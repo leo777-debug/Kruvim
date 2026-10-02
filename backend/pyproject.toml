@@ -1,0 +1,21 @@
+[project]
+name = "kruvim"
+version = "1.0.0"
+description = "Kruvim - synthetic audience simulation platform"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# B008: FastAPI Depends() defaults. B904: routes deliberately re-raise as typed AppErrors. B905: zips are over equal-length arrays.
+ignore = ["E501", "B008", "B904", "B905"]
