@@ -7,6 +7,7 @@ import { useAuth } from "./lib/auth";
 import { AuthPage, InvitePage } from "./features/auth/AuthPages";
 
 const Dashboard = lazy(() => import("./features/dashboard/DashboardPage"));
+const AllRuns = lazy(() => import("./features/simulations/AllRunsPage"));
 const Projects = lazy(() => import("./features/projects/ProjectsPage"));
 const Project = lazy(() => import("./features/projects/ProjectPage"));
 const NewSimulation = lazy(() => import("./features/simulations/NewSimulationPage"));
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/accuracy" element={<PublicAccuracy />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route index element={<Dashboard />} />
+          <Route path="runs" element={<AllRuns />} />
           <Route path="projects" element={<Projects />} />
           <Route path="projects/:projectId" element={<Project />} />
           <Route path="projects/:projectId/new" element={<NewSimulation />} />

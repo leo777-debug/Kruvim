@@ -15,6 +15,7 @@ import { AlertsBell } from "@/features/monitoring/AlertsBell";
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutGrid, end: true },
   { to: "/projects", label: "Projects", icon: FolderKanban },
+  { to: "/runs", label: "All runs", icon: LayoutGrid },
   { to: "/data-pool", label: "Data pool", icon: Database },
   { to: "/audiences", label: "Audiences", icon: Contact },
   { to: "/my-audience", label: "My audience", icon: Users2 },
