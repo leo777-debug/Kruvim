@@ -135,7 +135,10 @@ class SurveyIn(BaseModel):
     region: str | None = None
     stance: str | None = None
     kind: Literal["voice", "stakeholder"] | None = None
-    n: int = Field(default=12, ge=1, le=40)
+    n: int = Field(default=12, ge=1, le=2000)
+    everyone: bool = False
+    confirmed_count: int | None = Field(default=None, ge=1, le=2000)
+    confirmed_credits: int | None = Field(default=None, ge=0)
 
 
 class ExploreIn(AudienceIn):

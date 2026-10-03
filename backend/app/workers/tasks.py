@@ -1,6 +1,7 @@
 """Background jobs (arq). Each one is idempotent per simulation step and reports progress as events."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import traceback
@@ -264,7 +265,11 @@ async def generate_report(ctx, sim_id: str):
 async def run_survey(ctx, survey_id: str):
     usage = Usage()
     llm = None
+    res = None
     async with session_scope() as s:
+        claimed = await s.execute(update(Survey).where(Survey.id == survey_id, Survey.status == "queued").values(status="running"))
+        if not claimed.rowcount:
+            return
         sv = await s.get(Survey, survey_id)
         sim = await s.get(Simulation, sv.simulation_id)
     try:
@@ -273,25 +278,49 @@ async def run_survey(ctx, survey_id: str):
         async with session_scope() as s:
             rows = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim.id))).scalars().all()
         f = sv.filters or {}
+        if "metered" in f and (res.metered != f["metered"] or res.config_id != f.get("provider_config_id")):
+            raise ValueError("The model provider changed. Preview and start the survey again.")
+        if sim.status != "completed":
+            raise ValueError("The simulation changed. Wait for it to complete before surveying.")
         pick = [r for r in rows if (not f.get("region") or r.region == f["region"]) and (not f.get("stance") or (r.persona or {}).get("stance") == f["stance"])
                 and (not f.get("kind") or r.kind == f["kind"])][: int(f.get("n") or 12)]
+        if f.get("agent_refs") is not None:
+            by_ref = {r.ref: r for r in rows}
+            pick = [by_ref[ref] for ref in f["agent_refs"] if ref in by_ref]
+            if len(pick) != len(f["agent_refs"]):
+                raise ValueError("The agents changed. Preview and start the survey again.")
         details = [await agent_detail(sim, r.ref) for r in pick]
+        partial = []
+        answer_lock = asyncio.Lock()
 
         async def on_answer(item):
-            await bus.publish(sim.id, "survey.answer", {"survey_id": survey_id, **item})
+            async with answer_lock:
+                partial.append(item)
+                async with session_scope() as s:
+                    row = await s.get(Survey, survey_id)
+                    row.answers = list(partial)
+                await bus.publish(sim.id, "survey.answer", {"survey_id": survey_id, "answered": len(partial), "total": len(details), **item})
 
         out = await run_survey_fn(details, sim.card, (sim.content or {}).get("platform"), sv.question, llm, usage, on_answer)
         async with session_scope() as s:
             row = await s.get(Survey, survey_id)
             row.answers, row.summary, row.status = out["answers"], __import__("json").dumps(out["summary"], ensure_ascii=False), "done"
-        await metering.record(sim.org_id, sim.id, "survey", usage, res)
         await bus.publish(sim.id, "survey.completed", {"survey_id": survey_id, "summary": out["summary"]})
-    except Exception as exc:
+    except (Exception, asyncio.CancelledError) as exc:
         async with session_scope() as s:
             row = await s.get(Survey, survey_id)
             row.status, row.summary = "failed", str(exc)[:1000]
         await bus.publish(sim.id, "survey.failed", {"survey_id": survey_id, "message": str(exc)[:500]})
     finally:
+        if res:
+            await metering.record(sim.org_id, sim.id, "survey", usage, res)
+        from app.services.quotas import ledger
+        async with session_scope() as s:
+            row = await s.get(Survey, survey_id)
+            reserved = int((row.filters or {}).get("reserved_credits") or 0)
+            if reserved:
+                await ledger(s, sim.org_id, reserved, "survey_refund", survey_id)
+                row.filters = {**row.filters, "reserved_credits": 0}
         if llm:
             await llm.aclose()
 

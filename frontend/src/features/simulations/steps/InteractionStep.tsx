@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/overlay";
+import { Dialog, Select } from "@/components/ui/overlay";
 import { Badge, Callout, Empty, Field, Input, Segmented, Status, Textarea, UnderlineTabs } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { REGION_COLORS, scoreColor, STANCE_COLORS } from "@/lib/colors";
@@ -153,12 +153,23 @@ function ReportChat({ sim }: { sim: Simulation }) {
 }
 
 function Surveys({ sim, stream }: { sim: Simulation; stream: StreamState }) {
-  const list = useQuery({ queryKey: ["surveys", sim.id], queryFn: () => api<any[]>(`/simulations/${sim.id}/surveys`), refetchInterval: (q) => ((q.state.data as any[])?.some((s) => s.status === "running") ? 2500 : false) });
+  const list = useQuery({ queryKey: ["surveys", sim.id], queryFn: () => api<any[]>(`/simulations/${sim.id}/surveys`), refetchInterval: (q) => ((q.state.data as any[])?.some((s) => ["queued", "running"].includes(s.status)) ? 2500 : false) });
   const regions = sim.audience?.regions || [];
   const [f, setF] = useState({ question: "", region: "", stance: "", kind: "", n: 12 });
+  const [preview, setPreview] = useState<any>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [pending, setPending] = useState<any>(null);
+  async function estimate(everyone = false) {
+    const payload = {question: f.question, region: everyone ? null : f.region || null, stance: everyone ? null : f.stance || null,
+      kind: everyone ? "voice" : f.kind || null, n: f.n, everyone};
+    setPreviewing(true);
+    try {const cost = await api(`/simulations/${sim.id}/surveys/estimate`, {json:payload}); setPending(payload); setPreview(cost);}
+    catch (e) {toast.error(e instanceof Error ? e.message : "Unable to estimate");}
+    finally {setPreviewing(false);}
+  }
   const create = useMutation({
-    mutationFn: () => api(`/simulations/${sim.id}/surveys`, { json: { question: f.question, region: f.region || null, stance: f.stance || null, kind: f.kind || null, n: f.n } }),
-    onSuccess: () => { list.refetch(); setF({ ...f, question: "" }); },
+    mutationFn: () => api(`/simulations/${sim.id}/surveys`, { json: {...pending, confirmed_count:preview.respondents, confirmed_credits:preview.max_credits} }),
+    onSuccess: () => { list.refetch(); setF({ ...f, question: "" }); setPreview(null); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed"),
   });
   return (
@@ -170,24 +181,35 @@ function Surveys({ sim, stream }: { sim: Simulation; stream: StreamState }) {
           <Field label="Region"><Select value={f.region || "*"} onChange={(v) => setF({ ...f, region: v === "*" ? "" : v })} options={[{ value: "*", label: "Any" }, ...regions.map((r: string) => ({ value: r, label: r }))]} /></Field>
           <Field label="Stance"><Select value={f.stance || "*"} onChange={(v) => setF({ ...f, stance: v === "*" ? "" : v })} options={[{ value: "*", label: "Any" }, ...["enthusiast", "neutral", "skeptic", "contrarian", "disengaged"].map((s) => ({ value: s, label: s }))]} /></Field>
           <Field label="Who"><Select value={f.kind || "*"} onChange={(v) => setF({ ...f, kind: v === "*" ? "" : v })} options={[{ value: "*", label: "Everyone" }, { value: "voice", label: "People" }, { value: "stakeholder", label: "Accounts" }]} /></Field>
-          <Field label="Respondents"><Input type="number" min={1} max={40} value={f.n} onChange={(e) => setF({ ...f, n: Number(e.target.value) })} /></Field>
+          <Field label="Respondents"><Input type="number" min={1} max={2000} value={f.n} onChange={(e) => setF({ ...f, n: Number(e.target.value) })} /></Field>
         </div>
-        <Button variant="primary" className="w-full" disabled={f.question.trim().length < 3} loading={create.isPending} onClick={() => create.mutate()}>Run survey</Button>
+        <Button variant="primary" className="w-full" disabled={f.question.trim().length < 3 || previewing} loading={previewing} onClick={() => estimate()}>Estimate survey</Button>
+        <Button className="w-full" disabled={f.question.trim().length < 3 || previewing} onClick={() => estimate(true)}>Interview everyone</Button>
+        <p className="text-xs text-muted">Interview everyone surveys every voice agent in this run. You'll see the cost before starting.</p>
+        <Dialog open={!!preview} onOpenChange={(v) => {if (!v && !create.isPending) setPreview(null);}} title={pending?.everyone ? "Interview everyone" : "Survey estimate"}
+          description="Review the respondents and model cost before starting." footer={<><Button disabled={create.isPending} onClick={() => setPreview(null)}>Cancel</Button><Button variant="primary" loading={create.isPending} disabled={!preview?.respondents || !preview?.affordable} onClick={() => create.mutate()}>Start interviews</Button></>}>
+          {preview && <div className="space-y-3 text-sm"><p>{fmt.n(preview.respondents)} respondents · about {fmt.n(preview.credits)} credits</p>
+            {preview.metered && <Callout tone="warn">Up to {fmt.n(preview.max_credits)} credits will be reserved, including summary retries. Unused credits are returned. Balance: {fmt.n(preview.balance)}.</Callout>}
+            {preview.dry && <p className="text-muted">Dry run: no model calls or credits.</p>}
+            {preview.own_provider && <Callout tone="warn">Uses about {fmt.n(preview.model_calls)} calls on your own model provider. That provider may charge you directly.</Callout>}
+            {!preview.affordable && <Callout tone="neg">There aren't enough credits for this survey.</Callout>}
+          </div>}
+        </Dialog>
       </div>
       <div className="space-y-4">
         {(list.data || []).length === 0 && <div className="card"><Empty title="No surveys yet">Ask a whole segment the same question and get themed, quotable answers.</Empty></div>}
         {(list.data || []).map((s) => {
           const live = stream.surveyAnswers[s.id] || [];
-          const answers = s.status === "done" ? s.answers : live;
+          const answers = s.status === "done" || s.answers.length >= live.length ? s.answers : live;
           return (
             <div key={s.id} className="card p-4">
               <div className="flex items-start justify-between gap-3">
                 <div><div className="text-[13px] font-semibold">{s.question}</div>
-                  <div className="mt-1 flex gap-1">{Object.entries(s.filters).filter(([, v]) => v).map(([k, v]: any) => <Badge key={k} tone="outline">{k}: {String(v)}</Badge>)}</div></div>
-                <Status tone={s.status === "done" ? "pos" : s.status === "failed" ? "neg" : "brand"}>{s.status === "running" ? `${answers.length} answers so far` : s.status === "done" ? "Complete" : s.status}</Status>
+                  <div className="mt-1 flex flex-wrap gap-1">{Object.entries(s.filters).filter(([k, v]) => v && ["region", "stance", "kind", "n"].includes(k)).map(([k, v]: any) => <Badge key={k} tone="outline">{k}: {String(v)}</Badge>)}</div></div>
+                <Status tone={s.status === "done" ? "pos" : s.status === "failed" ? "neg" : "brand"}>{["queued", "running"].includes(s.status) ? `${answers.length} / ${s.filters.n} answers` : s.status === "done" ? "Complete" : s.status}</Status>
               </div>
               {s.summary?.themes?.length > 0 && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {s.summary.themes.map((t: any, i: number) => <div key={i} className="rounded-md border border-line p-2.5 text-xs"><div className="flex justify-between font-medium"><span>{t.theme}</span><span className="num text-muted">{t.count}</span></div>
                     <div className="mt-1 text-muted">“{t.quote}”</div></div>)}
                 </div>

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import QuotaExceeded
@@ -53,6 +53,17 @@ async def ledger(s: AsyncSession, org_id: str, delta: int, reason: str, ref: str
     org.credits_balance = int(org.credits_balance or 0) + delta
     s.add(CreditLedger(org_id=org_id, delta=delta, balance_after=org.credits_balance, reason=reason, ref=ref))
     return org.credits_balance
+
+
+async def reserve(s: AsyncSession, org_id: str, amount: int, reason: str, ref: str) -> None:
+    if not amount:
+        return
+    available = (await s.execute(update(Organization).where(Organization.id == org_id, Organization.credits_balance >= amount)
+                                 .values(credits_balance=Organization.credits_balance - amount)
+                                 .returning(Organization.credits_balance))).scalar_one_or_none()
+    if available is None:
+        raise QuotaExceeded("Insufficient credits for this survey.")
+    s.add(CreditLedger(org_id=org_id, delta=-amount, balance_after=available, reason=reason, ref=ref))
 
 
 async def ensure_monthly_grant(s: AsyncSession, org: Organization) -> None:

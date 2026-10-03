@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import defaultdict
 
 from app.services.content import card_block
 from app.services.llm import BaseLLM, LLMAuthError, Usage
@@ -61,9 +62,11 @@ async def ask(detail: dict, card: dict, platform: str | None, history: list[dict
 
 
 async def survey(details: list[dict], card: dict, platform: str | None, question: str, llm: BaseLLM, usage: Usage, on_answer=None) -> dict:
+    semaphore = asyncio.Semaphore(max(1, min(32, llm.s.concurrency)))
     async def one(d):
         try:
-            a = await ask(d, card, platform, [], question, llm, usage)
+            async with semaphore:
+                a = await ask(d, card, platform, [], question, llm, usage)
         except LLMAuthError:
             raise
         except Exception as exc:
@@ -76,12 +79,39 @@ async def survey(details: list[dict], card: dict, platform: str | None, question
 
     answers = await asyncio.gather(*[one(d) for d in details])
     if llm.is_dry or not answers:
-        return {"answers": answers, "summary": {"themes": [], "takeaway": "[dry run] Connect a model to summarise answers."}}
+        return {"answers": answers, "summary": rule_summary(answers, dry=llm.is_dry)}
+    batches = []
     try:
-        summ = await llm.complete_json(system=SURVEY_SUMMARY, role="report", max_tokens=1200, usage=usage,
-                                       user=json.dumps({"question": question, "answers": [a["answer"] for a in answers]}, ensure_ascii=False))
+        for i in range(0, len(answers), 50):
+            batch = answers[i:i + 50]
+            batches.append(await llm.complete_json(system=SURVEY_SUMMARY, role="report", max_tokens=1200, usage=usage,
+                user=json.dumps({"question": question, "answers": [a["answer"][:1000] for a in batch]}, ensure_ascii=False)))
+        if len(batches) == 1:
+            summ = batches[0]
+        else:
+            summ = await llm.complete_json(system=SURVEY_SUMMARY + " Merge the batch themes. Counts are respondent counts, not batch counts; do not count anyone twice.",
+                role="report", max_tokens=1200, usage=usage, user=json.dumps({"question": question, "respondents": len(answers),
+                "batches": [{"themes": [{"theme": str(t.get("theme", ""))[:100], "count": t.get("count"),
+                "quote": str(t.get("quote", ""))[:120]} for t in b.get("themes", [])[:5]],
+                "takeaway": str(b.get("takeaway", ""))[:200]} for b in batches]}, ensure_ascii=False))
+        if not isinstance(summ.get("themes"), list):
+            summ = rule_summary(answers)
     except LLMAuthError:
         raise
     except Exception:
-        summ = {"themes": [], "takeaway": ""}
+        summ = rule_summary(answers)
     return {"answers": answers, "summary": summ}
+
+
+def rule_summary(answers, dry=False):
+    grouped = defaultdict(list)
+    for a in answers:
+        value = a.get("opinion")
+        if a["answer"].startswith("(no answer:"):
+            theme = "Unavailable answers"
+        else:
+            theme = "Unrated" if not isinstance(value, (float, int)) else "Positive reactions" if value >= 6.5 else "Negative reactions" if value < 4 else "Mixed reactions"
+        grouped[theme].append(a)
+    return {"themes": [{"theme": theme, "count": len(rows), "quote": rows[0]["answer"], "agent_refs": [a["agent"] for a in rows]}
+                       for theme, rows in grouped.items()], "takeaway": "[dry run] Themed by simulated opinion; these are demonstration answers." if dry
+                       else "Themes grouped by simulated opinion; review the individual answers before deciding.", "method": "rule-based"}

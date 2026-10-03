@@ -43,9 +43,10 @@ from app.schemas.workspace import PerformanceIn
 from app.services import audit, jobs, knowledge, lifecycle, metering
 from app.services.events import bus
 from app.services.interaction import ask
+from app.services.interaction.selection import select_respondents, survey_estimate
 from app.services.llm import Usage, make_llm
 from app.services.providers import resolve
-from app.services.quotas import estimate_credits
+from app.services.quotas import ensure_monthly_grant, estimate_credits, reserve
 from app.services.report import chat as report_chat
 from app.services.simulation import agent_detail, explore
 
@@ -406,15 +407,47 @@ async def explore_route(sim_id: str, body: ExploreIn, p: Principal = Depends(pri
     return out
 
 
+@router.post("/simulations/{sim_id}/surveys/estimate")
+async def estimate_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
+    sim = await get_sim(s, p, sim_id)
+    if sim.status != "completed":
+        raise Conflict("Run the simulation first.")
+    respondents, eligible = await select_respondents(s, sim_id, body.model_dump())
+    res = await resolve(s, p.org_id)
+    return survey_estimate(len(respondents), eligible, res, p.org.credits_balance)
+
+
 @router.post("/simulations/{sim_id}/surveys")
 async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
         raise Conflict("Run the simulation first.")
-    sv = Survey(simulation_id=sim_id, question=body.question, filters=body.model_dump(exclude={"question"}, exclude_none=True))
+    filters = body.model_dump(exclude={"question", "confirmed_count", "confirmed_credits"}, exclude_none=True)
+    respondents, eligible = await select_respondents(s, sim_id, filters)
+    if not respondents:
+        raise AppError("No agents match these survey filters.")
+    res = await resolve(s, p.org_id)
+    if res.metered:
+        await ensure_monthly_grant(s, p.org)
+    estimate = survey_estimate(len(respondents), eligible, res, p.org.credits_balance)
+    if body.everyone or body.n > 40 or body.confirmed_count is not None:
+        if body.confirmed_count != len(respondents) or body.confirmed_credits != estimate["max_credits"]:
+            raise Conflict("Preview and confirm the current survey estimate before starting.", details=estimate)
+    filters.update(agent_refs=[a.ref for a in respondents], n=len(respondents), estimate=estimate,
+                   reserved_credits=estimate["max_credits"], provider_config_id=res.config_id, metered=res.metered)
+    sv = Survey(simulation_id=sim_id, question=body.question, filters=filters, status="queued")
     s.add(sv)
+    await s.flush()
+    await reserve(s, p.org_id, estimate["max_credits"], "survey_reserve", sv.id)
     await s.commit()
-    await jobs.enqueue("run_survey", survey_id=sv.id)
+    try:
+        await jobs.enqueue("run_survey", survey_id=sv.id)
+    except Exception:
+        from app.services.quotas import ledger
+        await ledger(s, p.org_id, estimate["max_credits"], "survey_refund", sv.id)
+        sv.status, sv.filters = "failed", {**filters, "reserved_credits": 0}
+        await s.commit()
+        raise
     return {"id": sv.id, "status": sv.status}
 
 
