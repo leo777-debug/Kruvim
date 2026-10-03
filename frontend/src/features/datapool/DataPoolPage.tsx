@@ -10,7 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { REGION_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 
 export default function DataPoolPage() {
   const [tab, setTab] = useState("world");
@@ -47,8 +47,8 @@ function World() {
             <p dir="auto" className="text-[13px] leading-relaxed">{w.brief}</p>
             <div className="mt-1 text-[11px] text-faint">{w.brief_by === "template" ? "Automatic summary. Connect a model for written briefs." : `Summary by ${w.brief_by}`}</div>
             <KV className="mt-3" rows={[
-              ["News tone", w.tone ? `${w.tone.avg > 0 ? "+" : ""}${w.tone.avg?.toFixed?.(1)}` : "–"],
-              ["Upcoming", w.events?.length ? w.events.slice(0, 2).map((e: any) => `${e.name} (${e.days_away} d)`).join(", ") : "–"],
+              ["News tone", w.tone?.avg != null ? `${w.tone.avg > 0 ? "+" : ""}${w.tone.avg.toFixed(1)}` : "Source unavailable"],
+              ["Upcoming", w.events?.length ? w.events.slice(0, 2).map((e: any) => e.days_away == null ? e.name : `${e.name} (${e.days_away} d)`).join(", ") : "Source unavailable"],
               ["Economy", w.economy?.[0]?.title || "–"],
             ]} />
             <div className="mt-4 text-xs font-medium text-muted">Headlines</div>
@@ -192,7 +192,7 @@ function Listen() {
             <div className="divide-y divide-line">
               {m.data.map((p, i) => (
                 <div key={i} className="px-4 py-3">
-                  <div className="flex items-center gap-1.5 text-xs text-muted"><span className="font-medium capitalize text-fg">{p.platform}</span>· @{p.author} · {fmt.ago(p.observed_at)}
+                  <div className="flex items-center gap-1.5 text-xs text-muted"><span className="font-medium text-fg">{platformName(p.platform)}</span>· @{p.author} · {fmt.ago(p.observed_at)}
                     <span className="num ml-auto">{fmt.n(p.engagement)} engagements</span>{p.url && <a href={p.url} target="_blank" rel="noreferrer" aria-label="Open post" className="hover:text-fg"><ExternalLink className="h-3 w-3" /></a>}</div>
                   <div dir="auto" className="mt-1 text-[13px] leading-relaxed">{p.text}</div>
                 </div>

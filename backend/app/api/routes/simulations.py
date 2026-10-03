@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -234,6 +235,7 @@ async def patch_config(sim_id: str, body: ConfigPatch, p: Principal = Depends(ro
 async def agents(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     await get_sim(s, p, sim_id)
     rows = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim_id).order_by(SimAgent.kind.desc(), SimAgent.id))).scalars().all()
+    rows.sort(key=lambda a: (a.kind != "voice", hashlib.sha256(f"{sim_id}:{a.ref}".encode()).hexdigest()))
     return [{"ref": r.ref, "kind": r.kind, "name": r.name, "handle": r.handle, "region": r.region, "followers": r.followers,
              "persona": {k: r.persona.get(k) for k in ("age", "gender", "city", "origin", "stance", "profession", "language", "role", "description",
                                                        "platforms", "interests", "education", "income")},

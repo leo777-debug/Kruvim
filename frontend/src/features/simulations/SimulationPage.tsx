@@ -60,8 +60,10 @@ export default function SimulationPage() {
   const [team, setTeam] = useState<{ open: boolean; tab: "comments" | "versions"; anchor: string }>({ open: false, tab: "comments", anchor: "general" });
 
   const q = useQuery({ queryKey: [orgId, "sim", simId], queryFn: () => api<Simulation>(`/simulations/${simId}`), refetchInterval: (qq) => {
-    const st = (qq.state.data as Simulation | undefined)?.status;
-    return st && ["building_graph", "preparing", "queued", "running", "paused"].includes(st) ? 4000 : false;
+    const data = qq.state.data as Simulation | undefined;
+    const st = data?.status;
+    return st && (["building_graph", "preparing", "queued", "running", "paused"].includes(st)
+      || (st === "completed" && !["done", "failed"].includes(data?.report_status || ""))) ? 4000 : false;
   } });
   const refetch = useCallback(() => { qc.invalidateQueries({ queryKey: [orgId, "sim", simId] }); }, [qc, orgId, simId]);
   const stream = useSimulationStream(simId, graphRef, (t) => {

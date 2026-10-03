@@ -6,7 +6,7 @@ import { Sheet, SheetClose } from "@/components/ui/overlay";
 import { Badge, Bar, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { ACTION_COLORS, engColor, scoreColor, STANCE_COLORS } from "@/lib/colors";
-import { fmt, initials } from "@/lib/utils";
+import { fmt, initials, platformName } from "@/lib/utils";
 
 export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string; agentRef: string | null; onClose: () => void; onChat?: (ref: string) => void }) {
   const q = useQuery({ queryKey: ["agent", simId, agentRef], queryFn: () => api(`/simulations/${simId}/agents/${agentRef}`), enabled: !!agentRef });
@@ -103,7 +103,7 @@ export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string
                 <div className="space-y-2">
                   {d.posts.filter((x: any) => x.content).slice(-8).map((x: any) => (
                     <div key={x.id} className="rounded-md border border-line px-3 py-2">
-                      <div className="mb-1 flex gap-1.5 text-xs text-muted"><span className="capitalize">{x.platform} · {x.kind} · round {x.round}</span>
+                      <div className="mb-1 flex gap-1.5 text-xs text-muted"><span>{platformName(x.platform)} · {x.kind} · round {x.round}</span>
                         <span className="num ml-auto">{(x.stats?.likes || 0) + (x.stats?.crowd_likes || 0) + (x.stats?.up || 0)} likes · {(x.stats?.reposts || 0) + (x.stats?.crowd_reposts || 0)} reposts</span></div>
                       <div className="text-xs leading-relaxed">{x.content}</div>
                     </div>

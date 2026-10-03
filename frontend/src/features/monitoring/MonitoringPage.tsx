@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/overlay";
+import { RegionPicker } from "@/components/ui/RegionPicker";
 import { Card, CardHeader, Field, Input } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -18,7 +20,6 @@ interface Watch {
   id: string; name: string; feed_url: string; project_id: string; format: string; platform: string;
   audience: Record<string, unknown>; threshold: number; active: boolean; last_checked_at: string | null; last_error: string | null; runs: number;
 }
-const selectStyle = "h-8 w-full rounded-md border border-line-strong bg-panel px-2 text-sm";
 export default function MonitoringPage() {
   const orgId = useAuth((s) => s.orgId);
   const qc = useQueryClient();
@@ -69,10 +70,10 @@ export default function MonitoringPage() {
         }); }}>
           <Field label="Competitor name"><Input aria-label="Competitor name" required maxLength={200} value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <Field label="Public feed URL"><Input aria-label="Public feed URL" required type="url" maxLength={1000} value={form.feed_url} onChange={(e) => set("feed_url", e.target.value)} placeholder="https://example.com/feed.xml" /></Field>
-          <Field label="Project"><select aria-label="Project" required className={selectStyle} value={form.project_id} onChange={(e) => set("project_id", e.target.value)}><option value="">Choose project</option>{projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-          <Field label="Content format"><select aria-label="Content format" className={selectStyle} value={form.format} onChange={(e) => set("format", e.target.value)}>{ref.data?.formats.filter((f) => f.type === "text" && !f.poll).map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}</select></Field>
-          <Field label="Platform"><select aria-label="Platform" className={selectStyle} value={form.platform} onChange={(e) => set("platform", e.target.value)}>{ref.data?.platforms.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}</select></Field>
-          <Field label="Audience regions" help="Comma-separated country codes, for example AE, SA. Leave blank for all regions."><Input aria-label="Audience regions" value={form.regions} onChange={(e) => set("regions", e.target.value)} /></Field>
+          <Field label="Project"><Select value={form.project_id} onChange={(v) => set("project_id", v)} placeholder="Choose project" options={(projects.data || []).map((p) => ({ value: p.id, label: p.name }))} /></Field>
+          <Field label="Content format"><Select value={form.format} onChange={(v) => set("format", v)} options={(ref.data?.formats || []).filter((f) => f.type === "text" && !f.poll).map((f) => ({ value: f.key, label: f.label }))} /></Field>
+          <Field label="Platform"><Select value={form.platform} onChange={(v) => set("platform", v)} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field>
+          <Field label="Audience regions" help="Choose the regions to test. Leave all unchecked to use every region."><RegionPicker value={form.regions.split(",").filter(Boolean)} onChange={(v) => set("regions", v.join(","))} /></Field>
           <Field label="Alert threshold" help="Points above your average opinion score, from 0 to 5."><Input aria-label="Alert threshold" required type="number" min={0} max={5} step={0.1} value={form.threshold} onChange={(e) => set("threshold", e.target.value)} /></Field>
           <div className="flex gap-2"><Button type="submit" variant="primary" loading={busy} disabled={!editing && !!watches.data && watches.data.watches.length >= watches.data.limit}>{editing ? "Save feed" : "Add feed"}</Button>{editing && <Button type="button" onClick={() => { setEditing(null); setForm((f) => ({ ...f, name: "", feed_url: "" })); }}>Cancel edit</Button>}</div>
           {watches.data?.limit === 0 && <p className="text-sm text-muted">Competitor monitoring requires Pro or above.</p>}

@@ -60,6 +60,28 @@ class GoogleNewsConnector(BaseConnector):
         return items
 
 
+class RegionalTrendsConnector(BaseConnector):
+    spec = ConnectorSpec("regional_trends", "Regional search trends", "social", "Country-specific trending searches from Google Trends RSS.",
+                         interval_minutes=60, docs_url="https://trends.google.com/trending")
+
+    async def fetch(self, client, regions, secrets, config):
+        async def one(reg):
+            response = await client.get("https://trends.google.com/trending/rss", params={"geo": reg["code"]})
+            response.raise_for_status()
+            out = []
+            for item in ET.fromstring(response.content).iter("item"):
+                title = (item.findtext("title") or "").strip()
+                traffic = next((x.text or "" for x in item if x.tag.endswith("approx_traffic")), "")
+                match = re.search(r"([\d,.]+)\s*([KM]?)", traffic.upper())
+                value = float(match[1].replace(",", "")) * {"K": 1000, "M": 1000000, "": 1}[match[2]] if match else None
+                if title:
+                    out.append(SignalItem("social_trend", reg["code"], title, value=value, url=item.findtext("link"),
+                        payload={"platform": "google_trends", "country": reg["code"], "measurement": "search traffic", "source": "country RSS"}))
+            return out[:12]
+        results = await asyncio.gather(*(one(r) for r in regions), return_exceptions=True)
+        return [item for result in results if isinstance(result, list) for item in result]
+
+
 _gdelt_lock = asyncio.Lock()
 _gdelt_state = {"last": 0.0, "blocked_until": 0.0}
 
@@ -114,6 +136,20 @@ class WikipediaConnector(BaseConnector):
     spec = ConnectorSpec("wikipedia", "Wikipedia attention", "attention", "Most-read pages yesterday per language edition.",
                          interval_minutes=360, supports_search=True, docs_url="https://wikimedia.org/api/rest_v1/")
 
+    async def safe_pages(self, client, lang, titles):
+        from ..safety import safe_title
+        titles = [t for t in titles if safe_title(t)]
+        if not titles:
+            return set()
+        response = await client.get(f"https://{lang}.wikipedia.org/w/api.php", params={"action": "query", "prop": "categories",
+            "titles": "|".join(titles), "cllimit": "max", "redirects": 1, "format": "json"})
+        response.raise_for_status()
+        data = response.json().get("query", {})
+        safe = {p["title"].replace("_", " ") for p in data.get("pages", {}).values()
+                if "missing" not in p and safe_title(p["title"], [c["title"] for c in p.get("categories", [])])}
+        aliases = {x["from"].replace("_", " "): x["to"].replace("_", " ") for x in data.get("normalized", []) + data.get("redirects", [])}
+        return {t for t in titles if aliases.get(t.replace("_", " "), t.replace("_", " ")) in safe}
+
     async def search(self, client, query, regions, secrets, config, limit=10):
         out = []
         for reg in regions[:3]:
@@ -121,7 +157,11 @@ class WikipediaConnector(BaseConnector):
             r = await client.get(f"https://{lang}.wikipedia.org/w/api.php", params={"action": "query", "list": "search",
                 "srsearch": query[:300], "srlimit": min(limit, 10), "format": "json"})
             r.raise_for_status()
-            for item in r.json().get("query", {}).get("search", []):
+            items = r.json().get("query", {}).get("search", [])
+            allowed = await self.safe_pages(client, lang, [x["title"] for x in items])
+            for item in items:
+                if item["title"] not in allowed:
+                    continue
                 title = item["title"]
                 out.append(SignalItem("trend", reg["code"], title, url=f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}",
                     payload={"summary": html.unescape(re.sub(r"<[^>]+>", "", item.get("snippet", "")))[:500], "source": "wikipedia"}))
@@ -140,6 +180,8 @@ class WikipediaConnector(BaseConnector):
                     continue
                 r.raise_for_status()
                 arts = [a for a in r.json()["items"][0]["articles"] if not _WIKI_SKIP.search(a["article"])][:12]
+                allowed = await self.safe_pages(client, lang, [a["article"] for a in arts])
+                arts = [a for a in arts if a["article"] in allowed]
                 for reg in regs:
                     for a in arts:
                         out.append(SignalItem("trend", reg["code"], a["article"].replace("_", " "), value=float(a["views"]),

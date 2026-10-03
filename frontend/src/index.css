@@ -1,4 +1,12 @@
 @import "tailwindcss";
+@media (max-width: 639px) {
+  .card { min-width: 0; max-width: 100%; overflow-x: auto; }
+  .account-table, .account-table tbody { display: block; width: 100%; }
+  .account-table thead { display: none; }
+  .account-table tr { display: block; padding: 12px; border-bottom: 1px solid rgb(var(--line)); }
+  .account-table td { display: block; white-space: normal; padding: 6px 0; max-width: 100%; overflow-wrap: anywhere; }
+  .account-table td::before { content: attr(data-label); display: block; font-size: 11px; color: rgb(var(--muted)); margin-bottom: 4px; }
+}
 @config "../tailwind.config.ts";
 
 @utility num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "cv11"; }

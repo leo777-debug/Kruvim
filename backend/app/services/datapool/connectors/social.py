@@ -12,6 +12,18 @@ from ..base import BaseConnector, ConnectorSpec, SignalItem
 
 _TAG = re.compile(r"<[^>]+>")
 
+REGIONAL_TERMS = {"AE": ["dubai", "uae", "emirates", "دبي", "الإمارات"], "SA": ["saudi", "riyadh", "jeddah", "السعودية", "الرياض"],
+                  "EG": ["egypt", "cairo", "مصر", "القاهرة"], "JO": ["jordan", "amman", "الأردن", "عمان"],
+                  "MA": ["morocco", "casablanca", "المغرب"], "US": ["united states", "american", "usa"],
+                  "GB": ["united kingdom", "britain", "london", "british"], "IN": ["india", "mumbai", "indian", "भारत"]}
+
+
+def regionalize(items, regions):
+    """A global social service is not a country's trend feed. Keep explicit geographic evidence only."""
+    from dataclasses import replace
+    return [replace(item, region=reg["code"]) for reg in regions for item in items
+            if any(term in item.title.casefold() for term in REGIONAL_TERMS.get(reg["code"], []))]
+
 
 def _iso(s: str | None):
     if not s:
@@ -40,7 +52,7 @@ class MastodonConnector(BaseConnector):
             out.append(SignalItem("social_trend", "*", link.get("title") or link.get("url"), url=link.get("url"),
                                   value=float(sum(int(h.get("uses", 0)) for h in (link.get("history") or [])[:2])),
                                   payload={"platform": "mastodon", "type": "link", "provider": link.get("provider_name")}))
-        return out
+        return regionalize(out, regions)
 
     async def search(self, client, query, regions, secrets, config, limit=10):
         base = config.get("instance") or self.BASE
@@ -76,7 +88,7 @@ class BlueskyConnector(BaseConnector):
             if title:
                 out.append(SignalItem("social_trend", "*", title, url="https://bsky.app" + (t.get("link") or ""),
                                       payload={"platform": "bluesky", "description": t.get("description")}))
-        return out
+        return regionalize(out, regions)
 
     async def _token(self, client, secrets):
         cached = self._session.get(secrets.get("bluesky_handle"))

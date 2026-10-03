@@ -23,8 +23,12 @@ DEMO_PASSWORD = os.environ.get("KRUVIM_DEMO_PASSWORD", "kruvim-demo-2026")
 async def main():
     if settings.is_prod:
         raise SystemExit("Refusing to seed demo data in production.")
-    async with engine.begin() as c:
-        await c.run_sync(Base.metadata.create_all)
+    if settings.is_sqlite:
+        from app.db.migrate import upgrade_head
+        await asyncio.to_thread(upgrade_head)
+    else:
+        async with engine.begin() as c:
+            await c.run_sync(Base.metadata.create_all)
     async with session_scope() as s:
         u = (await s.execute(select(User).where(User.email == DEMO_EMAIL))).scalar_one_or_none()
         if u:

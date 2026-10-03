@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.db.session import session_scope
 from app.models import Signal, SignalEmbedding
 from app.services.datapool.context import tokens
+from app.services.datapool.safety import safe_title
 
 
 def embed(text: str, dimensions=128):
@@ -40,7 +41,7 @@ def rank(signals, query, weights=None, n=5):
 
 async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
     """At most one provider embedding request for all signals and all agent queries."""
-    signals = {str(x["id"]): x for snap in snapshots.values() for x in snap.get("signals", [])}
+    signals = {str(x["id"]): x for snap in snapshots.values() for x in snap.get("signals", []) if safe_title(x.get("title", ""))}
     candidates = list(signals.values())[:min(300, 2048 - len(personas))]
     queries = [" ".join(x.get("label", "") for x in p.get("interests", [])) + " " + card.get("title", "") + " " +
                " ".join(card.get("keywords") or []) + " " + " ".join(p.get("platforms", [])) + f" age {p['age']}" for p in personas]

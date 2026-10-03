@@ -9,7 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { engColor, REGION_COLORS, scoreColor, STANCE_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import type { Simulation } from "@/lib/types";
-import { cn, fmt } from "@/lib/utils";
+import { cn, fmt, platformName } from "@/lib/utils";
 
 const SECTIONS = [
   ["verdict", "Summary"], ["attention", "Attention"], ["audience", "Audience"], ["dynamics", "Conversation"], ["spread", "Reach"], ["platforms", "Platforms"],
@@ -221,7 +221,7 @@ function Audience({ r, sim, onAgent }: { r: any; sim: Simulation; onAgent: (r: s
                 <div className="eyebrow mb-2">Interests</div>
                 {ex.data.interests.map((i: any) => <div key={i.label} className="flex justify-between text-xs"><span className="text-muted">{i.label}</span><span className="num">{fmt.pct(i.w)}</span></div>)}
                 <div className="eyebrow mb-1 mt-3">Platforms</div>
-                {ex.data.platforms.slice(0, 4).map((p: any) => <div key={p.platform} className="flex justify-between text-xs"><span className="text-muted">{p.platform}</span><span className="num">{fmt.pct(p.share)}</span></div>)}
+                {ex.data.platforms.slice(0, 4).map((p: any) => <div key={platformName(p.platform)} className="flex justify-between text-xs"><span className="text-muted">{platformName(p.platform)}</span><span className="num">{fmt.pct(p.share)}</span></div>)}
               </div>
               <div><div className="eyebrow mb-2">In their words</div>
                 {ex.data.quotes.slice(0, 4).map((q: any) => <button key={q.agent} onClick={() => onAgent(q.agent)} className="mb-2 block border-l-2 border-line-strong pl-2.5 text-left text-xs text-muted hover:text-fg">“{q.quote}”<div className="text-[11px] text-faint">{q.who} · {fmt.s1(q.score)}</div></button>)}
@@ -252,7 +252,7 @@ function Dynamics({ r, onAgent }: { r: any; onAgent: (r: string) => void }) {
           <div className="divide-y divide-line px-4 pb-2">
             {d.top_posts.slice(0, 6).map((p: any) => (
               <div key={p.id} className="py-2.5">
-                <div className="flex items-center gap-1.5 text-2xs text-muted"><Badge tone="outline">{p.platform}</Badge><Badge tone="outline">{p.kind}</Badge>
+                <div className="flex items-center gap-1.5 text-2xs text-muted"><Badge tone="outline">{platformName(p.platform)}</Badge><Badge tone="outline">{p.kind}</Badge>
                   <button onClick={() => p.author_ref?.includes(":") && onAgent(p.author_ref)} className="truncate hover:text-fg">{p.author}</button><span className="ml-auto">R{p.round}</span></div>
                 <div dir="auto" className="mt-1 text-xs leading-relaxed">{p.content}</div>
                 <div className="num mt-1 text-[11px] text-muted">{fmt.n(p.likes + p.crowd_likes + p.up)} likes · {fmt.n(p.reposts + p.crowd_reposts)} reposts · {fmt.n(p.comments)} comments{p.down ? ` · ${p.down} downvotes` : ""} · {fmt.k(p.views)} views</div>
@@ -323,7 +323,7 @@ function Platforms({ r }: { r: any }) {
         <table className="dt min-w-[640px]">
           <thead><tr><th>Platform</th><th className="!text-right">Audience share</th><th>Opinion among its users</th><th className="!text-right">Share intent</th><th className="!text-right">Completion</th></tr></thead>
           <tbody>{pl.map((p: any) => (
-            <tr key={p.platform}>
+            <tr key={platformName(p.platform)}>
               <td className="font-medium">{p.label}{p.platform === r.platforms.target && <span className="ml-2 text-xs font-normal text-brand">Target platform</span>}</td>
               <td className="r">{fmt.pct(p.reach_share)}</td>
               <td><div className="flex items-center gap-2"><Bar value={p.score} max={10} color={scoreColor(p.score)} className="max-w-[220px]" /><span className="num">{p.score.toFixed(2)}</span></div></td>
@@ -442,7 +442,7 @@ function Calibrate({ sim }: { sim: Simulation }) {
         </Card>
         <Card className="p-4 text-xs">
           {(list.data || []).length === 0 ? <div className="text-muted">No real-world results reported yet.</div> : (list.data || []).map((p, i) => (
-            <div key={i} className="flex justify-between border-b border-line py-1.5 last:border-0"><span>{fmt.date(p.at)} · {p.platform}</span><span className="num">{fmt.k(p.views)} views · {p.engagement_rate ?? "–"}%</span></div>
+            <div key={i} className="flex justify-between border-b border-line py-1.5 last:border-0"><span>{fmt.date(p.at)} · {platformName(p.platform)}</span><span className="num">{fmt.k(p.views)} views · {p.engagement_rate ?? "–"}%</span></div>
           ))}
         </Card>
       </div>
@@ -457,6 +457,8 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
       <div className="grid gap-4 text-xs lg:grid-cols-3">
         <Card className="space-y-1.5 p-4">
           <div className="eyebrow mb-1">Model usage</div>
+          <Row k="Retrieval model" v={r.creator?.retrieval_usage?.model || "local"} />
+          <Row k="Embedding cost" v={r.creator?.retrieval_usage?.extra_cost_usd == null ? "Unavailable" : `$${r.creator.retrieval_usage.extra_cost_usd.toFixed(5)}`} />
           <Row k="Provider" v={r.provider?.dry ? "dry run" : `${r.provider?.preset} (${r.provider?.source})`} />
           <Row k="Voice model" v={r.provider?.voice_model || "–"} /><Row k="Report model" v={r.provider?.report_model || "–"} />
           <Row k="Calls (failed)" v={`${fmt.n(u.calls)} (${u.failed})`} /><Row k="Tokens in (cached)" v={`${fmt.n(u.input_tokens)} (${fmt.n(u.cached_tokens)})`} />

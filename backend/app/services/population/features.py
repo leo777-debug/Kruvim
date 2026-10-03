@@ -67,7 +67,9 @@ def stratified_sample(pop: Population, mask: np.ndarray, n: int, rng: np.random.
         if c > 0:
             members = idx[inv == s]
             out.append(rng.choice(members, size=min(c, members.size), replace=False))
-    return np.concatenate(out) if out else np.array([], dtype=np.int64)
+    result = np.concatenate(out) if out else np.array([], dtype=np.int64)
+    rng.shuffle(result)
+    return result
 
 
 def persona_text(p: dict, platform_label: str = "social media") -> str:

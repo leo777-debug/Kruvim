@@ -42,14 +42,14 @@ def _watch(w: Watch, runs: int = 0) -> dict:
 @router.get("/watches")
 async def list_watches(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(Watch).where(Watch.org_id == p.org_id).order_by(Watch.created_at))).scalars().all()
-    limit = monitoring.watch_limit(p.org, p.is_superuser)
+    limit = monitoring.watch_limit(p.org, False)
     sims = (await s.execute(select(Simulation.config).where(Simulation.org_id == p.org_id))).all()
     counts: dict[str, int] = {}
     for (cfg,) in sims:
         wid = (cfg or {}).get("watch_id")
         if wid:
             counts[wid] = counts.get(wid, 0) + 1
-    return {"limit": limit, "plan": p.org.plan, "watches": [_watch(w, counts.get(w.id, 0)) for w in rows]}
+    return {"limit": limit, "plan": p.org.plan, "admin_override": p.is_superuser, "watches": [_watch(w, counts.get(w.id, 0)) for w in rows]}
 
 
 async def _validate(s: AsyncSession, p: Principal, body: WatchIn) -> None:

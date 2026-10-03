@@ -5,6 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export const PLATFORM_NAMES: Record<string, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X",
+  facebook: "Facebook", snapchat: "Snapchat", linkedin: "LinkedIn", reddit: "Reddit", bluesky: "Bluesky", mastodon: "Mastodon" };
+export const platformName = (key?: string) => PLATFORM_NAMES[key || ""] || key || "Platform";
+
 /** API timestamps are UTC; a value without an offset must not be read as local time. */
 export function parseTime(iso: string): Date {
   return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) || !iso.includes("T") ? iso : iso + "Z");

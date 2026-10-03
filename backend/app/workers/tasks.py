@@ -244,6 +244,7 @@ async def generate_report(ctx, sim_id: str):
             sim = await s.get(Simulation, sim_id)
             sim.report_status, sim.step = "done", 5
             sim.usage = {**(sim.usage or {}), "report": usage.as_dict(res.settings)}
+        await bus.publish(sim_id, "report.completed", {"status": "done"})
     except Exception as exc:
         msg = str(exc) if isinstance(exc, USER_ERRORS) else f"{exc.__class__.__name__}: {exc}"
         log.error("report failed\n%s", traceback.format_exc(), extra={"simulation_id": sim_id})

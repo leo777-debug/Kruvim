@@ -165,7 +165,6 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
         r = await s.get(Report, rep_id)
         r.title, r.summary, r.outline, r.sections, r.markdown, r.status = (outline.get("title") or "Simulation report",
                                                                           outline.get("summary", ""), sections_plan, sections, md, "done")
-    await bus.publish(sim_id, "report.completed", {"report_id": rep_id})
     return r
 
 

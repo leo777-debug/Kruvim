@@ -6,7 +6,7 @@ import { Callout, KV, Progress } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { ENTITY_PALETTE } from "@/lib/colors";
 import type { Simulation } from "@/lib/types";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 import type { StreamState } from "../useSimulationStream";
 
 export function Section({ title, children, right }: { title: React.ReactNode; children: React.ReactNode; right?: React.ReactNode }) {
@@ -48,7 +48,7 @@ export function GraphStep({ sim, stream, onNext, refetch }: { sim: Simulation; s
     <div className="bg-panel">
       <Section title="Research question">
         <p className="text-[13px] leading-relaxed">{sim.requirement || <span className="text-muted">No question set. Edit the inputs to add one; the analyst answers it in the report.</span>}</p>
-        <KV className="mt-3" rows={[["Format", <span className="capitalize">{sim.content?.type}</span>], ["Platform", sim.content?.platform],
+        <KV className="mt-3" rows={[["Format", <span className="capitalize">{sim.content?.type}</span>], ["Platform", platformName(sim.content?.platform)],
           ["Regions", (sim.audience?.regions || []).join(", ") || "All"], ["Publish time", sim.publish_at ? fmt.date(sim.publish_at) : "Now"]]} />
       </Section>
 

@@ -22,9 +22,10 @@ from app.services.llm import BaseLLM, Usage
 from app.services.population.regions import REGIONS, region
 
 from .runner import run_connector
+from .safety import clean_snapshot, safe_title
 
 log = logging.getLogger("kruvim.datapool")
-ON_DEMAND = ["open_meteo", "google_news", "wikipedia", "calendar"]
+ON_DEMAND = ["open_meteo", "google_news", "wikipedia", "calendar", "regional_trends"]
 
 
 def _aware(dt: datetime) -> datetime:
@@ -40,7 +41,7 @@ async def _latest(s, region_code: str, kinds: list[str], since: datetime, limit:
     regs = [region_code, "*"] if scope_global else [region_code]
     q = (select(Signal).where(and_(Signal.org_id.is_(None), Signal.region.in_(regs), Signal.kind.in_(kinds), Signal.fetched_at >= since, Signal.fetched_at <= utcnow()))
          .order_by(desc(Signal.fetched_at), desc(Signal.value)).limit(limit))
-    return (await s.execute(q)).scalars().all()
+    return [x for x in (await s.execute(q)).scalars().all() if safe_title(x.title)]
 
 
 async def build_snapshot_data(code: str, at: datetime) -> dict:
@@ -50,11 +51,12 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         tone = await _latest(s, code, ["tone"], at - timedelta(hours=30), 1)
         news = await _latest(s, code, ["headline"], at - timedelta(hours=24), 12)
         trends = await _latest(s, code, ["trend"], at - timedelta(hours=48), 10)
-        social = await _latest(s, code, ["social_trend"], at - timedelta(hours=24), 12, scope_global=True)
+        social = await _latest(s, code, ["social_trend"], at - timedelta(hours=24), 12)
         events = await _latest(s, code, ["event"], at - timedelta(hours=36), 5)
         econ = await _latest(s, code, ["economy"], at - timedelta(hours=36), 2)
         prepared = (await s.execute(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]), Signal.fetched_at <= at,
             Signal.observed_at <= at, Signal.fetched_at >= at - timedelta(days=2)).order_by(Signal.fetched_at.desc()).limit(200))).scalars().all()
+        prepared = [x for x in prepared if safe_title(x.title) and (x.kind != "social_trend" or x.region == code)]
         moment = (await s.execute(select(CulturalMoment).where(CulturalMoment.region == code,
             CulturalMoment.day == at.replace(hour=0, minute=0, second=0, microsecond=0)))).scalar_one_or_none()
         series = (await s.execute(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]),
@@ -67,10 +69,10 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         key = item.source
         if key not in freshness or age < freshness[key]["age_hours"]:
             freshness[key] = {"source": key, "region": code, "age_hours": round(age, 1), "max_age_hours": maximum, "stale": age > maximum}
-    for source, kind in (("open_meteo", "weather"), ("google_news", "headline"), ("wikipedia", "trend"), ("calendar", "event")):
+    for source, kind in (("open_meteo", "weather"), ("google_news", "headline"), ("wikipedia", "trend"), ("calendar", "event"), ("gdelt", "tone")):
         if source not in freshness:
             freshness[source] = {"source": source, "region": code, "age_hours": None,
-                                 "max_age_hours": settings.signal_max_age_hours.get(kind, 6), "stale": True}
+                                 "max_age_hours": settings.signal_max_age_hours.get(kind, 6), "stale": True, "status": "source_unavailable"}
     reg = region(code)
     local = at + timedelta(hours=reg["tz_offset"])
     return {
@@ -79,16 +81,16 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         "weather": w[0].payload if w else None,
         "tone": ({"avg": tone[0].value, **tone[0].payload} if tone else None),
         "news": [{"title": x.title, "source": x.payload.get("source", ""), "url": x.url} for x in news],
-        "trending": [{"title": x.title, "views": x.value} for x in trends],
-        "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url} for x in social],
-        "events": sorted([{"name": x.title, **x.payload} for x in events], key=lambda e: e.get("days_away", 99)),
+        "trending": [{"title": x.title, "views": x.value, "at": x.observed_at.isoformat()} for x in trends],
+        "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url, "at": x.observed_at.isoformat()} for x in social],
+        "events": sorted([{"name": x.title, **x.payload} for x in events], key=lambda e: e.get("days_away") if e.get("days_away") is not None else 999),
         "economy": [{"title": x.title, "value": x.value} for x in econ],
         "signals": [{"id": x.id, "source": x.source, "kind": x.kind, "title": x.title,
                      "value": x.value,
                      "embedding": embed(x.title + " " + str(x.payload.get("summary", ""))).tolist(),
                      "summary": str(x.payload.get("summary", ""))[:500], "at": x.observed_at.isoformat(), "url": x.url} for x in prepared],
         "freshness": list(freshness.values()), "stale_sources": [x for x in freshness.values() if x["stale"]],
-        "cultural_moment": moment.note if moment else "Topics on people's minds: " + "; ".join(x.title for x in news[:3]),
+        "cultural_moment": moment.note if moment and safe_title(moment.note) else "Topics on people's minds: " + "; ".join(x.title for x in news[:3]),
         "cultural_moment_by": moment.model if moment else "template",
         "trend_series": [{"title": x.title, "source": x.source, "value": x.value, "at": x.observed_at.isoformat()} for x in series],
     }
@@ -109,7 +111,7 @@ def template_brief(d: dict) -> str:
         parts.append("Most read: " + ", ".join(x["title"] for x in d["trending"][:4]) + ".")
     if d.get("events"):
         e = d["events"][0]
-        parts.append(f"Coming up: {e['name']} in {e.get('days_away', '?')} days.")
+        parts.append(e['name'] + "." if e.get("days_away") is None else f"Coming up: {e['name']} in {e['days_away']} days.")
     return " ".join(parts)
 
 
@@ -160,7 +162,7 @@ async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | Non
                     except Exception:
                         data = {"signals": [], "archive_unavailable": True, "stale_sources": [{"source": "archive", "region": c,
                             "age_hours": None, "stale": True}]}
-                    out[c] = {**data, "brief": row.brief, "brief_by": row.brief_by, "archived": True}
+                    out[c] = {**clean_snapshot(data), "brief": row.brief if safe_title(row.brief) else "Historical brief filtered for discovery safety.", "brief_by": row.brief_by, "archived": True}
         missing = [c for c in codes if c not in out]
         for c in missing:
             reg = region(c)
@@ -185,7 +187,7 @@ async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | Non
                 except IntegrityError:
                     row = (await s.execute(select(RegionSnapshot).where(
                         RegionSnapshot.region == c, RegionSnapshot.hour == bucket))).scalar_one()
-            out[c] = {**row.data, "brief": row.brief, "brief_by": row.brief_by, "archived": False}
+            out[c] = {**clean_snapshot(row.data), "brief": row.brief if safe_title(row.brief) else template_brief(clean_snapshot(row.data)), "brief_by": row.brief_by, "archived": False}
             if row.brief_by == "template":
                 need_brief.append(c)
     if at > now + timedelta(hours=1):   # scheduled publish time: same live context, shifted clock + calendar
@@ -253,6 +255,7 @@ def trend_alignment(card: dict, snaps: dict) -> dict:
             source = history[-1]["source"]
             history = list({x["at"]: x for x in history if x["source"] == source}.values())
         match["evidence"] = history[-5:]
+        match["at"] = history[-1]["at"] if history else None
         match["phase"] = trend_phase(history)
         match["at"] = history[-1]["at"] if history else snapshot.get("at")
     strength = sum(min(m["strength"], 3) for m in matches[:8])

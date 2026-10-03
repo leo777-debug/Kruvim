@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { REGION_COLORS, STANCE_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import type { Simulation } from "@/lib/types";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 
 const PAGE = 50;
 const SENT = { positive: "text-pos", negative: "text-neg", neutral: "text-muted" } as Record<string, string>;
@@ -54,7 +54,7 @@ export function TranscriptPanel({ sim, onAgent }: { sim: Simulation; onAgent: (r
                   <span className="text-muted">{[m.age && `${m.age}`, m.region, m.author_kind === "stakeholder" ? "account" : null].filter(Boolean).join(" · ")}</span>
                   {m.stance && <span className="inline-flex items-center gap-1 capitalize text-muted"><span className="h-1.5 w-1.5 rounded-full" style={{ background: STANCE_COLORS[m.stance] }} />{m.stance}</span>}
                   <span className={`capitalize ${SENT[m.sentiment]}`}>{m.sentiment}</span>
-                  <span className="ml-auto text-faint">{m.platform} · {m.kind} · round {m.round}</span>
+                  <span className="ml-auto text-faint">{platformName(m.platform)} · {m.kind} · round {m.round}</span>
                 </div>
                 {m.reply_to && <div className="mt-1 border-l-2 border-line-strong pl-2 text-xs text-muted">Replying to {m.reply_to.author}: “{m.reply_to.content}”</div>}
                 <div dir="auto" className="mt-1 text-[14px] leading-relaxed">{m.content}</div>

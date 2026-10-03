@@ -23,5 +23,6 @@ def upgrade_head() -> None:
         finally:
             eng.dispose()
         if "simulations" in tables and "alembic_version" not in tables:
-            command.stamp(cfg, "0001")          # created by an older build with create_all: adopt it at the first revision
+            from app.models import Base
+            command.stamp(cfg, "head" if set(Base.metadata.tables).issubset(tables) else "0001")
     command.upgrade(cfg, "head")

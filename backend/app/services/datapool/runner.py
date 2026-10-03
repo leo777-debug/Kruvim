@@ -65,6 +65,8 @@ async def ensure_platform_connectors() -> None:
 
 
 async def store_signals(source: str, items: list[SignalItem], org_id=None, simulation_id=None) -> int:
+    from .safety import safe_title
+    items = [i for i in items if safe_title(i.title, i.payload.get("categories", []))]
     if not items:
         return 0
     now = utcnow()

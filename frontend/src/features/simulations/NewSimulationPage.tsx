@@ -6,10 +6,10 @@ import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
-import { Card, Checkbox, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
+import { RegionPicker } from "@/components/ui/RegionPicker";
+import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { REGION_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import type { Asset, Format, Simulation } from "@/lib/types";
 import { cn, fmt } from "@/lib/utils";
@@ -160,9 +160,7 @@ export default function NewSimulationPage() {
     } finally { setBusy(false); }
   }
 
-  const regions = ref.data?.regions || [];
   const toggle = (k: string, v: string) => setAud({ ...aud, [k]: aud[k].includes(v) ? aud[k].filter((x: string) => x !== v) : [...aud[k], v] });
-  const setRegions = (codes: string[], on: boolean) => setAud({ ...aud, regions: on ? Array.from(new Set([...aud.regions, ...codes])) : aud.regions.filter((c: string) => !codes.includes(c)) });
   const groups = useMemo(() => Array.from(new Set(formats.map((x) => x.group))), [formats]);
   const advancedCount = aud.professions.length + aud.incomes.length + Object.keys(aud.ocean).length + (aud.expats_only ? 1 : 0) + (aud.citizens_only ? 1 : 0);
 
@@ -242,9 +240,11 @@ export default function NewSimulationPage() {
 
           <Section title="Audience" desc={<>Who sees it, drawn from the 1,000,000-person population <InfoTip term="population" className="align-[-2px]" />. Counts update as you edit.</>}>
             <div className="flex flex-wrap items-end gap-2">
-              <Field label="Saved audiences" className="min-w-[240px] flex-1">
+              <Field label="Creator preset" help="Start with a suggested audience, then adjust its filters." className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder="Apply a creator preset…" options={(presets.data || []).map((p) => ({ value: p.id, label: p.name }))}
                   onChange={(id) => { const p = presets.data?.find((x) => x.id === id); if (p) setAud({ regions: [], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false, expats_only: false, interests: [], professions: [], incomes: [], ocean: {}, ...p.filters }); }} />
+              </Field>
+              <Field label="Saved audiences" className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder={templates.data?.length ? "Load a saved audience…" : "No saved audiences yet"}
                   onChange={async (id) => { const t = templates.data?.find((x) => x.id === id); if (t) { setAud({ ...aud, ...t.filters }); api(`/audience-templates/${id}/use`, { method: "POST" }).catch(() => null); toast.success(`Loaded "${t.name}"`); } }}
                   options={(templates.data || []).map((t) => ({ value: t.id, label: `${t.name}${t.mine ? "" : " · community"}${t.accuracy != null ? ` · ${Math.round(t.accuracy * 100)}% accuracy` : ""}` }))} />
@@ -254,26 +254,7 @@ export default function NewSimulationPage() {
             <Switch checked={!!aud.use_creator_audience} onChange={(v) => setAud({ ...aud, use_creator_audience: v })}
               label="Match my audience" />
             <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
-            <div className="overflow-hidden rounded-md border border-line">
-              <table className="dt">
-                <thead><tr>
-                  <th className="w-8"><Checkbox checked={regions.length > 0 && aud.regions.length === regions.length} indeterminate={aud.regions.length > 0 && aud.regions.length < regions.length}
-                    onChange={(v) => setRegions(regions.map((r) => r.code), v)} /></th>
-                  <th>Region</th><th>Group</th><th className="!text-right">Matching people</th>
-                </tr></thead>
-                <tbody>{regions.map((r) => {
-                  const on = aud.regions.includes(r.code);
-                  return (
-                    <tr key={r.code} className="hoverable" onClick={() => toggle("regions", r.code)}>
-                      <td><Checkbox checked={on} onChange={() => toggle("regions", r.code)} /></td>
-                      <td><span className="mr-2 inline-block h-2 w-2 rounded-[2px]" style={{ background: REGION_COLORS[r.code] }} />{r.name}</td>
-                      <td className="text-muted">{r.mena ? "MENA" : "Other"}</td>
-                      <td className="r text-muted">{on && count?.regions?.[r.code] != null ? fmt.n(count.regions[r.code]) : "–"}</td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
+            <Field label="Audience regions"><RegionPicker value={aud.regions} onChange={(value) => setAud({ ...aud, regions: value })} /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Age range"><div className="flex items-center gap-2"><Input type="number" min={16} max={70} value={aud.age_min} onChange={(e) => setAud({ ...aud, age_min: Number(e.target.value) })} />
                 <span className="text-[13px] text-muted">to</span><Input type="number" min={16} max={70} value={aud.age_max} onChange={(e) => setAud({ ...aud, age_max: Number(e.target.value) })} /></div></Field>

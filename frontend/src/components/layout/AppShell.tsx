@@ -21,6 +21,7 @@ const NAV = [
   { to: "/monitoring", label: "Monitoring", icon: Gauge },
   { to: "/population", label: "Population", icon: Users2 },
   { to: "/calibration", label: "Calibration", icon: Gauge },
+  { to: "/accuracy", label: "Accuracy", icon: BarChart3 },
 ];
 
 function useTheme() {

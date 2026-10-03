@@ -77,6 +77,9 @@ class CalendarConnector(BaseConnector):
                 days = (dt.date.fromisoformat(ds) - today).days
                 out.append(SignalItem("event", reg["code"], name, value=float(days),
                                       payload={"date": ds, "days_away": days, "source": src}))
+            if not events:
+                out.append(SignalItem("event", reg["code"], "No upcoming dates in the next 60 days",
+                    payload={"availability": "no_upcoming_dates", "source": "built-in calendar", "days_away": None}))
         return out
 
 

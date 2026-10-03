@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { platformName } from "@/lib/utils";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -50,13 +51,13 @@ export default function MyAudiencePage() {
     {params.get("connection") && <Card className="mb-4 p-4" role="status">{params.get("connection") === "connected" ? "Account connected. Sync analytics to load its breakdown." : "Account connection failed. Check permissions and try again."}</Card>}
     {(accounts.isError || profile.isError) && <Card className="mb-4 p-4" role="alert">Could not load audience data. <Button onClick={() => { accounts.refetch(); profile.refetch(); }}>Retry</Button></Card>}
     <Card className="overflow-x-auto">
-      <table className="dt"><thead><tr><th>Platform</th><th>Account</th><th>Available analytics</th><th>Actions</th></tr></thead><tbody>
+      <table className="dt account-table"><thead><tr><th>Platform</th><th>Account</th><th>Available analytics</th><th>Actions</th></tr></thead><tbody>
         {accounts.data?.providers.map((provider) => {
           const c = accounts.data.connections.find((x) => x.platform === provider.platform);
-          return <tr key={provider.platform}><td className="capitalize">{provider.platform}</td><td>{c?.connected ? c.account_name : "Not connected"}</td>
-            <td className="max-w-md whitespace-normal"><p>{provider.limitations}</p>{c?.last_error && <p role="alert" className="text-neg">{c.last_error}</p>}
+          return <tr key={provider.platform}><td data-label="Platform">{platformName(provider.platform)}</td><td data-label="Account">{c?.connected ? c.account_name : "Not connected"}</td>
+            <td data-label="Available analytics" className="max-w-md whitespace-normal"><p>{provider.limitations}</p>{c?.last_error && <p role="alert" className="text-neg">{c.last_error}</p>}
               {c?.last_sync_at && <p className="text-xs text-muted">Last synced {new Date(c.last_sync_at).toLocaleString()}</p>}</td>
-            <td><div className="flex flex-wrap gap-2"><Button disabled={!provider.configured || busy !== null} loading={busy === provider.platform}
+            <td data-label="Actions"><div className="flex flex-wrap gap-2"><Button disabled={!provider.configured || busy !== null} loading={busy === provider.platform}
               onClick={() => action(provider.platform, `/social/${provider.platform}/connect`)}>{c?.connected ? "Reconnect" : provider.configured ? "Connect" : "Setup required"}</Button>
               {c?.connected && <><Button disabled={busy !== null} onClick={() => action(c.id, `/social/connections/${c.id}/sync`)} loading={busy === c.id}>Sync now</Button>
                 <Button disabled={busy !== null} onClick={() => action(`use-${c.id}`, `/social/connections/${c.id}/use-audience`)}>Use breakdown</Button>

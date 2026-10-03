@@ -38,6 +38,7 @@ export function SectionHeader({ title, actions, sub, className }: { title: React
 const field = "w-full rounded-md border border-line-strong bg-panel text-[13px] text-fg placeholder:text-faint shadow-[inset_0_1px_1px_rgb(16_24_40/0.03)] focus:border-brand focus:outline-none focus:ring-[3px] focus:ring-brand/15 disabled:bg-raised disabled:opacity-70";
 
 const FieldLabelContext = createContext<string | undefined>(undefined);
+export const useFieldLabel = () => useContext(FieldLabelContext);
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => {
   const labelId = useContext(FieldLabelContext);
   return <input ref={ref} aria-labelledby={p["aria-label"] ? undefined : labelId} className={cn(field, "h-8 px-2.5", className)} {...p} />;

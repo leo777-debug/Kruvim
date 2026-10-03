@@ -246,3 +246,13 @@ docker-compose.yml    postgres, redis, api, worker, connector-worker, web, optio
   Link published posts to sync real results automatically; Calibration also accepts manual results.
 * The population is synthetic and built from regional priors until it is calibrated with survey data.
 * Some free sources rate-limit aggressively (GDELT in particular); connectors report their status on the data pool page.
+
+## October click-through fixes (Part A)
+
+Demo SQLite installs now run Alembic before seeding; legacy databases containing every model table are stamped at head. Reports notify clients after committing, and completed runs keep polling until their report finishes.
+
+Regional trend RSS is fetched per country. Global social items are admitted only when they explicitly reference the requested region. Wikipedia discovery checks titles and categories before ingestion; cached snapshots and retrieval apply the title filter too. Saudi dates use the built-in holiday calendar when a remote source is unavailable, and unavailable news tone is labeled clearly. These sources remain external and may rate-limit or return no matching trends.
+
+The UI has shared platform names, separate creator-preset labels, real plan feed limits, a shared region picker, and an Accuracy sidebar entry. Retrieval accounting is in Method. Audience connections stack as cards below 640px. Voice selection preserves weighted demographic proportions and mixes the interview list. LLM keys remain blank by default; dry-run and OpenAI-compatible local providers remain supported.
+
+Validation: 32 backend tests passed; Ruff, TypeScript and the production Vite build passed. All 17 formats completed in an isolated dry-run workspace; 40 concurrent reads returned HTTP 200. Browser checks at 390px covered the 12 main pages, a project, the new-run form and completed results. Run `frontend/tools/verify-mobile.ps1 -Browser <agent-browser executable> -ProjectId <id> -RunId <id>` against an authenticated browser session named `kruvim-gaps`. Country RSS and Wikipedia category responses were tested with fixtures; live upstream availability and paid-model output were not certified.

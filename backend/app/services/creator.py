@@ -80,7 +80,26 @@ def weighted_sample(pop, mask, n, rng, split=None, exclude=None):
         indices = np.setdiff1d(indices, exclude)
     weights, diagnostics = audience_weights(pop, indices, split or {})
     count = min(n, int((weights > 0).sum()))
-    return rng.choice(indices, count, replace=False, p=weights), diagnostics
+    keys = (pop.region[indices].astype(int) * 2 + pop.male[indices]) * 5 + pop.age_band[indices]
+    _, inv = np.unique(keys, return_inverse=True)
+    mass = np.bincount(inv, weights=weights)
+    quota = count * mass
+    allocation = np.floor(quota).astype(int)
+    for group in np.argsort(-(quota - allocation))[:count - int(allocation.sum())]:
+        allocation[group] += 1
+    selected = []
+    for group, n in enumerate(allocation):
+        positions = np.flatnonzero((inv == group) & (weights > 0))
+        if n and len(positions):
+            chosen = rng.choice(positions, min(n, len(positions)), replace=False, p=weights[positions] / weights[positions].sum())
+            selected.extend(indices[chosen].tolist())
+    if len(selected) < count:
+        remaining = np.flatnonzero((weights > 0) & ~np.isin(indices, selected))
+        selected.extend(indices[rng.choice(remaining, count - len(selected), replace=False,
+            p=weights[remaining] / weights[remaining].sum())].tolist())
+    result = np.asarray(selected, dtype=np.int64)
+    rng.shuffle(result)
+    return result, diagnostics
 
 
 def personal_signals(persona, card, snapshots):

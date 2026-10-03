@@ -33,4 +33,4 @@ if __name__ == "__main__":
     datapool.run_due = AsyncMock(return_value=[])
     context.ensure_fresh = AsyncMock()
     targeted.prepare = AsyncMock()
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, access_log=False)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ.get("KRUVIM_VERIFY_PORT", "8000")), access_log=False)

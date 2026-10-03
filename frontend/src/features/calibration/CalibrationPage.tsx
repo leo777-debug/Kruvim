@@ -4,7 +4,7 @@ import { Page } from "@/components/layout/AppShell";
 import { Card, Empty, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 import AccuracyReport from "./AccuracyReport";
 import { Link } from "react-router-dom";
 
@@ -39,7 +39,7 @@ export default function CalibrationPage() {
                 <th className="!text-right">Views</th><th className="!text-right">Engagement</th><th className="!text-right">Watched</th></tr></thead>
               <tbody>{c.rows.map((r: any, i: number) => (
                 <tr key={i} onClick={() => nav(`/simulations/${r.simulation_id}`)} className="hoverable">
-                  <td className="font-medium">{r.name}</td><td>{r.platform}</td>
+                  <td className="font-medium">{r.name}</td><td>{platformName(r.platform)}</td>
                   <td className="r">{fmt.s2(r.predicted_score)}</td><td className="r">{fmt.s1(r.predicted_viral)}</td>
                   <td className="r">{fmt.n(r.views)}</td><td className="r">{r.engagement_rate != null ? `${r.engagement_rate}%` : "–"}</td>
                   <td className="r">{r.retention != null ? `${r.retention}%` : "–"}</td>

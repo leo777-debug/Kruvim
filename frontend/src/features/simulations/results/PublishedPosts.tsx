@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { platformName } from "@/lib/utils";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, Field, Input } from "@/components/ui/primitives";
@@ -35,7 +36,7 @@ export default function PublishedPosts({ sim }: { sim: Simulation }) {
       <Field label="Variant"><select className="rounded border border-line bg-panel p-2" value={variant} onChange={(e) => setVariant(e.target.value)} aria-label="Published variant"><option>A</option>{sim.results?.ab && <option>B</option>}</select></Field>
       <Field label="Published post ID"><Input value={postId} onChange={(e) => setPostId(e.target.value)} placeholder="Platform post or video ID" /></Field>
       <Button loading={busy} disabled={busy || !postId.trim()} onClick={() => mutate(`/simulations/${sim.id}/published-posts`, "POST", { connection_id: connection.id, variant, post_id: postId.trim() })}>Link post</Button>
-    </div> : <Link className="text-sm text-brand" to="/my-audience">Connect your {sim.content?.platform} analytics</Link>}
+    </div> : <Link className="text-sm text-brand" to="/my-audience">Connect your {platformName(sim.content?.platform)} analytics</Link>}
     {!!posts.data?.length && <div className="overflow-x-auto"><table className="dt"><thead><tr><th>Variant</th><th>Post</th><th>Views</th><th>Engagement</th><th>Retention</th><th>Status</th><th /></tr></thead><tbody>
       {posts.data.map((p) => <tr key={p.id}><td>{p.variant}</td><td>{p.post_id}</td><td>{p.metrics.views?.toLocaleString() ?? "Unavailable"}</td>
         <td>{p.metrics.engagement_rate != null ? `${p.metrics.engagement_rate}%` : "Unavailable"}</td><td>{p.metrics.retention != null ? `${p.metrics.retention}%` : "Unavailable"}</td>

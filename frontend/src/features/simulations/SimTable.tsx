@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Progress, Status } from "@/components/ui/primitives";
 import { scoreColor } from "@/lib/colors";
 import type { SimSummary } from "@/lib/types";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 import { STATUS_LABEL, STATUS_TONE } from "./SimulationPage";
 
 export function SimTable({ rows, selected, onSelect }: { rows: SimSummary[]; selected?: string[]; onSelect?: (id: string, checked: boolean) => void }) {
@@ -20,7 +20,7 @@ export function SimTable({ rows, selected, onSelect }: { rows: SimSummary[]; sel
               <td>
                 <div className="font-medium text-fg">{s.name}</div>
                 <div className="text-xs text-muted">
-                  <span className="capitalize">{s.content_type}</span> · {s.platform}
+                  <span className="capitalize">{s.content_type}</span> · {platformName(s.platform)}
                   {s.ab && <> · A/B{s.ab_winner ? ` (${s.ab_winner === "tie" ? "tie" : `${s.ab_winner} preferred`})` : ""}</>}
                   {s.dry && <> · dry run</>}
                 </div>

@@ -7,7 +7,7 @@ import { Callout, Field, Input, KV, Progress, Segmented, Slider, Switch } from "
 import { api, ApiError } from "@/lib/api";
 import { REGION_COLORS, STANCE_COLORS } from "@/lib/colors";
 import type { Simulation } from "@/lib/types";
-import { fmt } from "@/lib/utils";
+import { fmt, platformName } from "@/lib/utils";
 import type { StreamState } from "../useSimulationStream";
 import { Section } from "./GraphStep";
 
@@ -132,7 +132,7 @@ export function EnvironmentStep({ sim, stream, onNext, refetch, onAgent }: { sim
               <div className="divide-y divide-line overflow-hidden rounded-md border border-line">
                 {cfg.external_seed.slice(0, 8).map((p: any, i: number) => (
                   <div key={i} className="px-3 py-2 text-[13px]">
-                    <div className="mb-1 flex items-center gap-1.5 text-xs text-muted"><span className="font-medium capitalize text-fg">{p.platform}</span>· @{p.author}
+                    <div className="mb-1 flex items-center gap-1.5 text-xs text-muted"><span className="font-medium text-fg">{platformName(p.platform)}</span>· @{p.author}
                       {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="ml-auto text-muted hover:text-fg"><ExternalLink className="h-3 w-3" /></a>}</div>
                     <div dir="auto" className="line-clamp-3 leading-relaxed">{p.text}</div>
                   </div>
