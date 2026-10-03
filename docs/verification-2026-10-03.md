@@ -16,7 +16,7 @@ bounded feed downloads, production configuration checks, accessible form labels 
 
 ## Completed local checks
 
-- Backend: 24 tests passed; the creator tests also cover sync retries, demographic refresh, cross-workspace access,
+- Backend: the 24-test suite and an additional focused source-privacy test passed; creator tests cover sync retries, demographic refresh, cross-workspace access,
   OAuth replay, evidence isolation, archive round trips and transparent accuracy exclusions.
 - Ruff: application, tests, scripts, migrations and verification tools passed.
 - Frontend: TypeScript and production build passed; browser checks covered sign-in, audience save, results and public accuracy.
@@ -29,6 +29,8 @@ bounded feed downloads, production configuration checks, accessible form labels 
 ## External validation
 
 Real OAuth account exchanges, provider app review and live analytics were not exercised without production app credentials.
-Local Docker was unavailable. CI checks PostgreSQL migrations, native pgvector queries, Redis source exclusion and both
-container builds. S3 archive behavior was verified with mocked storage; a real object store still needs a deployment smoke test.
+Local Docker was unavailable. GitHub CI subsequently passed PostgreSQL migrations and schema comparison, native pgvector
+queries, Redis source exclusion, backend/frontend checks and both container builds. CI exposed and resolved a PostgreSQL
+codec conflict and a test import-path difference. S3 archive behavior was verified with mocked storage;
+a real object store still needs a deployment smoke test.
 No numerical public accuracy claim is made before sufficient eligible opted-in comparisons exist.

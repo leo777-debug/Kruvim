@@ -254,3 +254,37 @@ async def test_one_remote_embedding_batch_and_fallback(client, auth, monkeypatch
     evidence, meta = await prepare_retrieval(auth[1]["orgs"][0]["id"], personas, {"title": "Gaming"}, {"SA": {"signals": [{"id": 987654, "title": "Gaming esports"}]}}, llm, usage)
     assert len(calls) == 1 and usage.calls == 1 and evidence[0][0]["id"] == 987654
     assert meta["extra_cost_usd"] > 0
+
+
+async def test_source_learning_requires_independent_workspaces_per_source(client, monkeypatch):
+    from app.services.source_weights import learned_weights
+    monkeypatch.setattr(settings, "source_weight_min_tests", 3)
+    monkeypatch.setattr(settings, "accuracy_min_workspaces", 3)
+    connections = []
+    for i in range(3):
+        account = (await client.post("/auth/register", json={"email": f"source-{i}@example.com",
+            "password": "correct-horse-battery", "org_name": f"Source {i}"})).json()
+        h = {"Authorization": f"Bearer {account['access_token']}"}
+        oid = account["orgs"][0]["id"]
+        project = (await client.post("/projects", headers=h, json={"name": "Source learning"})).json()
+        sim = (await client.post(f"/projects/{project['id']}/simulations", headers=h,
+            json={"content": {"format": "short_video", "platform": "tiktok", "transcript": "Test"}})).json()
+        async with session_scope() as s:
+            c = SocialConnection(org_id=oid, platform="tiktok", share_accuracy=True)
+            s.add(c)
+            await s.flush()
+            connections.append(c.id)
+            predicted_at = utcnow()
+            for variant, score, views in (("A", 7, 100), ("B", 4, 10)):
+                s.add(SocialPost(org_id=oid, connection_id=c.id, simulation_id=sim["id"], variant=variant,
+                    post_id=f"source-{i}-{variant}", predicted_score=score, predicted_at=predicted_at,
+                    prediction={"dry": False, "b_kind": "version", "winner": "A", "niche": "source-isolation-test",
+                                "sources": ["shared", "single-workspace"] if i == 0 else ["shared"]},
+                    metrics={"views": views, "window_eligible": True}))
+    async with session_scope() as s:
+        result = await learned_weights(s, "source-isolation-test")
+        assert result["sources"]["shared"]["weight"] == 1.5
+        assert "single-workspace" not in result["sources"]
+        (await s.get(SocialConnection, connections[0])).share_accuracy = False
+    async with session_scope() as s:
+        assert (await learned_weights(s, "source-isolation-test"))["sources"] == {}

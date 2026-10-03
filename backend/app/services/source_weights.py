@@ -16,15 +16,15 @@ def weights_from_pairs(pairs, minimum):
 
 
 async def learned_weights(s, niche=None):
-    rows = (await s.execute(select(SocialPost).join(SocialConnection, SocialPost.connection_id == SocialConnection.id).where(
-        SocialConnection.share_accuracy.is_(True), SocialPost.org_id == SocialConnection.org_id))).scalars().all()
+    rows = (await s.execute(select(SocialPost, SocialConnection.platform).join(SocialConnection, SocialPost.connection_id == SocialConnection.id).where(
+        SocialConnection.share_accuracy.is_(True), SocialPost.org_id == SocialConnection.org_id))).all()
     groups = {}
-    for post in rows:
+    for post, platform in rows:
         if niche and post.prediction.get("niche") != niche:
             continue
-        groups.setdefault((post.org_id, post.simulation_id), {})[post.variant] = post
-    pairs, orgs = [], set()
-    for (oid, _), variants in groups.items():
+        groups.setdefault((post.org_id, post.simulation_id, platform), {})[post.variant] = post
+    pairs, source_orgs = [], {}
+    for (oid, _, _), variants in groups.items():
         if set(variants) != {"A", "B"}:
             continue
         a, b = variants["A"], variants["B"]
@@ -33,11 +33,15 @@ async def learned_weights(s, niche=None):
             continue
         if a.prediction.get("dry", True) or b.prediction.get("dry", True) or a.prediction.get("winner") not in ("A", "B"):
             continue
-        if a.predicted_at != b.predicted_at or a.prediction.get("b_kind") != "version":
+        if a.predicted_at != b.predicted_at or a.prediction.get("b_kind") != "version" or a.last_error or b.last_error or a.predicted_score == b.predicted_score:
             continue
-        pairs.append((a.prediction.get("sources", []), a.prediction["winner"] == ("A" if av > bv else "B")))
-        orgs.add(oid)
-    enough = len(orgs) >= settings.accuracy_min_workspaces
-    return {"niche": niche, "sources": weights_from_pairs(pairs, settings.source_weight_min_tests) if enough else {},
+        sources = set(a.prediction.get("sources", [])) | set(b.prediction.get("sources", []))
+        pairs.append((sources, a.prediction["winner"] == ("A" if av > bv else "B")))
+        for source in sources:
+            source_orgs.setdefault(source, set()).add(oid)
+    weights = weights_from_pairs(pairs, settings.source_weight_min_tests)
+    eligible = {source: data for source, data in weights.items()
+                if data["n"] >= settings.source_weight_min_tests and len(source_orgs[source]) >= settings.accuracy_min_workspaces}
+    return {"niche": niche, "sources": eligible,
             "minimum": settings.source_weight_min_tests, "method": "Association of including each source with actual A/B rank accuracy. "
             "Opt-in aggregates only; equal weights until sufficient tests across independent workspaces. Not a causal estimate."}
