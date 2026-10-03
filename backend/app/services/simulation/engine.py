@@ -718,6 +718,11 @@ class Engine:
              "top_posts": [{"id": p.id, "platform": p.platform, "author": p.author_name, "content": p.content[:140], **p.stats()} for p in top]}
         m["by_region"] = {k: (None if v != v else v) for k, v in m["by_region"].items()}
         self.timeline.append(m)
+        from app.services.knowledge.learn import learn_round
+        await learn_round(self.writer, [{"id": p.id, "author_ref": p.author_ref, "content": p.content[:2000],
+                                        "kind": p.kind} for p in self.posts.values()
+                                       if p.round == self.round and p.author_ref in self.agents
+                                       and p.kind in ("post", "comment", "quote")], self.llm, self.usage)
         await self.writer.flush(f"round {self.round}")
         await self.emit("round.end", m)
         async with session_scope() as s:
