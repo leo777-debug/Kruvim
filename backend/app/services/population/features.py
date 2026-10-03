@@ -42,31 +42,33 @@ def topic_match(pop: Population, idx, topic_vec: np.ndarray) -> np.ndarray:
 
 
 def stratified_sample(pop: Population, mask: np.ndarray, n: int, rng: np.random.Generator, exclude=None) -> np.ndarray:
-    """Proportional allocation over region x age band x stance (largest remainder); >=1 per stratum
-    holding >= 0.5% of the audience."""
+    """Allocate regions first, then gender/age segments, without forcing tiny strata into small runs."""
     idx = np.flatnonzero(mask)
     if exclude is not None and len(exclude):
         idx = np.setdiff1d(idx, np.asarray(exclude))
-    if idx.size == 0:
-        return idx
+    if idx.size == 0 or n <= 0:
+        return np.array([], dtype=np.int64)
     n = min(n, idx.size)
-    key = (pop.region[idx].astype(np.int32) * 5 + pop.age_band[idx]) * len(STANCES) + pop.stance[idx]
-    _, inv, cnt = np.unique(key, return_inverse=True, return_counts=True)
-    share = cnt / cnt.sum()
-    quota = share * n
-    alloc = np.floor(quota).astype(int)
-    alloc[(share >= 0.005) & (alloc == 0)] = 1
-    rem = n - alloc.sum()
-    if rem > 0:
-        for j in np.argsort(-(quota - np.floor(quota)))[:rem]:
-            alloc[j] += 1
-    while alloc.sum() > n:
-        alloc[np.argmax(alloc)] -= 1
+
+    def allocate(counts, total):
+        quota = counts / counts.sum() * total
+        allocation = np.floor(quota).astype(int)
+        order = rng.permutation(len(counts))
+        order = order[np.argsort(-(quota - allocation)[order], kind="stable")]
+        allocation[order[:total - int(allocation.sum())]] += 1
+        return allocation
+
+    regions, counts = np.unique(pop.region[idx], return_counts=True)
     out = []
-    for s, c in enumerate(alloc):
-        if c > 0:
-            members = idx[inv == s]
-            out.append(rng.choice(members, size=min(c, members.size), replace=False))
+    for region, count in zip(regions, allocate(counts, n), strict=True):
+        if not count:
+            continue
+        members = idx[pop.region[idx] == region]
+        keys = pop.male[members].astype(int) * 5 + pop.age_band[members]
+        _, inverse, segment_counts = np.unique(keys, return_inverse=True, return_counts=True)
+        for segment, size in enumerate(allocate(segment_counts, count)):
+            if size:
+                out.append(rng.choice(members[inverse == segment], size=size, replace=False))
     result = np.concatenate(out) if out else np.array([], dtype=np.int64)
     rng.shuffle(result)
     return result

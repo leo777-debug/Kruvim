@@ -94,3 +94,22 @@ def test_seed_then_startup_migration(tmp_path, legacy):
     subprocess.run([sys.executable, "-m", "scripts.seed_demo"], cwd=backend, env=env, check=True, capture_output=True)
     subprocess.run([sys.executable, "-c", "from app.db.migrate import upgrade_head; upgrade_head()"],
                    cwd=backend, env=env, check=True, capture_output=True)
+
+
+def test_small_voice_runs_keep_each_regions_proportional_share():
+    from app.services.population import stratified_sample
+    from app.services.population.generator import generate
+    from app.services.population.regions import REGIONS
+    pop = generate(40000, 19)
+    sa = [r["code"] for r in REGIONS].index("SA")
+    ae = [r["code"] for r in REGIONS].index("AE")
+    mask = np.isin(pop.region, [sa, ae])
+    expected_sa = np.mean(pop.region[mask] == sa) * 16
+    for seed in range(10):
+        chosen = stratified_sample(pop, mask, 16, np.random.default_rng(seed))
+        assert len(chosen) == len(set(chosen)) == 16
+        assert set(pop.region[chosen]) == {sa, ae}
+        assert abs(np.count_nonzero(pop.region[chosen] == sa) - expected_sa) <= 1
+    excluded = stratified_sample(pop, mask, 16, np.random.default_rng(1))
+    chosen = stratified_sample(pop, mask, 16, np.random.default_rng(2), exclude=excluded)
+    assert not set(chosen) & set(excluded)
