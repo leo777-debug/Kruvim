@@ -77,7 +77,7 @@ async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_ke
     running = (await s.execute(select(func.count()).select_from(Simulation).where(and_(
         Simulation.org_id == org.id, Simulation.status.in_(RUNNING))))).scalar()
     if running >= max(p["max_concurrent"], 1):
-        raise QuotaExceeded(f"Your plan runs {p['max_concurrent']} simulation(s) at a time. Wait for one to finish.")
+        raise QuotaExceeded(f"Your plan runs {p['max_concurrent']} simulation(s) at a time. Wait for one to finish.", code="concurrency_limit")
     need = estimate_credits(cfg)["total"]
     if platform_key:   # only metered when Kruvim's own model key is used
         await ensure_monthly_grant(s, org)

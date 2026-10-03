@@ -430,6 +430,8 @@ async def list_surveys(sim_id: str, p: Principal = Depends(principal), s: AsyncS
 @router.post("/simulations/{sim_id}/performance")
 async def add_performance(sim_id: str, body: PerformanceIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
+    if body.variant == "B" and not sim.results.get("ab"):
+        raise AppError("No variant B prediction exists for this simulation.")
     d = body.model_dump()
     if d["engagement_rate"] is None and d["views"]:
         acts = sum(x or 0 for x in (d["likes"], d["shares"], d["comments"]))
@@ -444,7 +446,8 @@ async def add_performance(sim_id: str, body: PerformanceIn, p: Principal = Depen
 async def list_performance(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     await get_sim(s, p, sim_id)
     rows = (await s.execute(select(PerformanceReport).where(PerformanceReport.simulation_id == sim_id).order_by(PerformanceReport.created_at))).scalars().all()
-    return [{"platform": r.platform, "views": r.views, "likes": r.likes, "shares": r.shares, "comments": r.comments,
+    return [{"platform": r.platform, "variant": r.variant, "source": "automatic" if r.social_post_id else "manual",
+             "views": r.views, "likes": r.likes, "shares": r.shares, "comments": r.comments,
              "engagement_rate": r.engagement_rate, "retention": r.retention, "notes": r.notes, "at": r.created_at} for r in rows]
 
 

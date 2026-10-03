@@ -4,15 +4,16 @@ from __future__ import annotations
 import logging
 import os
 import traceback
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 
 from app.core.config import settings
+from app.core.errors import QuotaExceeded
 from app.core.metrics import JOBS_RUNNING, SIMULATIONS
 from app.db.session import session_scope
 from app.models import Asset, PopulationVersion, Report, Simulation, Survey
-from app.services import datapool, knowledge, lifecycle, metering, monitoring, storage
+from app.services import datapool, jobs, knowledge, lifecycle, metering, monitoring, storage
 from app.services.content import ContentError, build_card, document_text, prepare
 from app.services.events import bus
 from app.services.interaction import survey as run_survey_fn
@@ -50,19 +51,32 @@ async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed")
     await monitoring.on_failed(sim_id, msg)
 
 
-async def _autopilot(sim_id: str, step: str) -> None:
+async def _autopilot(sim_id: str, step: str, attempt: int = 0) -> None:
     """Batch tests, recurring re-runs and competitor monitoring run every step without anyone clicking."""
     async with session_scope() as s:
         sim = await s.get(Simulation, sim_id)
         if not sim or not (sim.config or {}).get("autopilot"):
+            return
+        if step == "run" and sim.status != "ready":
             return
         try:
             if step == "environment":
                 await lifecycle.queue_environment(s, sim)
             else:
                 await lifecycle.queue_run(s, sim)
+        except QuotaExceeded as exc:
+            if exc.code == "concurrency_limit" and attempt < 720:
+                sim.progress = {**(sim.progress or {}), "waiting_for_slot": True}
+                await s.commit()
+                await jobs.enqueue("resume_autopilot", sim_id=sim_id, attempt=attempt + 1, delay=5)
+            else:
+                await _fail(sim_id, "simulation", exc, status="failed")
         except Exception as exc:
             await _fail(sim_id, "simulation", exc, status="failed")
+
+
+async def resume_autopilot(ctx, sim_id: str, attempt: int = 0):
+    await _autopilot(sim_id, "run", attempt)
 
 
 async def _asset_files(sim: Simulation, kinds: tuple[str, ...]) -> tuple[dict, list]:
@@ -111,6 +125,9 @@ async def build_graph(ctx, sim_id: str):
         await progress("Fetching live context from the data pool", 0.1)
         regions = (sim.audience or {}).get("regions") or datapool.context.all_codes()
         snaps = await datapool.snapshots_at(regions, sim.publish_at, llm, usage)
+        if not sim.publish_at or sim.publish_at >= _now() - timedelta(hours=2):
+            from app.services.datapool.targeted import prepare as prepare_targeted
+            await prepare_targeted(sim_id, org_id, cards["A"], regions, snaps)
         for c in cards.values():
             c["trend"] = datapool.trend_alignment(c, snaps)
         content = dict(sim.content)
@@ -193,6 +210,8 @@ async def run_simulation(ctx, sim_id: str):
             sim.usage = {**(sim.usage or {}), "simulation": usage.as_dict(res.settings)}
             sim.credits_charged = (sim.credits_charged or 0) + credits
             sim.report_status = "queued"
+        from app.services.creator_memory import update_memory
+        await update_memory(org_id, sim_id)
         SIMULATIONS.labels("completed").inc()
         await bus.publish(sim_id, "simulation.completed", {"score": results["score"], "viral": results["viral"]["score"],
                                                            "stopped_early": results.get("stopped_early")})

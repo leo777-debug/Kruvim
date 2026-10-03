@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, kruvim]
   pull_request:
 
 concurrency:
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: kruvim
           POSTGRES_PASSWORD: kruvim
@@ -40,11 +40,18 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U kruvim" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
     defaults:
       run:
         working-directory: backend
     env:
       KRUVIM_DATABASE_URL: postgresql+asyncpg://kruvim:kruvim@localhost:5432/kruvim
+      KRUVIM_REDIS_URL: redis://localhost:6379/0
+      KRUVIM_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +62,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Upgrade, downgrade and upgrade again on PostgreSQL
         run: alembic upgrade head && alembic downgrade base && alembic upgrade head
+      - run: alembic check
+      - run: python -m tools.verify_production
 
   frontend:
     runs-on: ubuntu-latest
@@ -71,6 +80,7 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit -p .
       - run: npx vite build
+      - run: npm audit --audit-level=high
 
   images:
     runs-on: ubuntu-latest

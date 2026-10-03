@@ -122,6 +122,79 @@ All settings are environment variables prefixed with `KRUVIM_` (see `.env.exampl
 | `KRUVIM_POPULATION_SIZE` | Population size (default 1,000,000). |
 | `KRUVIM_STORAGE_BACKEND`, `KRUVIM_S3_*` | Local volume or S3-compatible object storage for uploads. |
 
+## Creator analytics and audience twins
+
+Under **My audience**, connect a creator-owned YouTube, TikTok or Instagram account using read-only OAuth.
+Register provider applications, set the `KRUVIM_*_CLIENT_ID` / `CLIENT_SECRET` values, and register the exact callback
+`<KRUVIM_PUBLIC_URL>/api/v1/social/<platform>/callback`. Provider review/approved scopes are required for production;
+Instagram needs a professional account. These credentials are distinct from the public-data YouTube API key.
+
+Complete a test, then link the published post ID for variant A and, optionally, B in its Overview. Ownership is checked
+before linking. The development scheduler and arq cron sync aggregate outcomes, refresh tokens and update Calibration
+without manual metric entry. Credentials are encrypted, OAuth state expires after ten minutes and is consumed once,
+and all private analytics queries are workspace-scoped. A database lease prevents overlapping syncs; each pass processes
+up to five pending posts per account, oldest observation first. Snapshots finalize at the first sync after seven days.
+Disconnect removes credentials and post mappings; existing calibration reports remain. Removing a post link removes
+its automatic calibration report. No comment text or individual follower records are collected.
+
+| Provider | Outcomes | Audience breakdown |
+| --- | --- | --- |
+| YouTube | Views, likes, shares, comment count, average view percentage | Subscribed-viewer country, age and gender; this describes active viewers, not the complete follower base |
+| TikTok Display API | Views, likes, shares and comment count | Not exposed by this API; use the manual breakdown |
+| Instagram | Available media views and engagement counts | Follower country, age and gender, subject to professional-account eligibility and privacy thresholds |
+
+Unavailable/private metrics remain null, never fabricated zeros. YouTube replays can push average view percentage above
+100%; the calibration retention field is capped at 100%. Instagram retention is not exposed by this connector. TikTok
+retention and follower demographics require additional eligible Business analytics access, which is not implemented.
+
+Use **Match my audience** when creating a simulation, or pass `audience.follower_split` with percentage maps named
+`countries`, `ages`, and `genders`. Supplied marginals must total 100%. Sampling and population summaries are weighted
+to those marginals; other traits remain synthetic priors. Results disclose unsupported country/gender shares, clipped
+age bands (the population covers 16–70), and residual fitting error. Connected breakdowns refresh automatically; each
+prepared simulation keeps its own copy so later syncs do not change an existing run. Six built-in creator presets are
+available. Workspace memory keeps the latest 20 simulated observations and can be reset.
+
+Short-video results expose rewatch, stitch/duet, sound-reuse and comment-bait reactions; formula defaults support dry-run.
+Rewatch and duet likelihood adjust crowd sharing and cascade amplification. Prepared snapshots store deterministic local
+hash embeddings and per-agent retrieved signal evidence. Set `KRUVIM_EMBEDDING_MODEL` to use the configured compatible
+provider's embedding endpoint: one batch includes all candidate signals and agent queries; unsupported models or
+dimensions fall back locally. Vectors are stored in PostgreSQL pgvector (128 dimensions with a cosine HNSW index), or
+JSON/NumPy on SQLite. `KRUVIM_EMBEDDING_PRICE_PER_MILLION` lets the usage panel report the extra cost; unknown prices are
+not treated as zero. Historical runs without an archive disclose missing context instead of using today's data.
+
+### Accuracy and shared calibration
+
+The unauthenticated page `/accuracy` and API `/api/v1/public/accuracy` publish actual ranking accuracy with a Wilson 95%
+confidence interval. Predictions are frozen when posts are linked. Eligible pairs must use the same completed run,
+predate both publications, contain actual views observed 7–8 days after publication, and have a decisive model winner.
+Dry runs, competitor comparisons, ties, late snapshots and missing outcomes are excluded. These are observational creator
+comparisons, not randomized experiments. No example accuracy percentage or invented test count is published.
+
+Public reporting and shared source weights require explicit per-account opt-in, at least `KRUVIM_ACCURACY_MIN_TESTS`
+eligible pairs across `KRUVIM_ACCURACY_MIN_WORKSPACES` workspaces. Until then, the public report makes no accuracy claim.
+Source weights associate each included source with A/B correctness per niche; they use equal weights until sufficient
+evidence, and do not claim causation. Shared learning currently adjusts retrieval source weights; it does not retrain
+an LLM or replace global demographic priors with creators' private follower data.
+
+### Pipeline operation
+
+Graph preparation triggers bounded topic pulls across Google News, Wikipedia and searchable social connectors. Results
+are private to the workspace and tagged with the simulation. Completed sources are retained within a 20-second budget.
+No external fetch occurs inside the reaction engine. Hourly snapshots include per-source freshness; limits are configured
+through `KRUVIM_SIGNAL_MAX_AGE_HOURS`. A daily regional cultural synthesis uses the platform report model, once per region
+per UTC day outside simulation billing, with a deterministic template when no model is configured or the call fails.
+
+In production, start the `connector-worker` service as well as simulation workers. The dedicated `kruvim:connectors` queue
+uses `KRUVIM_CONNECTOR_CONCURRENCY`, distributed per-source exclusion, and configurable minimum request spacing through
+`KRUVIM_CONNECTOR_MIN_INTERVAL_SECONDS`. Old snapshots are gzip-compressed to S3-compatible storage when configured,
+after `KRUVIM_SNAPSHOT_ARCHIVE_DAYS` (default 30), and restored for backtests. Database contents are cleared only after a
+successful object upload. Trend lifecycle labels use at least three dated, numeric observations from the same source;
+insufficient history is explicitly labelled unknown. Matches without comparable measurements establish relevance only.
+
+The Compose PostgreSQL image includes pgvector. Existing PostgreSQL installations need the vector extension available
+to the migration role. End-to-end production PostgreSQL/Redis/S3 operation and real OAuth accounts require their running
+services and credentials; local tests use SQLite, dry-run models and mocked provider responses.
+
 ## Billing status
 
 Plans (Free, Pro, Business, Enterprise), monthly credit grants, the credit ledger and usage metering are implemented.
@@ -155,7 +228,7 @@ cd frontend && npx tsc --noEmit && npx vite build
 backend/
   app/api/            routes, dependencies (auth, roles, tenancy)
   app/core/           config, security, logging, metrics, rate limiting
-  app/models/         SQLAlchemy models (28 tables)
+  app/models/         SQLAlchemy models
   app/services/       llm, population, datapool, knowledge, simulation, report, interaction, quotas
   app/workers/        arq worker and tasks
   migrations/         Alembic
@@ -164,12 +237,12 @@ backend/
 frontend/
   src/components/     UI primitives, layout, live graph, charts
   src/features/       pages: dashboard, projects, simulations (five steps), data pool, population, settings, admin
-docker-compose.yml    postgres, redis, api, worker, web, optional ollama
+docker-compose.yml    postgres, redis, api, worker, connector-worker, web, optional ollama
 ```
 
 ## Limits worth knowing
 
 * Agent reactions are model outputs grounded in demographics and live context, not measurements of real people.
-  Use *Calibration* to record real results; Kruvim reports how well predictions rank actual outcomes.
+  Link published posts to sync real results automatically; Calibration also accepts manual results.
 * The population is synthetic and built from regional priors until it is calibrated with survey data.
 * Some free sources rate-limit aggressively (GDELT in particular); connectors report their status on the data pool page.

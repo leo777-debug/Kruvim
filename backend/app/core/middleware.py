@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 
@@ -28,7 +29,8 @@ class RequestContextMiddleware:
         rid = None
         for k, v in scope.get("headers", []):
             if k == b"x-request-id":
-                rid = v.decode()[:64]
+                candidate = v.decode(errors="ignore")[:64]
+                rid = candidate if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", candidate) else None
         rid = rid or uuid.uuid4().hex[:16]
         token = request_id_var.set(rid)
         start = time.perf_counter()
@@ -48,7 +50,7 @@ class RequestContextMiddleware:
         finally:
             dur = time.perf_counter() - start
             route = scope.get("route")
-            path = getattr(route, "path", None) or ("static" if not scope["path"].startswith("/api") else scope["path"])
+            path = getattr(route, "path", None) or ("static" if not scope["path"].startswith("/api") else "unmatched")
             HTTP_REQUESTS.labels(scope["method"], path, str(status_holder["status"])).inc()
             HTTP_LATENCY.labels(scope["method"], path).observe(dur)
             if scope["path"].startswith("/api") and not scope["path"].endswith("/events"):

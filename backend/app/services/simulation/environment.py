@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, datetime
 
@@ -15,7 +16,8 @@ import numpy as np
 from sqlalchemy import delete, or_, select
 
 from app.db.session import session_scope
-from app.models import GraphEdge, GraphNode, SimAgent, Simulation
+from app.models import GraphEdge, GraphNode, Organization, SimAgent, Simulation, SocialConnection
+from app.services.creator import audience_weights, weighted_sample
 from app.services.datapool import listen
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
@@ -65,7 +67,27 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         context = (sim.config or {}).get("context", {})
         publish_at = sim.publish_at or datetime.now(UTC)
         org_id = sim.org_id
-        seed = d["seed"] or (abs(hash(sim_id)) % (2**31))
+        org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+        creator_memory = (org.settings or {}).get("creator_memory", {}).get("summary", "")
+        creator_memory += "\n" + (org.settings or {}).get("creator_memory", {}).get("real_summary", "")
+        from app.services.source_weights import learned_weights
+        topics = card.get("topics") or {}
+        learned = await learned_weights(s, max(topics, key=topics.get) if topics else None)
+        for snapshot in context.values():
+            snapshot["source_weights"] = {key: value["weight"] for key, value in learned["sources"].items()}
+        if audience.get("use_creator_audience"):
+            profile = (org.settings or {}).get("creator_audience", {})
+            split = profile.get("split")
+            if profile.get("connection_id"):
+                connection = (await s.execute(select(SocialConnection).where(SocialConnection.id == profile["connection_id"],
+                    SocialConnection.org_id == org_id))).scalar_one_or_none()
+                if connection and connection.audience:
+                    split = {k: connection.audience.get(k, {}) for k in ("countries", "ages", "genders")}
+            if not split or not any(split.values()):
+                raise ValueError("Set up My audience or enter a follower breakdown first.")
+            audience["follower_split"] = split
+            sim.audience = audience
+        seed = d["seed"] or (int(hashlib.sha256(sim_id.encode()).hexdigest()[:8], 16) % (2**31))
         sim.seed = seed
     pop = await get_population()
     mask = pop.mask(audience)
@@ -75,8 +97,15 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     rng = np.random.default_rng(seed)
     await progress(f"{n_aud:,} agents match the audience", 0.1)
 
-    voice_idx = stratified_sample(pop, mask, d["voice"], rng)
+    twin = None
+    if audience.get("follower_split"):
+        _, twin = audience_weights(pop, np.flatnonzero(mask), audience["follower_split"])
+        voice_idx, _ = weighted_sample(pop, mask, d["voice"], rng, audience["follower_split"])
+    else:
+        voice_idx = stratified_sample(pop, mask, d["voice"], rng)
     personas = [pop.persona(int(i)) for i in voice_idx]
+    from app.services.datapool.retrieval import prepare_retrieval
+    retrieved, retrieval_usage = await prepare_retrieval(org_id, personas, card, context, llm, usage)
     regions_in = sorted({p["region"] for p in personas})
     await progress(f"Sampled {len(personas)} voice agents across {len({(p['region'], p['age_band'], p['stance']) for p in personas})} strata", 0.25)
 
@@ -154,8 +183,9 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     async with session_scope() as s:
         await s.execute(delete(SimAgent).where(SimAgent.simulation_id == sim_id))
         acts = []
-        for i, p in zip(voice_idx, personas):
+        for i, p, evidence in zip(voice_idx, personas, retrieved):
             cfg = agent_config(p, pop, int(i))
+            cfg["personal_signals"] = evidence
             acts.append(cfg["activity"])
             s.add(SimAgent(simulation_id=sim_id, ref=f"p:{int(i)}", kind="voice", name=p["name"], handle=p["handle"], region=p["region"],
                            persona=p, config=cfg, followers=p["followers"]))
@@ -181,6 +211,8 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             "external_seed": external[:12], "ab": has_b, "regions": regions_in, "audience_size": n_aud,
             "behaviour": {"max_actions": 3, "memory": 6, "crowd_exposures": 4},
             "context": context, "overrides": (sim.config or {}).get("overrides", {}),
+            "audience_twin": twin, "creator_memory": creator_memory, "accuracy_live_model": not llm.is_dry,
+            "retrieval_usage": retrieval_usage,
         }
         for k in ("autopilot", "watch_id", "rerun_of"):        # lifecycle markers survive regeneration
             if k in (sim.config or {}):

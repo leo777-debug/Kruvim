@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.creator import FollowerSplit
+
 ContentType = Literal["video", "audio", "image", "text"]
 
 
@@ -41,6 +43,8 @@ class ContentIn(VariantIn):
 
 
 class AudienceIn(BaseModel):
+    follower_split: FollowerSplit | None = None
+    use_creator_audience: bool = False
     regions: list[str] = Field(default_factory=list)
     age_min: int | None = Field(default=None, ge=16, le=70)
     age_max: int | None = Field(default=None, ge=16, le=70)

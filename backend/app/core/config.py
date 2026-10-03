@@ -65,6 +65,24 @@ class Settings(BaseSettings):
     bluesky_handle: str = ""
     bluesky_app_password: str = ""
     datapool_refresh_minutes: int = 60
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    tiktok_client_id: str = ""
+    tiktok_client_secret: str = ""
+    instagram_client_id: str = ""
+    instagram_client_secret: str = ""
+    instagram_api_version: str = "v25.0"
+    social_sync_minutes: int = Field(default=60, ge=10)
+    accuracy_min_tests: int = Field(default=20, ge=1)
+    accuracy_min_workspaces: int = Field(default=3, ge=2)
+    source_weight_min_tests: int = Field(default=20, ge=3)
+    embedding_model: str = ""  # configured OpenAI-compatible provider; blank uses local hashes
+    embedding_price_per_million: float | None = Field(default=None, ge=0)
+    connector_concurrency: int = Field(default=3, ge=1, le=20)
+    connector_min_interval_seconds: dict[str, float] = Field(default_factory=lambda: {"gdelt": 10, "reddit": 2})
+    snapshot_archive_days: int = Field(default=30, ge=1)
+    signal_max_age_hours: dict[str, float] = Field(default_factory=lambda: {
+        "weather": 1, "headline": 3, "tone": 3, "trend": 6, "social_trend": 6, "event": 24, "economy": 24})
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -72,6 +90,11 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v
+
+    @field_validator("embedding_price_per_million", mode="before")
+    @classmethod
+    def _optional_price(cls, value):
+        return None if value == "" else value
 
     @property
     def is_sqlite(self) -> bool:
@@ -85,8 +108,10 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
-    if s.is_prod and s.secret_key.startswith("dev-"):
-        raise RuntimeError("KRUVIM_SECRET_KEY must be set in production")
+    if s.is_prod and (s.secret_key.startswith("dev-") or len(s.secret_key) < 32):
+        raise RuntimeError("KRUVIM_SECRET_KEY must contain at least 32 characters in production")
+    if s.is_prod and "*" in s.cors_origins:
+        raise RuntimeError("Production CORS origins must be explicit")
     os.makedirs(s.data_dir, exist_ok=True)
     return s
 

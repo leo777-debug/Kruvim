@@ -8,6 +8,16 @@ from app.services.population.generator import generate
 from app.services.population.regions import STANCES
 
 
+def test_downvoted_posts_do_not_crash_ranking():
+    from app.services.simulation.engine import PostRT
+
+    post = PostRT(id=1, platform="forum", kind="post", author_ref="p:1", author_name="Test",
+                  author_region="AE", content="An unpopular proposal", round=0, stance=0, down=100)
+    assert post.popularity() == 0
+    post.likes = 100
+    assert post.popularity() > 0
+
+
 def test_password_hashing():
     h = hash_password("hunter2-but-longer")
     assert verify_password("hunter2-but-longer", h)

@@ -15,9 +15,12 @@ const DataPool = lazy(() => import("./features/datapool/DataPoolPage"));
 const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
+const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
+const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
 const Settings = lazy(() => import("./features/settings/SettingsPage"));
 const Usage = lazy(() => import("./features/settings/UsagePage"));
 const Admin = lazy(() => import("./features/admin/AdminPage"));
+const Monitoring = lazy(() => import("./features/monitoring/MonitoringPage"));
 
 function Spinner() {
   return <div className="flex h-full items-center justify-center text-muted"><Loader2 className="h-5 w-5 animate-spin" /></div>;
@@ -53,6 +56,7 @@ export default function App() {
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/accuracy" element={<PublicAccuracy />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route index element={<Dashboard />} />
           <Route path="projects" element={<Projects />} />
@@ -63,6 +67,8 @@ export default function App() {
           <Route path="data-pool" element={<DataPool />} />
           <Route path="population" element={<Population />} />
           <Route path="audiences" element={<Audiences />} />
+          <Route path="my-audience" element={<MyAudience />} />
+          <Route path="monitoring" element={<Monitoring />} />
           <Route path="calibration" element={<Calibration />} />
           <Route path="settings" element={<Settings />} />
           <Route path="usage" element={<Usage />} />

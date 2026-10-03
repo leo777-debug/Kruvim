@@ -32,6 +32,8 @@ Stay realistic:
   or relevance only where a real person would connect it.
 - quote = what they would actually type in the comments or say to a friend, in their own register (Gulf Arabic,
   Hinglish, Darija, slang...). Max 25 words. No hashtags.
+- For short videos, estimate rewatch_probability, stitch_duet_likelihood, sound_reuse_likelihood (0–1) and comment_bait
+  (a plausible part-2 request, song-name question, or "none"). Consider the persona's language register and dialect.
 - segment_engagement: exactly {n_segments} numbers, probability (0-1) they are still paying attention at the END of each
   segment given they were at its start. drop_segment = 1-based segment where they would stop, or null.
 - Judge it the way this format is actually encountered (see "How people encounter it").{poll_rule}
@@ -47,7 +49,8 @@ Reply with JSON only:
  "emotion_intensity": <0-1>, "would_share": <0-1>, "would_comment": <0-1>, "would_follow": <0-1>, "novelty": <0-1>,
  "segment_engagement": [<{n_segments} numbers>], "drop_segment": <int or null>, "drivers": [up to 3 of {json.dumps(DRIVERS)}],
  "decision_mode": one of {json.dumps(DECISION_MODES)}, "objection": "<main complaint in a few words, or empty>",
- "quote": "<comment in their voice>", "reason": "<one sentence: why, from their point of view>"{poll_field}}}"""
+ "quote": "<comment in their voice>", "reason": "<one sentence: why, from their point of view>",
+ "rewatch_probability": <0-1>, "stitch_duet_likelihood": <0-1>, "sound_reuse_likelihood": <0-1>, "comment_bait": "<response>"{poll_field}}}"""
 
 
 def action_system(card_short: str, world_block: str, analysis_focus: str) -> str:

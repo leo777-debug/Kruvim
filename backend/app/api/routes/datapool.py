@@ -40,9 +40,16 @@ async def connectors(p: Principal = Depends(principal), s: AsyncSession = Depend
     out = []
     for key in REGISTRY:
         r, o = plat.get(key), org.get(key)
+        category = REGISTRY[key].spec.category
+        max_age = {"weather": 1, "news": 3, "tone": 3, "attention": 6, "social": 6, "events": 24, "economy": 24}.get(category, 6)
+        kind = {"news": "headline", "attention": "trend", "social": "social_trend", "events": "event"}.get(category, category)
+        max_age = settings.signal_max_age_hours.get(kind, max_age)
+        age = (datetime.now(UTC) - r.last_run_at).total_seconds() / 3600 if r and r.last_run_at else None
         sec = secrets_of(r)
         osec = secrets_of(o) if o else {}
         out.append({**_spec(key), "enabled": bool(r.enabled) if r else True, "interval_minutes": r.interval_minutes if r else 0,
+                    "freshness": {"age_hours": round(age, 1) if age is not None else None, "max_age_hours": max_age,
+                                  "stale": age is None or age > max_age or r.last_status != "ok"},
                     "last_run_at": r.last_run_at if r else None, "last_status": r.last_status if r else "never",
                     "last_error": r.last_error if r else None, "last_items": r.last_items if r else 0, "total_items": r.total_items if r else 0,
                     "credentials": {k: bool(sec.get(k)) for k in REGISTRY[key].spec.secrets},
@@ -92,7 +99,8 @@ async def run_connector(key: str, p: Principal = Depends(role("admin")), user: U
 async def signals(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), region: str | None = None,
                   kind: str | None = None, source: str | None = None, hours: int = 24, limit: int = 200):
     since = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 24 * 30)))
-    q = select(Signal).where(Signal.fetched_at >= since)
+    visible = (Signal.org_id.is_(None)) | (Signal.org_id == p.org_id)
+    q = select(Signal).where(visible, Signal.fetched_at >= since)
     if region:
         q = q.where(Signal.region.in_([region, "*"]))
     if kind:
@@ -107,9 +115,10 @@ async def signals(p: Principal = Depends(principal), s: AsyncSession = Depends(g
 @router.get("/stats")
 async def pool_stats(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     since = datetime.now(UTC) - timedelta(hours=24)
-    by_source = (await s.execute(select(Signal.source, func.count()).where(Signal.fetched_at >= since).group_by(Signal.source))).all()
-    by_kind = (await s.execute(select(Signal.kind, func.count()).where(Signal.fetched_at >= since).group_by(Signal.kind))).all()
-    total = (await s.execute(select(func.count()).select_from(Signal))).scalar()
+    visible = (Signal.org_id.is_(None)) | (Signal.org_id == p.org_id)
+    by_source = (await s.execute(select(Signal.source, func.count()).where(visible, Signal.fetched_at >= since).group_by(Signal.source))).all()
+    by_kind = (await s.execute(select(Signal.kind, func.count()).where(visible, Signal.fetched_at >= since).group_by(Signal.kind))).all()
+    total = (await s.execute(select(func.count()).select_from(Signal).where(visible))).scalar()
     snaps = (await s.execute(select(func.count(), func.min(RegionSnapshot.hour)).select_from(RegionSnapshot))).one()
     return {"signals_total": total, "last_24h": {"by_source": dict(by_source), "by_kind": dict(by_kind)},
             "archive": {"snapshots": snaps[0], "since": snaps[1]}}

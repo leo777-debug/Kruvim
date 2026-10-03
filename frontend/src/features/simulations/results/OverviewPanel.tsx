@@ -9,6 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { scoreColor } from "@/lib/colors";
 import type { Simulation } from "@/lib/types";
 import { fmt } from "@/lib/utils";
+import PublishedPosts from "./PublishedPosts";
 
 function word(score: number) {
   return score >= 7.5 ? "strongly positive" : score >= 6.5 ? "positive" : score >= 5.5 ? "mildly positive" : score >= 4.5 ? "lukewarm" : score >= 3.5 ? "negative" : "strongly negative";
@@ -71,6 +72,22 @@ export function OverviewPanel({ sim, onTab }: { sim: Simulation; onTab: (t: stri
 
   return (
     <div className="space-y-5">
+      <PublishedPosts sim={sim} />
+      {r.creator && <Card className="space-y-3 p-5"><h2 className="font-semibold">Audience and context checks</h2>
+        {r.creator.audience_twin && <><p className="text-sm">Matched to your audience breakdown. {r.creator.audience_twin.warning}</p>
+          <KV rows={Object.entries(r.creator.audience_twin.coverage || {}).map(([key, value]) => [`Supported ${key}`, `${value}%`])} />
+          <p className="text-xs text-muted">Largest difference from your supplied breakdown: {r.creator.audience_twin.max_marginal_error_percent ?? 0} percentage points. Interests and behavior remain synthetic.</p></>}
+        {!!r.creator.stale_sources?.length && <div role="status" className="text-sm">{r.creator.stale_sources.map((x: any, i: number) => <p key={i}>{x.region}: {x.source} {x.age_hours == null ? (x.source === "archive" ? "archive unavailable" : "has no recent data") : `was ${x.age_hours} hours old`}</p>)}</div>}
+        {r.creator.short_video && <KV rows={[["Rewatch probability", fmt.pct(r.creator.short_video.rewatch_probability)],
+          ["Stitch or duet likelihood", fmt.pct(r.creator.short_video.stitch_duet_likelihood)], ["Sound reuse likelihood", fmt.pct(r.creator.short_video.sound_reuse_likelihood)]]} />}
+        <p className="text-xs text-muted">{r.creator.language_fit?.flags?.length || 0} language-fit objections. {r.creator.language_fit?.note}</p>
+        {!!r.creator.language_fit?.flags?.length && <table className="dt"><thead><tr><th>Agent</th><th>Language evidence</th></tr></thead><tbody>{r.creator.language_fit.flags.map((x: any) =>
+          <tr key={x.agent}><td>{x.agent}</td><td className="whitespace-normal">{x.evidence} · “{x.quote}”</td></tr>)}</tbody></table>}
+        <h3 className="text-sm font-medium">Trend fit</h3><p className="text-xs text-muted">{r.trend?.recommendation}</p>
+        <table className="dt"><thead><tr><th>Matching signal</th><th>Phase</th><th>Observed</th></tr></thead><tbody>{r.trend?.matches?.map((x: any, i: number) =>
+          <tr key={i}><td className="whitespace-normal">{x.title}</td><td>{x.phase || "unknown"}</td><td>{x.at ? new Date(x.at).toLocaleDateString() : "Unavailable"}</td></tr>)}</tbody></table>
+        <p className="text-xs text-muted">Retrieval: {r.creator.retrieval_usage?.model || "local"} · extra embedding cost {r.creator.retrieval_usage?.extra_cost_usd == null ? "unavailable" : `$${r.creator.retrieval_usage.extra_cost_usd.toFixed(5)}`}</p>
+      </Card>}
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-base font-semibold">What happened</h2>

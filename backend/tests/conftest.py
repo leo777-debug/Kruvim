@@ -16,11 +16,18 @@ import pytest  # noqa: E402
 
 @pytest.fixture(scope="session")
 async def client():
+    # External feeds have their own integration checks. Keep the application suite
+    # reproducible and offline; network timeouts otherwise stall every graph build.
+    from unittest.mock import AsyncMock, patch
+
     from app.main import app
-    async with app.router.lifespan_context(app):
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1", timeout=60) as c:
-            yield c
+    with patch("app.services.datapool.run_due", new=AsyncMock(return_value=[])), \
+         patch("app.services.datapool.targeted.prepare", new=AsyncMock()), \
+         patch("app.services.datapool.context.ensure_fresh", new=AsyncMock()):
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1", timeout=60) as c:
+                yield c
 
 
 @pytest.fixture(scope="session")

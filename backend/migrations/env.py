@@ -14,6 +14,10 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
 
 
+def include_object(obj, name, type_, reflected, compare_to):
+    return not (settings.is_sqlite and type_ == "index" and name == "ix_signal_embeddings_cosine")
+
+
 def render_item(type_, obj, autogen_context):
     """Migrations stay free of app imports: UTCDateTime is a plain timezone-aware DateTime in the database."""
     if type_ == "type" and isinstance(obj, UTCDateTime):
@@ -23,14 +27,14 @@ def render_item(type_, obj, autogen_context):
 
 def run_migrations_offline():
     context.configure(url=settings.database_url, target_metadata=target_metadata, literal_binds=True,
-                      render_as_batch=settings.is_sqlite, compare_type=True, render_item=render_item)
+                      render_as_batch=settings.is_sqlite, compare_type=True, render_item=render_item, include_object=include_object)
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run(connection):
     context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=settings.is_sqlite, compare_type=True,
-                      render_item=render_item)
+                      render_item=render_item, include_object=include_object)
     with context.begin_transaction():
         context.run_migrations()
 

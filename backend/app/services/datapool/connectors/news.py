@@ -112,7 +112,20 @@ _WIKI_SKIP = re.compile(r"^(Main_Page|Special:|Wikipedia:|Portal:|File:|Help:|Ca
 
 class WikipediaConnector(BaseConnector):
     spec = ConnectorSpec("wikipedia", "Wikipedia attention", "attention", "Most-read pages yesterday per language edition.",
-                         interval_minutes=360, docs_url="https://wikimedia.org/api/rest_v1/")
+                         interval_minutes=360, supports_search=True, docs_url="https://wikimedia.org/api/rest_v1/")
+
+    async def search(self, client, query, regions, secrets, config, limit=10):
+        out = []
+        for reg in regions[:3]:
+            lang = reg["wiki_lang"]
+            r = await client.get(f"https://{lang}.wikipedia.org/w/api.php", params={"action": "query", "list": "search",
+                "srsearch": query[:300], "srlimit": min(limit, 10), "format": "json"})
+            r.raise_for_status()
+            for item in r.json().get("query", {}).get("search", []):
+                title = item["title"]
+                out.append(SignalItem("trend", reg["code"], title, url=f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}",
+                    payload={"summary": html.unescape(re.sub(r"<[^>]+>", "", item.get("snippet", "")))[:500], "source": "wikipedia"}))
+        return out
 
     async def fetch(self, client, regions, secrets, config):
         by_lang: dict[str, list[dict]] = {}

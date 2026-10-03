@@ -69,7 +69,11 @@ class Usage:
             return None
         pc = s.price_cached if s.price_cached is not None else s.price_in
         unc = max(0, self.input_tokens - self.cached_tokens)
-        return round((unc * s.price_in + self.cached_tokens * pc + self.output_tokens * s.price_out) / 1e6, 5)
+        embedding = self.by_role.get("retrieval_embedding", {})
+        if embedding and embedding.get("cost_usd") is None:
+            return None
+        unc = max(0, unc - embedding.get("input", 0))
+        return round((unc * s.price_in + self.cached_tokens * pc + self.output_tokens * s.price_out) / 1e6 + embedding.get("cost_usd", 0), 5)
 
     def as_dict(self, s: ProviderSettings | None = None) -> dict:
         return {"calls": self.calls, "failed": self.failed, "input_tokens": self.input_tokens,

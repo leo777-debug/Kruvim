@@ -6,6 +6,7 @@ from collections import Counter
 
 import numpy as np
 
+from app.services.creator import audience_weights, creator_checks
 from app.services.datapool.context import trend_alignment
 from app.services.population import features
 from app.services.population.regions import AGE_BAND_LABELS, INTERESTS, PLATFORM_LABELS, PLATFORMS, REGIONS, STANCES
@@ -42,6 +43,10 @@ def finalize(e) -> dict:
     pop = e.pop
     mask = pop.mask(e.audience)
     aud = np.flatnonzero(mask)
+    if e.audience.get("follower_split"):
+        w, _ = audience_weights(pop, aud, e.audience["follower_split"])
+        # Population summaries reflect the creator's marginals, rather than generic population counts.
+        aud = np.random.default_rng(e.seed + 77).choice(aud, aud.size, replace=True, p=w)
     voices = [a for a in e.agents.values() if a.kind == "voice" and a.reaction and "score" in a.reaction]
     by_idx = {int(a.ref[2:]): a for a in voices}
     ids = e.ids0
@@ -154,6 +159,8 @@ def finalize(e) -> dict:
     emp = getattr(e, "c_reposts_creator", 0) / exposures
     model_rate = float(share.mean()) * 0.15
     boost = float(np.clip(emp / model_rate, 0.5, 3.0)) if model_rate > 0 and exposures > 50 else 1.0
+    if e.card.get("format_key") == "short_video" and e.platform_key in ("tiktok", "instagram", "youtube"):
+        boost *= 1 + float(np.mean([a.reaction.get("rewatch_probability", 0) + a.reaction.get("stitch_duet_likelihood", 0) for a in voices]))
     casc = projection.cascade(pop, P[:, 1], aud, e.seed, boost=boost)
     casc["real_world"] = real_world(casc, getattr(e, "creator_followers", None), e.platform_key)
     fol = pop.followers_n[aud]
@@ -292,4 +299,5 @@ def finalize(e) -> dict:
     res["platform"] = e.platform_key
     res["format"] = {"key": e.card.get("format_key"), "label": e.card.get("format_label")}
     res["b_kind"] = getattr(e, "b_kind", "version")
+    res["creator"] = creator_checks(e, voices)
     return insights.add(e, res, aud)

@@ -126,7 +126,7 @@ async def test_formats_insights_and_collaboration(client, auth):
     assert child["content"]["variant_b"]["title"] == "Fasting & fitness, faster"
     rerun = (await client.post(f"/simulations/{pod['id']}/clone", json={"mode": "rerun", "build": True}, headers=h)).json()
     assert rerun["status"] == "building_graph"
-    await wait_for(client, h, rerun["id"], "status", {"graph_ready"})
+    await wait_for(client, h, rerun["id"], "status", {"completed"})
     vs = (await client.get(f"/simulations/{child['id']}/versions", headers=h)).json()
     assert [v["id"] for v in vs][0] == pod["id"] and {child["id"], rerun["id"]} <= {v["id"] for v in vs}
 
@@ -177,7 +177,7 @@ async def test_documents_autopilot_recurring_and_monitoring(client, auth, monkey
     from app.models import Simulation
     from app.services import monitoring
 
-    h, _ = auth
+    h, session = auth
     pid = (await client.post("/projects", json={"name": "Autopilot"}, headers=h)).json()["id"]
     aud = {"regions": ["AE", "SA"]}
 
@@ -224,8 +224,15 @@ async def test_documents_autopilot_recurring_and_monitoring(client, auth, monkey
         return FEED
     monkeypatch.setattr(monitoring, "fetch", fake_fetch)
     monkeypatch.setattr(monitoring, "check_public_url", lambda url: url)
-    w = (await client.post("/watches", json={"name": "Rival Gym", "feed_url": "https://example.com/rss", "project_id": pid, "audience": aud,
-                                             "threshold": -10}, headers=h)).json()
+    # Give the competitor a deterministic baseline to beat without bypassing the
+    # public API's nonnegative threshold validation.
+    from sqlalchemy import update
+    async with session_scope() as ss:
+        await ss.execute(update(Simulation).where(Simulation.org_id == session["orgs"][0]["id"]).values(score=0))
+    w_response = await client.post("/watches", json={"name": "Rival Gym", "feed_url": "https://example.com/rss", "project_id": pid, "audience": aud,
+                                                   "threshold": 0}, headers=h)
+    assert w_response.status_code == 200, w_response.text
+    w = w_response.json()
     first = (await client.post(f"/watches/{w['id']}/check", headers=h)).json()
     assert first["new"] == 1
     again = (await client.post(f"/watches/{w['id']}/check", headers=h)).json()

@@ -133,7 +133,8 @@ function Connectors() {
                     : c.last_status === "skipped" ? <Status tone="warn">Needs credentials</Status> : <Status>Not run</Status>}
                     <div className="mt-0.5 text-xs text-muted">{needs ? (hasCreds ? "Credentials set" : "Credentials required") : "No key needed"}{c.supports_search ? " · listening" : ""}</div></td>
                   <td className="whitespace-nowrap text-muted">{c.interval_minutes > 0 ? `Every ${c.interval_minutes >= 60 ? `${c.interval_minutes / 60} h` : `${c.interval_minutes} min`}` : "On demand"}</td>
-                  <td className="r whitespace-nowrap text-muted">{fmt.ago(c.last_run_at)}</td>
+                  <td className="r whitespace-nowrap text-muted">{fmt.ago(c.last_run_at)}
+                    <div className={c.freshness?.stale ? "text-xs text-neg" : "text-xs text-muted"}>{c.freshness?.age_hours == null ? "No fresh data" : `${c.freshness.age_hours} h old · ${c.freshness.stale ? "stale" : "within limit"}`}</div></td>
                   <td className="r whitespace-nowrap">{fmt.n(c.last_items)} / {fmt.n(c.total_items)}</td>
                   <td>
                     <div className="flex items-center justify-end gap-1.5">

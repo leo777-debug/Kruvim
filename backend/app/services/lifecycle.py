@@ -2,7 +2,10 @@
 recurring re-runs and competitor monitoring chain graph -> environment -> simulation without anyone clicking)."""
 from __future__ import annotations
 
-from sqlalchemy import and_, delete
+import asyncio
+from collections import defaultdict
+
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, Conflict
@@ -13,6 +16,7 @@ from app.services.providers import resolve
 from app.services.quotas import check_start
 
 LOCKED = ("building_graph", "preparing", "queued", "running", "paused")
+_start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
@@ -42,10 +46,18 @@ async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
 
 
 async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
+    # Serialize the quota check and reservation in one process (including SQLite)
+    # and lock the organisation row across PostgreSQL worker/API replicas.
+    async with _start_locks[sim.org_id]:
+        await s.refresh(sim)
+        return await _queue_run(s, sim, user_id)
+
+
+async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
+    org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
     res = await resolve(s, sim.org_id)
-    org = await s.get(Organization, sim.org_id)
     await check_start(s, org, sim.config, res.metered)
     for model in (Action, Post):
         await s.execute(delete(model).where(model.simulation_id == sim.id))

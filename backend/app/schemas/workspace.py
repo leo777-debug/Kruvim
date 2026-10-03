@@ -60,6 +60,7 @@ class ProviderIn(BaseModel):
 
 
 class PerformanceIn(BaseModel):
+    variant: Literal["A", "B"] = "A"
     platform: str = ""
     views: int | None = Field(default=None, ge=0)
     likes: int | None = Field(default=None, ge=0)

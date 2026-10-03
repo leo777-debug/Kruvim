@@ -14,7 +14,7 @@ from app.core.crypto import decrypt, encrypt
 from app.core.metrics import CONNECTOR_RUNS
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models import Connector, Signal
+from app.models import Connector, Signal, SignalEmbedding
 from app.services.population.regions import REGIONS
 
 from .base import UA, MissingCredentials, SignalItem
@@ -64,7 +64,7 @@ async def ensure_platform_connectors() -> None:
                 s.add(Connector(org_id=None, key=key, enabled=True, interval_minutes=c.spec.interval_minutes or 0))
 
 
-async def store_signals(source: str, items: list[SignalItem]) -> int:
+async def store_signals(source: str, items: list[SignalItem], org_id=None, simulation_id=None) -> int:
     if not items:
         return 0
     now = utcnow()
@@ -73,20 +73,34 @@ async def store_signals(source: str, items: list[SignalItem]) -> int:
         texty = [i for i in items if i.kind not in MEASUREMENT_KINDS]
         if texty:
             rows = (await s.execute(select(Signal.region, Signal.title).where(
-                and_(Signal.source == source, Signal.fetched_at >= now - timedelta(hours=24))))).all()
+                and_(Signal.source == source, Signal.org_id == org_id, Signal.simulation_id == simulation_id,
+                     Signal.fetched_at >= now - timedelta(hours=24))))).all()
             recent = {(r, t) for r, t in rows}
         n = 0
         for i in items:
             if i.kind not in MEASUREMENT_KINDS and (i.region, i.title) in recent:
                 continue
             recent.add((i.region, i.title))
-            s.add(Signal(source=source, kind=i.kind, region=i.region, title=i.title[:2000], value=i.value, url=(i.url or "")[:1000] or None,
-                         lang=i.lang, observed_at=i.observed_at or now, fetched_at=now, payload=i.payload))
+            signal = Signal(source=source, kind=i.kind, region=i.region, title=i.title[:2000], value=i.value, url=(i.url or "")[:1000] or None,
+                            lang=i.lang, observed_at=i.observed_at or now, fetched_at=now, payload=i.payload, org_id=org_id, simulation_id=simulation_id)
+            s.add(signal)
+            await s.flush()
+            from .retrieval import embed
+            s.add(SignalEmbedding(id=f"local:{signal.id}", org_id=org_id, signal_id=signal.id, model="local-hash-v1",
+                                  vector=embed(signal.title + " " + str(i.payload.get("summary", ""))).tolist()))
             n += 1
         return n
 
 
 async def run_connector(key: str, regions: list[str] | None = None) -> dict:
+    from .limits import source_slot
+    async with source_slot(key) as available:
+        if not available:
+            return {"key": key, "status": "busy", "items": 0}
+        return await _run_connector(key, regions)
+
+
+async def _run_connector(key: str, regions: list[str] | None = None) -> dict:
     conn = REGISTRY[key]
     regs = [r for r in REGIONS if not regions or r["code"] in regions]
     async with session_scope() as s:
@@ -127,7 +141,14 @@ async def run_due() -> list[dict]:
                _aware(r.last_run_at) + timedelta(minutes=r.interval_minutes) <= now)]
     results = []
     for key in due:   # sequential: polite to free sources
-        results.append(await run_connector(key))
+        if settings.redis_url:
+            from app.services.jobs import _arq_pool
+            pool = await _arq_pool()
+            await pool.enqueue_job("run_connector", key=key, _queue_name="kruvim:connectors",
+                                   _job_id=f"connector:{key}:{int(now.timestamp()) // 600}")
+            results.append({"key": key, "status": "queued"})
+        else:
+            results.append(await run_connector(key))
     return results
 
 

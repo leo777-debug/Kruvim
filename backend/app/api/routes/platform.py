@@ -13,7 +13,7 @@ from app.core.errors import NotFound
 from app.core.metrics import render
 from app.core.redis import get_redis
 from app.db.session import get_session
-from app.models import Organization, PerformanceReport, ProviderConfig, Simulation, User
+from app.models import Organization, PerformanceReport, ProviderConfig, Simulation, SocialPost, User
 from app.schemas.workspace import AdminOrgUpdate, ProviderIn
 from app.services import audit, jobs
 from app.services.content import formats
@@ -71,7 +71,11 @@ def _spearman(x, y):
     x, y = np.asarray(x, float), np.asarray(y, float)
     if x.size < 3:
         return None
-    rx, ry = np.argsort(np.argsort(x)), np.argsort(np.argsort(y))
+    def ranks(values):
+        _, inv, count = np.unique(values, return_inverse=True, return_counts=True)
+        ends = np.cumsum(count)
+        return ((ends - count + ends - 1) / 2)[inv]
+    rx, ry = ranks(x), ranks(y)
     if rx.std() == 0 or ry.std() == 0:
         return None
     return round(float(np.corrcoef(rx, ry)[0, 1]), 3)
@@ -79,15 +83,26 @@ def _spearman(x, y):
 
 @router.get("/calibration", tags=["calibration"])
 async def calibration(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
-    rows = (await s.execute(select(PerformanceReport, Simulation).join(Simulation, Simulation.id == PerformanceReport.simulation_id)
-                            .where(PerformanceReport.org_id == p.org_id).order_by(PerformanceReport.created_at))).all()
+    rows = (await s.execute(select(PerformanceReport, Simulation, SocialPost).join(Simulation, Simulation.id == PerformanceReport.simulation_id)
+                            .outerjoin(SocialPost, SocialPost.id == PerformanceReport.social_post_id)
+                            .where(PerformanceReport.org_id == p.org_id, Simulation.org_id == p.org_id).order_by(PerformanceReport.created_at))).all()
+    latest = {}
+    for pr, sim, post in rows:
+        key = (pr.simulation_id, pr.platform, pr.variant)
+        if key not in latest or post is not None or latest[key][2] is None:
+            latest[key] = (pr, sim, post)
     data = []
-    for pr, sim in rows:
+    for pr, sim, post in latest.values():
         r = sim.results or {}
         if not r.get("score"):
             continue
-        data.append({"simulation_id": sim.id, "name": sim.name, "platform": pr.platform, "predicted_score": r["score"]["mean"],
-                     "predicted_viral": r.get("viral", {}).get("score"), "predicted_share": r.get("viral", {}).get("raw", {}).get("mean_share_intent"),
+        predicted_score = r.get("ab", {}).get(pr.variant.lower(), {}).get("score", r["score"]["mean"])
+        if post is not None:
+            predicted_score = post.predicted_score
+        data.append({"simulation_id": sim.id, "name": sim.name, "platform": pr.platform, "variant": pr.variant,
+                     "source": "automatic" if pr.social_post_id else "manual", "predicted_score": predicted_score,
+                     "predicted_viral": r.get("viral", {}).get("score") if pr.variant == "A" else None,
+                     "predicted_share": r.get("viral", {}).get("raw", {}).get("mean_share_intent") if pr.variant == "A" else None,
                      "views": pr.views, "engagement_rate": pr.engagement_rate, "retention": pr.retention, "reported_at": pr.created_at})
     corr = {}
     for pred in ("predicted_score", "predicted_viral", "predicted_share"):

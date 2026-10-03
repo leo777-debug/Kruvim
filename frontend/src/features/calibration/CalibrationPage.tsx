@@ -5,14 +5,24 @@ import { Card, Empty, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
+import AccuracyReport from "./AccuracyReport";
+import { Link } from "react-router-dom";
 
 export default function CalibrationPage() {
   const orgId = useAuth((s) => s.orgId);
   const nav = useNavigate();
   const q = useQuery({ queryKey: [orgId, "calibration"], queryFn: () => api("/calibration") });
+  const weights = useQuery({ queryKey: [orgId, "source-weights"], queryFn: () => api<{ sources: Record<string, { n: number; weight: number }>; minimum: number; method: string }>("/calibration/source-weights") });
   const c = q.data;
   return (
-    <Page title="Calibration" subtitle="Predictions only matter if they track reality. Record real results on each simulation's report; Kruvim measures rank correlation (Spearman ρ) between predictions and outcomes across your runs. Publish this number even when it is imperfect.">
+    <Page title="Calibration" subtitle="Linked analytics update real results automatically. Rank correlation measures how well predictions track actual outcomes across your runs.">
+      <AccuracyReport />
+      <p className="mb-5 text-sm"><Link to="/my-audience" className="text-brand">Connect analytics</Link> · <Link to="/accuracy" className="text-brand">View the public accuracy report</Link></p>
+      <Card className="mb-5 p-5"><h2 className="mb-2 font-semibold">Data source weights</h2><p className="text-xs text-muted">{weights.data?.method}</p>
+        <table className="dt mt-3"><thead><tr><th>Source</th><th>Tests</th><th>Weight</th></tr></thead><tbody>{Object.entries(weights.data?.sources || {}).map(([key, value]) =>
+          <tr key={key}><td>{key}</td><td>{value.n}</td><td>{value.weight.toFixed(2)}</td></tr>)}</tbody></table>
+        {!Object.keys(weights.data?.sources || {}).length && <p className="mt-2 text-sm text-muted">Equal weights until enough consenting workspaces contribute at least {weights.data?.minimum || 20} tests per source.</p>}
+      </Card>
       {!c || c.n === 0 ? <Card><Empty title="No real-world results yet">Open a completed simulation, go to Results, then Analytics, and record the outcome under Calibration.</Empty></Card> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

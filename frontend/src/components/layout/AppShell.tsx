@@ -10,12 +10,15 @@ import { refreshToken, useAuth } from "@/lib/auth";
 import { cn, fmt, initials } from "@/lib/utils";
 import { Logo } from "./Logo";
 import { Menu } from "../ui/overlay";
+import { AlertsBell } from "@/features/monitoring/AlertsBell";
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutGrid, end: true },
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/data-pool", label: "Data pool", icon: Database },
   { to: "/audiences", label: "Audiences", icon: Contact },
+  { to: "/my-audience", label: "My audience", icon: Users2 },
+  { to: "/monitoring", label: "Monitoring", icon: Gauge },
   { to: "/population", label: "Population", icon: Users2 },
   { to: "/calibration", label: "Calibration", icon: Gauge },
 ];
@@ -65,6 +68,7 @@ export function AppShell() {
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 lg:hidden">
           <button onClick={() => setOpen(true)} className="rounded p-1.5 text-muted hover:bg-raised hover:text-fg" aria-label="Open navigation"><MenuIcon className="h-5 w-5" /></button>
           <Logo className="h-5 w-5" /><span className="text-[14px] font-semibold">Kruvim</span>
+          <AlertsBell />
         </div>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <Outlet />
@@ -95,6 +99,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="flex h-12 items-center gap-2 px-4">
         {brand.logo_url ? <img src={brand.logo_url} alt="" className="h-[22px] w-[22px] rounded object-contain" /> : <Logo className="h-[22px] w-[22px]" />}
         <span className="truncate text-[15px] font-semibold tracking-[-0.01em]">{brand.product_name || "Kruvim"}</span>
+        <AlertsBell />
         {onClose && <button onClick={onClose} className="ml-auto rounded p-1 text-muted hover:bg-raised" aria-label="Close navigation"><X className="h-4 w-4" /></button>}
       </div>
       <div className="px-2 pb-2">

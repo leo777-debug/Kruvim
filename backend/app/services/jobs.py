@@ -24,11 +24,12 @@ async def _arq_pool():
     return _pool
 
 
-async def enqueue(name: str, **kwargs) -> str:
+async def enqueue(name: str, *, delay: float = 0, **kwargs) -> str:
     job_id = f"{name}:{uuid.uuid4().hex[:12]}"
     if settings.redis_url:
         pool = await _arq_pool()
-        await pool.enqueue_job(name, _job_id=job_id, **kwargs)
+        queue = "kruvim:connectors" if name == "run_connector" else "arq:queue"
+        await pool.enqueue_job(name, _job_id=job_id, _defer_by=delay, _queue_name=queue, **kwargs)
         return job_id
     global _local_sem
     if _local_sem is None:
@@ -38,6 +39,8 @@ async def enqueue(name: str, **kwargs) -> str:
     fn = getattr(tasks, name)
 
     async def run():
+        if delay:
+            await asyncio.sleep(delay)
         async with _local_sem:
             try:
                 await fn({"job_id": job_id}, **kwargs)

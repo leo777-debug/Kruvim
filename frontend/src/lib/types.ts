@@ -34,6 +34,7 @@ export interface SimSummary {
   ab: boolean; regions: string[]; created_at: string; updated_at: string; progress: Record<string, any>; score?: number; viral?: number;
   ab_winner?: string; error?: string; credits_estimate: number; dry: boolean; format?: string; b_kind?: "version" | "competitor";
   parent_id?: string | null; review_status?: "none" | "in_review" | "approved" | "changes_requested";
+  rerun_every_days?: number | null; next_rerun_at?: string | null; autopilot?: boolean;
 }
 
 export interface Simulation extends SimSummary {

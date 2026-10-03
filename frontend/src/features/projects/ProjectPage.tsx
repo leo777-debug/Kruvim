@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Upload } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { LineSimple } from "@/components/charts";
 import { Card, CardHeader, Empty, KV, Skeleton } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { can, useAuth } from "@/lib/auth";
 import type { Asset } from "@/lib/types";
 import { fmt } from "@/lib/utils";
 import { SimTable } from "../simulations/SimTable";
@@ -23,8 +23,23 @@ export default function ProjectPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [running, setRunning] = useState(false);
+  const [batchErrors, setBatchErrors] = useState<{ id: string; error?: string }[]>([]);
   const q = useQuery({ queryKey: [orgId, "project", projectId], queryFn: () => api(`/projects/${projectId}`), refetchInterval: 8000 });
   const p = q.data;
+  async function runSelected() {
+    setRunning(true);
+    try {
+      const res = await api<{ results: { id: string; ok: boolean; error?: string }[] }>(`/projects/${projectId}/batch`, { json: { simulation_ids: selected } });
+      const failed = res.results.filter((r) => !r.ok);
+      setBatchErrors(failed);
+      setSelected(failed.map((r) => r.id));
+      toast.success(`${res.results.length - failed.length} simulations started`);
+      await q.refetch();
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not start batch"); }
+    finally { setRunning(false); }
+  }
   async function upload(files: FileList | null) {
     for (const f of Array.from(files || [])) {
       const fd = new FormData();
@@ -52,9 +67,10 @@ export default function ProjectPage() {
       actions={<Button variant="primary" onClick={() => nav(`/projects/${projectId}/new`)}><Plus className="h-4 w-4" />New simulation</Button>}>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="overflow-hidden">
-          <CardHeader title="Simulations" subtitle={`${sims.length} in this project`} divider />
+          <CardHeader title="Simulations" subtitle={`${sims.length} in this project`} divider actions={can("member") && <Button size="sm" loading={running} disabled={!selected.length || selected.length > 50} onClick={runSelected}>Run selected ({selected.length})</Button>} />
+          {batchErrors.length > 0 && <div role="alert" className="p-4 text-sm text-neg">{batchErrors.map((r) => <p key={r.id}>{sims.find((s) => s.id === r.id)?.name || r.id}: {r.error}</p>)}</div>}
           {sims.length === 0 ? <Empty title="No simulations yet" action={<Button variant="primary" onClick={() => nav(`/projects/${projectId}/new`)}>New simulation</Button>}>
-            Each simulation tests one piece of content, or an A/B pair, against an audience.</Empty> : <SimTable rows={sims} />}
+            Each simulation tests one piece of content, or an A/B pair, against an audience.</Empty> : <SimTable rows={sims} selected={selected} onSelect={can("member") ? (id, checked) => setSelected((prev) => checked ? [...prev, id] : prev.filter((x) => x !== id)) : undefined} />}
         </Card>
         <div className="space-y-5">
         {scored.length > 1 && (

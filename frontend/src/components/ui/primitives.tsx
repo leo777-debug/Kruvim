@@ -3,7 +3,7 @@ import * as RSlider from "@radix-ui/react-slider";
 import * as RTabs from "@radix-ui/react-tabs";
 import * as RTooltip from "@radix-ui/react-tooltip";
 import { Check, HelpCircle, Minus } from "lucide-react";
-import { forwardRef, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { createContext, forwardRef, useContext, useId, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...p }: HTMLAttributes<HTMLDivElement>) {
@@ -37,30 +37,34 @@ export function SectionHeader({ title, actions, sub, className }: { title: React
 
 const field = "w-full rounded-md border border-line-strong bg-panel text-[13px] text-fg placeholder:text-faint shadow-[inset_0_1px_1px_rgb(16_24_40/0.03)] focus:border-brand focus:outline-none focus:ring-[3px] focus:ring-brand/15 disabled:bg-raised disabled:opacity-70";
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => (
-  <input ref={ref} className={cn(field, "h-8 px-2.5", className)} {...p} />
-));
+const FieldLabelContext = createContext<string | undefined>(undefined);
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => {
+  const labelId = useContext(FieldLabelContext);
+  return <input ref={ref} aria-labelledby={p["aria-label"] ? undefined : labelId} className={cn(field, "h-8 px-2.5", className)} {...p} />;
+});
 Input.displayName = "Input";
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className, ...p }, ref) => (
-  <textarea ref={ref} className={cn(field, "min-h-[96px] resize-y px-2.5 py-2 leading-relaxed", className)} {...p} />
-));
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className, ...p }, ref) => {
+  const labelId = useContext(FieldLabelContext);
+  return <textarea ref={ref} aria-labelledby={p["aria-label"] ? undefined : labelId} className={cn(field, "min-h-[96px] resize-y px-2.5 py-2 leading-relaxed", className)} {...p} />;
+});
 Textarea.displayName = "Textarea";
 
-export function Label({ children, hint, className }: { children: ReactNode; hint?: ReactNode; className?: string }) {
+export function Label({ children, hint, className, id }: { children: ReactNode; hint?: ReactNode; className?: string; id?: string }) {
   return (
     <div className={cn("mb-1.5 flex items-baseline justify-between gap-2", className)}>
-      <label className="text-[13px] font-medium text-fg">{children}</label>
+      <label id={id} className="text-[13px] font-medium text-fg">{children}</label>
       {hint && <span className="text-xs text-faint">{hint}</span>}
     </div>
   );
 }
 
 export function Field({ label, hint, help, children, className }: { label: ReactNode; hint?: ReactNode; help?: ReactNode; children: ReactNode; className?: string }) {
+  const labelId = useId();
   return (
     <div className={className}>
-      <Label hint={hint}>{label}</Label>
-      {children}
+      <Label hint={hint} id={labelId}>{label}</Label>
+      <FieldLabelContext.Provider value={labelId}>{children}</FieldLabelContext.Provider>
       {help && <div className="mt-1.5 text-xs leading-relaxed text-muted">{help}</div>}
     </div>
   );

@@ -19,7 +19,7 @@ x-backend: &backend
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: kruvim
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kruvim}
@@ -51,6 +51,12 @@ services:
   worker:
     <<: *backend
     command: ["worker"]
+    healthcheck:
+      disable: true
+
+  connector-worker:
+    <<: *backend
+    entrypoint: ["arq", "app.workers.connectors.ConnectorWorkerSettings"]
     healthcheck:
       disable: true
 

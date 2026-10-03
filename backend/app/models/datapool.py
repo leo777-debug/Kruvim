@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, BigID, IdMixin, TimestampMixin, UTCDateTime, utcnow
@@ -40,6 +41,21 @@ class Signal(Base):
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     fetched_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     payload: Mapped[dict] = mapped_column(default=dict)
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    simulation_id: Mapped[str | None] = mapped_column(ForeignKey("simulations.id", ondelete="CASCADE"), index=True)
+
+
+class SignalEmbedding(Base):
+    __tablename__ = "signal_embeddings"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id", ondelete="CASCADE"), index=True)
+    model: Mapped[str] = mapped_column(String(200))
+    vector: Mapped[list] = mapped_column(Vector(128).with_variant(JSON(), "sqlite"))
+
+
+Index("ix_signal_embeddings_cosine", SignalEmbedding.vector, postgresql_using="hnsw",
+      postgresql_ops={"vector": "vector_cosine_ops"}).ddl_if(dialect="postgresql")
 
 
 class RegionSnapshot(Base):
@@ -49,6 +65,7 @@ class RegionSnapshot(Base):
     region: Mapped[str] = mapped_column(String(8))
     hour: Mapped[datetime] = mapped_column(UTCDateTime)
     data: Mapped[dict] = mapped_column(default=dict)
+    archive_key: Mapped[str | None] = mapped_column(String(500))
     brief: Mapped[str] = mapped_column(Text, default="")
     brief_by: Mapped[str] = mapped_column(String(200), default="template")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

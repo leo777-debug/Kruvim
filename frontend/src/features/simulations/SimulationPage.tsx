@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { LiveGraph, type GraphHandle } from "@/components/graph/LiveGraph";
 import { Button } from "@/components/ui/button";
 import { Menu } from "@/components/ui/overlay";
-import { Badge } from "@/components/ui/primitives";
+import { Badge, Switch } from "@/components/ui/primitives";
 import { api, API, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { GNode, Simulation } from "@/lib/types";
@@ -54,6 +54,7 @@ export default function SimulationPage() {
   const orgId = useAuth((s) => s.orgId);
   const graphRef = useRef<GraphHandle>(null);
   const [step, setStep] = useState<number | null>(null);
+  const [scheduling, setScheduling] = useState(false);
   const [selected, setSelected] = useState<GNode | null>(null);
   const [agentRef, setAgentRef] = useState<string | null>(null);
   const [team, setTeam] = useState<{ open: boolean; tab: "comments" | "versions"; anchor: string }>({ open: false, tab: "comments", anchor: "general" });
@@ -91,6 +92,15 @@ export default function SimulationPage() {
     const n = await api<Simulation>(`/simulations/${simId}/clone`, { json: { mode: "edit" } });
     toast.success("Re-test draft created with an editable version B");
     nav(`/simulations/${n.id}/edit`);
+  }
+  async function schedule(enabled: boolean) {
+    setScheduling(true);
+    try {
+      await api(`/simulations/${simId}/rerun-schedule`, { method: "PUT", json: { every_days: enabled ? 7 : null } });
+      await qc.invalidateQueries({ queryKey: [orgId, "sim", simId] });
+      toast.success(enabled ? "Weekly re-runs enabled with fresh news and trends" : "Weekly re-runs disabled");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not update schedule"); }
+    finally { setScheduling(false); }
   }
   async function review(status: string) {
     const note = status === "changes_requested" ? prompt("What should change?") ?? "" : "";
@@ -134,6 +144,7 @@ export default function SimulationPage() {
             {sim.review_status && sim.review_status !== "none" && <ReviewStatus status={sim.review_status} />}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {(sim.status === "completed" || sim.rerun_every_days) && can("member") && <div title={sim.next_rerun_at ? `Next run: ${new Date(sim.next_rerun_at).toLocaleString()}` : "Runs the same content with fresh news every week; normal usage limits apply."}><Switch checked={!!sim.rerun_every_days} disabled={scheduling} onChange={schedule} label="Re-run every week" /></div>}
             <Button size="sm" variant="ghost" onClick={() => openTeam("comments")}><MessageSquare className="h-3.5 w-3.5" />Comments</Button>
             <Button size="sm" variant="ghost" onClick={() => openTeam("versions")}><History className="h-3.5 w-3.5" />Versions</Button>
             <Button size="sm" onClick={() => nav(`/simulations/${simId}/edit`)} disabled={busy}><PencilLine className="h-3.5 w-3.5" />Edit inputs</Button>

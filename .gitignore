@@ -28,3 +28,8 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+*.tsbuildinfo
+
+# Local verification artifacts
+frontend/browser-*.png
+backend/verification-results.json

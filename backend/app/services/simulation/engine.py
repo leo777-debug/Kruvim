@@ -27,6 +27,7 @@ from app.db.session import session_scope
 from app.models import Action, Post, SimAgent, Simulation
 from app.services import jobs
 from app.services.content import card_block, topic_vector
+from app.services.creator import short_video_metrics, weighted_sample
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
 from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
@@ -95,8 +96,11 @@ class PostRT:
                 "down": self.down, "views": self.views, "crowd_likes": self.crowd_likes, "crowd_reposts": self.crowd_reposts}
 
     def popularity(self) -> float:
-        return math.log1p(self.likes + 2 * self.reposts + 3 * self.comments + 2 * self.quotes + 0.25 * self.crowd_likes
-                          + 0.5 * self.crowd_reposts + self.up - 0.5 * self.down) / math.log1p(60)
+        engagement = (self.likes + 2 * self.reposts + 3 * self.comments + 2 * self.quotes + 0.25 * self.crowd_likes
+                      + 0.5 * self.crowd_reposts + self.up - 0.5 * self.down)
+        # Downvotes can outweigh all positive engagement. Such posts get no
+        # popularity boost; log1p on a value <= -1 would crash the whole run.
+        return math.log1p(max(0, engagement)) / math.log1p(60)
 
 
 def _f(v, d, lo=None, hi=None):
@@ -193,6 +197,9 @@ class Engine:
         self.topic_vec = topic_vector(self.card.get("topics"))
         self.snaps = self.cfg.get("context", {})
         self.world_block = "\n".join(f"{v.get('name')} ({v.get('city')}): {v.get('brief')}" for v in self.snaps.values()) or "No live context."
+        self.world_block += "\n" + "\n".join(f"{code} cultural moment: {snapshot.get('cultural_moment', '')}" for code, snapshot in self.snaps.items())
+        if self.cfg.get("creator_memory"):
+            self.world_block += "\nCreator audience memory (simulated observations): " + self.cfg["creator_memory"]
         self.enabled = [p for p in ("feed", "forum") if self.cfg["platforms"][p]["enabled"]] or ["feed"]
         self.writer = GraphWriter(self.sim_id, 0)
         await self.writer.load_existing()
@@ -297,10 +304,14 @@ class Engine:
                 await asyncio.sleep(DRY_PACE)
                 tm = float(topic_match(self.pop, np.array([idx]), topic_vector(c.get("topics")))[0])
                 on_t = self.platform_key not in PLATFORMS or bool((int(self.pop.platforms[idx]) >> PLATFORMS.index(self.platform_key)) & 1)
-                return a, v, dry.reaction(a.persona, tm, on_t, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
-            d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + "\n\nReact now.", role="voice",
+                reaction = dry.reaction(a.persona, tm, on_t, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
+                return a, v, short_video_metrics(reaction)
+            personal = "\nWhat's on your mind today:\n" + "\n".join(x.get("title", "") for x in a.cfg.get("personal_signals", []))
+            d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
                                              max_tokens=700, usage=self.usage)
-            return a, v, norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            normalized.update({k: d[k] for k in ("rewatch_probability", "stitch_duet_likelihood", "sound_reuse_likelihood", "comment_bait") if k in d})
+            return a, v, short_video_metrics(normalized)
 
         tasks = [asyncio.create_task(react(a, v)) for a in voices for v in cards]
         done = 0
@@ -411,12 +422,16 @@ class Engine:
         mask[voice_ids] = False
         pool = np.flatnonzero(mask)
         self.crowd_idx = np.sort(self.rng.choice(pool, min(n, pool.size), replace=False)) if n > 0 and pool.size else np.array([], dtype=np.int64)
+        if n > 0 and pool.size and self.audience.get("follower_split"):
+            self.crowd_idx, _ = weighted_sample(self.pop, mask, n, self.rng, self.audience["follower_split"])
         if self.crowd_idx.size == 0:
             return
         P = projection.project_idx(self.pop, self.surface0, self.crowd_idx, self.topic_vec, self.platform_key, noise_seed=99)
         self.c_op = P[:, 0].astype(np.float32)
         self.c_op0 = self.c_op.copy()
         self.c_share = P[:, 1].astype(np.float32)
+        if self.card.get("format_key") == "short_video" and self.platform_key in ("tiktok", "instagram", "youtube"):
+            self.c_share = np.clip(self.c_share * (1 + self.c_op0 / 10 * .35 + self.c_share * .12), 0, 1)
         ex = self.pop.ocean[self.crowd_idx, 2].astype(np.float32)
         sc = self.pop.screen[self.crowd_idx].astype(np.float32)
         st = self.pop.stance[self.crowd_idx]

@@ -22,6 +22,11 @@ if settings.is_sqlite:
         cur.execute("PRAGMA foreign_keys=ON")
         cur.execute("PRAGMA busy_timeout=5000")
         cur.close()
+else:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _pgvector_codec(conn, _):
+        from pgvector.asyncpg import register_vector
+        conn.run_async(register_vector)
 
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

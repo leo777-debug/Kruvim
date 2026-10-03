@@ -50,14 +50,18 @@ async def fetch(url: str) -> bytes:
     async with httpx.AsyncClient(timeout=15, follow_redirects=False, headers={"User-Agent": "KruvimMonitor/1.0"}) as client:
         for _ in range(4):
             check_public_url(url)
-            r = await client.get(url)
-            if r.is_redirect and r.headers.get("location"):
-                url = urljoin(url, r.headers["location"])
-                continue
-            r.raise_for_status()
-            if len(r.content) > MAX_BYTES:
-                raise AppError("The feed is too large.")
-            return r.content
+            async with client.stream("GET", url) as r:
+                if r.is_redirect and r.headers.get("location"):
+                    url = urljoin(url, r.headers["location"])
+                    continue
+                r.raise_for_status()
+                chunks, total = [], 0
+                async for chunk in r.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_BYTES:
+                        raise AppError("The feed is too large.")
+                    chunks.append(chunk)
+                return b"".join(chunks)
     raise AppError("Too many redirects.")
 
 

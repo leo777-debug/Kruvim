@@ -136,5 +136,6 @@ class Toolbox:
         c = inp.get("region") or next(iter(ctx), None)
         s = ctx.get(c) or {}
         return {"region": c, "brief": s.get("brief"), "local_time": s.get("local_time"), "weather": s.get("weather"),
+                "cultural_moment": s.get("cultural_moment"), "freshness": s.get("freshness", []),
                 "headlines": [n["title"] for n in s.get("news", [])[:6]], "trending": [t["title"] for t in s.get("trending", [])[:6]],
                 "events": s.get("events", [])[:3]}

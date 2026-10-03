@@ -9,8 +9,9 @@ from app.core.config import settings
 
 
 def _local_path(key: str) -> str:
-    p = os.path.normpath(os.path.join(settings.data_dir, "objects", key))
-    if not p.startswith(os.path.normpath(os.path.join(settings.data_dir, "objects"))):
+    root = os.path.realpath(os.path.join(settings.data_dir, "objects"))
+    p = os.path.realpath(os.path.join(root, key))
+    if os.path.normcase(os.path.commonpath([root, p])) != os.path.normcase(root) or p == root:
         raise ValueError("invalid storage key")
     return p
 

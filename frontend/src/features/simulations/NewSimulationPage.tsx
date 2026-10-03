@@ -54,6 +54,7 @@ export default function NewSimulationPage() {
   const [platform, setPlatform] = useState("tiktok");
   const [platformTouched, setPlatformTouched] = useState(false);
   const [goal, setGoal] = useState("Grow followers");
+  const [followers, setFollowers] = useState("");
   const [A, setA] = useState<Variant>(blank());
   const [compare, setCompare] = useState<keyof typeof COMPARE>("none");
   const [B, setB] = useState<Variant>(blank());
@@ -75,6 +76,7 @@ export default function NewSimulationPage() {
     const s = existing.data;
     if (!s) return;
     const c = s.content || {};
+    setFollowers(c.creator_followers == null ? "" : String(c.creator_followers));
     setName(s.name); setReq(s.requirement); setFormat(c.format || "short_video"); setPlatform(c.platform || "tiktok"); setPlatformTouched(true); setGoal(c.goal || "");
     setA({ ...blank(), ...c, poll_options: c.poll_options?.length ? c.poll_options : ["", ""], file: null, files: [] });
     if (c.variant_b) { setCompare(c.b_kind === "competitor" ? "competitor" : "version"); setB({ ...blank(), ...c.variant_b, poll_options: c.variant_b.poll_options?.length ? c.variant_b.poll_options : ["", ""] }); }
@@ -85,6 +87,7 @@ export default function NewSimulationPage() {
 
   const project = useQuery({ queryKey: [orgId, "project", pid], queryFn: () => api(`/projects/${pid}`), enabled: !!pid });
   const templates = useQuery({ queryKey: [orgId, "templates"], queryFn: () => api<any[]>("/audience-templates") });
+  const presets = useQuery({ queryKey: [orgId, "audience-presets"], queryFn: () => api<{ id: string; name: string; description: string; filters: Record<string, unknown> }[]>("/audience-presets") });
   useEffect(() => {
     if (project.data && existing.data) setSeeds((project.data.assets || []).filter((a: Asset) => (existing.data!.content?.seed_asset_ids || []).includes(a.id)));
   }, [project.data, existing.data]);
@@ -116,7 +119,7 @@ export default function NewSimulationPage() {
       if (v.poll_options.filter((o) => o.trim()).length < 2) return `${label}: add at least two poll options.`;
       return null;
     }
-    if (type === "text" && !v.text.trim()) return `${label}: paste the text.`;
+    if (type === "text" && !v.text.trim() && !v.file && !v.asset_id) return `${label}: paste text or upload a document.`;
     if (f.multi && !(v.files?.length || v.asset_ids.length) && !v.description.trim()) return `${label}: add the slides or describe each one.`;
     if (type === "image" && !f.multi && !v.file && !v.asset_id && !v.description.trim()) return `${label}: add an image or describe it.`;
     if ((type === "video" || type === "audio") && !v.file && !v.asset_id && !v.transcript.trim()) return `${label}: add a file or a transcript.`;
@@ -134,6 +137,7 @@ export default function NewSimulationPage() {
   async function submit(build: boolean) {
     const err = validate(A, compare === "none" ? "Content" : "Your content") || (compare !== "none" ? validate(B, compare === "competitor" ? "Competitor" : "Version B") : null);
     if (err) return toast.error(err);
+    if (followers !== "" && (!Number.isInteger(Number(followers)) || Number(followers) < 0 || Number(followers) > 2_000_000_000)) return toast.error("Enter a whole follower count between 0 and 2 billion, or leave it blank.");
     if (!aud.regions.length) return toast.error("Select at least one region.");
     setBusy(true);
     try {
@@ -141,7 +145,7 @@ export default function NewSimulationPage() {
       const b = compare !== "none" ? await payload(B, "content_b") : null;
       const body = {
         name: name || A.title || A.text.slice(0, 60) || "Untitled simulation", requirement: req,
-        content: { format, platform, goal, ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
+        content: { format, platform, goal, creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
           variant_b: b ? { ...b, title: b.title || `${A.title || "Untitled"} (${compare === "competitor" ? "competitor" : "B"})` } : null },
         audience: cleanAud(aud),
         publish_at: when === "now" || !at ? null : new Date(at).toISOString(),
@@ -227,6 +231,7 @@ export default function NewSimulationPage() {
               <Field label="Simulation name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ramadan teaser v1" /></Field>
               <Field label="Main platform"><Select value={platform} onChange={(v) => { setPlatform(v); setPlatformTouched(true); }} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field>
               <Field label="Campaign goal"><Input value={goal} onChange={(e) => setGoal(e.target.value)} list="goals" /></Field>
+              <Field label="Follower count" hint="Optional" help="Followers on the selected platform. Real-world reach estimates stay hidden when this is blank; estimates are not guaranteed views."><Input aria-label="Follower count" type="number" min={0} max={2000000000} step={1} value={followers} onChange={(e) => setFollowers(e.target.value)} placeholder="e.g. 12000" /></Field>
               <datalist id="goals">{["Grow followers", "Drive sales", "Brand awareness", "Spark discussion", "Inform / educate", "Recruit"].map((g) => <option key={g} value={g} />)}</datalist>
             </div>
           </Section>
@@ -238,12 +243,17 @@ export default function NewSimulationPage() {
           <Section title="Audience" desc={<>Who sees it, drawn from the 1,000,000-person population <InfoTip term="population" className="align-[-2px]" />. Counts update as you edit.</>}>
             <div className="flex flex-wrap items-end gap-2">
               <Field label="Saved audiences" className="min-w-[240px] flex-1">
+                <Select value="" placeholder="Apply a creator preset…" options={(presets.data || []).map((p) => ({ value: p.id, label: p.name }))}
+                  onChange={(id) => { const p = presets.data?.find((x) => x.id === id); if (p) setAud({ regions: [], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false, expats_only: false, interests: [], professions: [], incomes: [], ocean: {}, ...p.filters }); }} />
                 <Select value="" placeholder={templates.data?.length ? "Load a saved audience…" : "No saved audiences yet"}
                   onChange={async (id) => { const t = templates.data?.find((x) => x.id === id); if (t) { setAud({ ...aud, ...t.filters }); api(`/audience-templates/${id}/use`, { method: "POST" }).catch(() => null); toast.success(`Loaded "${t.name}"`); } }}
                   options={(templates.data || []).map((t) => ({ value: t.id, label: `${t.name}${t.mine ? "" : " · community"}${t.accuracy != null ? ` · ${Math.round(t.accuracy * 100)}% accuracy` : ""}` }))} />
               </Field>
               <Button onClick={() => setSaveTpl(true)}>Save this audience</Button>
             </div>
+            <Switch checked={!!aud.use_creator_audience} onChange={(v) => setAud({ ...aud, use_creator_audience: v })}
+              label="Match my audience" />
+            <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
             <div className="overflow-hidden rounded-md border border-line">
               <table className="dt">
                 <thead><tr>
@@ -396,7 +406,7 @@ function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => vo
   const input = useRef<HTMLInputElement>(null);
   const multi = useRef<HTMLInputElement>(null);
   const type = f.type;
-  const accept = type === "video" ? "video/*" : type === "audio" ? "audio/*" : "image/*";
+  const accept = type === "text" ? ".pdf,.docx,.txt,.md" : type === "video" ? "video/*" : type === "audio" ? "audio/*" : "image/*";
   const titleLabel = f.key === "thumbnail" ? "Video title shown next to the thumbnail" : f.poll ? "Poll title (optional)" : type === "text" ? "Headline or first line" : "Title or opening line";
   const transcriptLabel = f.key === "song" ? "Lyrics" : f.key === "podcast" ? "Transcript or show notes" : "Transcript, subtitles or script";
   const descLabel = f.multi ? "Slide captions, one per line" : f.key === "thumbnail" ? "What the thumbnail shows" : type === "image" ? "Caption and description" : "On-screen description";
@@ -408,8 +418,8 @@ function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => vo
       {label && <div className="text-[13px] font-semibold">{label}</div>}
       <Field label={titleLabel} hint={f.poll ? "Optional" : undefined}><Input value={v.title} onChange={(e) => set({ ...v, title: e.target.value })} placeholder={f.key === "thumbnail" ? "I tried working out while fasting for 30 days" : "3-minute apartment workout"} /></Field>
 
-      {type !== "text" && !f.multi && (
-        <Field label={`${f.label} file`} hint={type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
+      {!f.poll && !f.multi && (
+        <Field label={`${f.label} file`} hint={type === "text" ? "PDF, Word (.docx), text or Markdown" : type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
           <div onClick={() => input.current?.click()} onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); const x = e.dataTransfer.files[0]; if (x) set({ ...v, file: x }); }}
             className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-line-strong bg-panel px-3.5 py-3 hover:bg-raised/50">
@@ -420,7 +430,7 @@ function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => vo
                   : <span className="text-muted">Drop a {type} file here or <span className="text-brand">browse</span></span>}
             </div>
             {(v.file || v.asset_id) && <button type="button" onClick={(e) => { e.stopPropagation(); set({ ...v, file: null, asset_id: null }); }} className="rounded p-0.5 text-muted hover:text-fg" aria-label="Remove file"><X className="h-4 w-4" /></button>}
-            <input ref={input} type="file" accept={accept} className="hidden" onChange={(e) => set({ ...v, file: e.target.files?.[0] || null })} />
+            <input ref={input} aria-label={`${label || "Content"} file`} type="file" accept={accept} className="hidden" onChange={(e) => set({ ...v, file: e.target.files?.[0] || null })} />
           </div>
         </Field>
       )}
@@ -457,7 +467,7 @@ function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => vo
         </Field>
       )}
       {type === "text" && !f.poll && (
-        <Field label={f.key === "article" ? "Article text" : "Post text"}>
+        <Field label={f.group === "Document" ? "Document text" : f.key === "article" ? "Article text" : "Post text"} help="Paste text or attach a document above.">
           <Textarea value={v.text} onChange={(e) => set({ ...v, text: e.target.value })} className="min-h-[200px]" placeholder={f.key === "article" ? "Paste the article, newsletter or press release." : "Paste the post, caption or thread."} />
         </Field>
       )}

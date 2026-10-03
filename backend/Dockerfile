@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --upgrade "pip>=26.2.1" && pip install -r requirements.txt
 COPY . .
 RUN useradd --create-home --uid 10001 kruvim && mkdir -p /data && chown -R kruvim:kruvim /data /app && chmod +x docker-entrypoint.sh
 USER kruvim
