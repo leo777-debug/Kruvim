@@ -5,6 +5,7 @@ import re
 
 from sqlalchemy import and_, or_, select
 
+from app.db.base import utcnow
 from app.db.session import session_scope
 from app.models import GraphEdge, GraphNode
 from app.services.events import bus
@@ -25,12 +26,13 @@ class GraphWriter:
         self.nodes: list[dict] = []
         self.edges: list[dict] = []
         self.edge_keys: set[tuple] = set()
+        self.closures: list[tuple] = []
 
     async def load_existing(self):
         async with session_scope() as s:
             self.known = {k for (k,) in (await s.execute(select(GraphNode.key).where(GraphNode.simulation_id == self.sim_id))).all()}
             self.edge_keys = {(a, b, r) for a, b, r in (await s.execute(select(GraphEdge.src, GraphEdge.dst, GraphEdge.relation)
-                                                                       .where(GraphEdge.simulation_id == self.sim_id))).all()}
+                                                                       .where(GraphEdge.simulation_id == self.sim_id, GraphEdge.valid_until_round.is_(None)))).all()}
 
     def node(self, key: str, kind: str, label: str, type_: str = "", summary: str = "", **attrs) -> str:
         if key not in self.known:
@@ -42,6 +44,14 @@ class GraphWriter:
     def edge(self, src: str, dst: str, relation: str, fact: str = "", weight: float = 1.0, **attrs) -> None:
         if src == dst and relation not in ("self",):
             return
+        if relation in ("supports", "opposes"):
+            opposite = "opposes" if relation == "supports" else "supports"
+            self.closures.append((src, dst, opposite))
+            self.edge_keys.discard((src, dst, opposite))
+            self.edges = [e for e in self.edges if (e["src"], e["dst"], e["relation"]) != (src, dst, opposite)]
+        elif relation == "contradicts":
+            self.closures.append((None, dst, None))
+            self.edge_keys = {k for k in self.edge_keys if k[1] != dst or k[2] not in ("asserts", "supports", "opposes")}
         k = (src, dst, relation)
         if k in self.edge_keys:
             return
@@ -50,18 +60,34 @@ class GraphWriter:
                            "attributes": attrs, "round": self.round})
 
     async def flush(self, note: str | None = None) -> int:
-        if not self.nodes and not self.edges:
+        if not self.nodes and not self.edges and not self.closures:
             return 0
         nodes, edges = self.nodes, [e for e in self.edges if e["src"] in self.known and e["dst"] in self.known]
         self.nodes, self.edges = [], []
+        updated = []
+        now = utcnow()
         async with session_scope() as s:
+            for src, dst, rel in self.closures:
+                q = select(GraphEdge).where(GraphEdge.simulation_id == self.sim_id, GraphEdge.dst == dst,
+                                           GraphEdge.valid_until_round.is_(None))
+                q = q.where(GraphEdge.src == src, GraphEdge.relation == rel) if src else q.where(GraphEdge.relation.in_(["asserts", "supports", "opposes"]))
+                for old in (await s.execute(q)).scalars():
+                    old.valid_until_round, old.valid_until_at = self.round, now
+                    updated.append(edge_public(old))
+            self.closures = []
             for n in nodes:
                 s.add(GraphNode(simulation_id=self.sim_id, key=n["key"], kind=n["kind"], type=n["type"], label=n["label"],
                                 summary=n["summary"], attributes=n["attributes"], round=n["round"]))
+            saved_edges = []
             for e in edges:
-                s.add(GraphEdge(simulation_id=self.sim_id, src=e["src"], dst=e["dst"], relation=e["relation"], fact=e["fact"],
-                                weight=e["weight"], attributes=e["attributes"], round=e["round"]))
-        await bus.publish(self.sim_id, "graph.delta", {"nodes": [_public_node(n) for n in nodes], "edges": [_public_edge(e) for e in edges],
+                row = GraphEdge(simulation_id=self.sim_id, src=e["src"], dst=e["dst"], relation=e["relation"], fact=e["fact"],
+                                weight=e["weight"], attributes=e["attributes"], round=e["round"],
+                                valid_from_round=e["round"], valid_from_at=now)
+                s.add(row)
+                saved_edges.append(row)
+            await s.flush()
+            public_edges = [edge_public(e) for e in saved_edges]
+        await bus.publish(self.sim_id, "graph.delta", {"nodes": [_public_node(n) for n in nodes], "edges": public_edges, "updated_edges": updated,
                                                        "round": self.round, "note": note})
         return len(nodes) + len(edges)
 
@@ -76,19 +102,29 @@ def _public_edge(e: dict) -> dict:
             "round": e["round"]}
 
 
-async def snapshot(sim_id: str, max_round: int | None = None) -> dict:
+def edge_public(e: GraphEdge) -> dict:
+    return {"id": e.id, "source": e.src, "target": e.dst, "relation": e.relation, "fact": e.fact[:1000],
+            "weight": e.weight, "round": e.round, "valid_from_round": e.valid_from_round,
+            "valid_until_round": e.valid_until_round, "valid_from_at": e.valid_from_at.isoformat(),
+            "valid_until_at": e.valid_until_at.isoformat() if e.valid_until_at else None,
+            "source_post_ids": (e.attributes or {}).get("source_post_ids", [])}
+
+
+async def snapshot(sim_id: str, max_round: int | None = None, history: bool = False) -> dict:
     async with session_scope() as s:
         qn = select(GraphNode).where(GraphNode.simulation_id == sim_id)
         qe = select(GraphEdge).where(GraphEdge.simulation_id == sim_id)
         if max_round is not None:
             qn = qn.where(GraphNode.round <= max_round)
             qe = qe.where(GraphEdge.round <= max_round)
+        if not history:
+            qe = qe.where(GraphEdge.valid_until_round.is_(None)) if max_round is None else qe.where(
+                or_(GraphEdge.valid_until_round.is_(None), GraphEdge.valid_until_round > max_round))
         nodes = (await s.execute(qn.order_by(GraphNode.id))).scalars().all()
         edges = (await s.execute(qe.order_by(GraphEdge.id))).scalars().all()
     return {"nodes": [{"id": n.key, "kind": n.kind, "type": n.type, "label": n.label, "summary": n.summary[:400],
                        "attrs": n.attributes, "round": n.round} for n in nodes],
-            "edges": [{"source": e.src, "target": e.dst, "relation": e.relation, "fact": e.fact[:300], "weight": e.weight,
-                       "round": e.round} for e in edges]}
+            "edges": [edge_public(e) for e in edges]}
 
 
 async def search(sim_id: str, query: str, limit: int = 12) -> dict:

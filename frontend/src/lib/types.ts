@@ -51,6 +51,6 @@ export interface Simulation extends SimSummary {
 }
 
 export interface GNode { id: string; kind: string; type: string; label: string; summary: string; attrs: Record<string, any>; round: number; x?: number; y?: number; fx?: number; fy?: number; __born?: number }
-export interface GEdge { source: string | GNode; target: string | GNode; relation: string; fact: string; weight: number; round: number }
+export interface GEdge { id?: number; valid_from_round?: number; valid_until_round?: number | null; valid_from_at?: string; valid_until_at?: string | null; source: string | GNode; target: string | GNode; relation: string; fact: string; weight: number; round: number }
 
 export interface SimEvent { seq: number; type: string; payload: any; t?: number }

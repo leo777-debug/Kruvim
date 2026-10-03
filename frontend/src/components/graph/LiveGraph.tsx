@@ -14,7 +14,7 @@ export interface GraphHandle {
 
 type ColorMode = "kind" | "opinion" | "region" | "stance";
 const KINDS = [
-  { key: "entity", label: "Entities" }, { key: "signal", label: "Live signals" }, { key: "agent", label: "Agents" },
+  { key: "claim", label: "Claims" }, { key: "entity", label: "Entities" }, { key: "signal", label: "Live signals" }, { key: "agent", label: "Agents" },
   { key: "post", label: "Posts" }, { key: "crowd", label: "Crowd" }, { key: "region", label: "Regions" },
 ];
 
@@ -41,6 +41,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [hidden, setHidden] = useState<Set<string>>(new Set(defaultHidden));
+  const [history, setHistory] = useState(false);
   const [labels, setLabels] = useState(false);
   const [mode, setMode] = useState<ColorMode>("kind");
   const [paused, setPaused] = useState(false);
@@ -78,10 +79,10 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
   const data = useMemo(() => {
     const vis = nodes.filter((n) => !hidden.has(n.kind === "content" || n.kind === "region" ? (n.kind === "region" ? "region" : "x") : n.kind));
     const ids = new Set(vis.map((n) => n.id));
-    const links = edges.filter((e) => ids.has(nid(e.source)) && ids.has(nid(e.target)));
+    const links = edges.filter((e) => (history || e.valid_until_round == null) && ids.has(nid(e.source)) && ids.has(nid(e.target)));
     return { nodes: vis, links };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, hidden]);
+  }, [version, hidden, history]);
 
   const match = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -214,6 +215,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
   }, [color, radius, match, neighbours, selectedId, degree, theme]);
 
   const linkColor = useCallback((l: GEdge) => {
+    if (l.valid_until_round != null) return theme.edgeDim;
     const s = l.source as GNode, t = l.target as GNode;
     const dim = neighbours && !(neighbours.has(s.id) && neighbours.has(t.id));
     if (dim) return theme.edgeDim;
@@ -294,6 +296,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
           ))}
         </div>
         <div className="flex h-7 items-center rounded-md border border-line-strong bg-panel p-0.5">
+          <button type="button" onClick={() => setHistory(!history)} aria-pressed={history} className="text-xs text-muted">{history ? "Hide superseded facts" : "Show superseded facts"}</button>
           <IconBtn onClick={() => setLabels(!labels)} active={labels} title="Show relation labels"><Tag className="h-3.5 w-3.5" /></IconBtn>
           <IconBtn onClick={() => setPaused(!paused)} title={paused ? "Resume layout" : "Freeze layout"}>{paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}</IconBtn>
           <IconBtn onClick={() => fg.current?.zoomToFit(600, 60)} title="Fit to view"><Crosshair className="h-3.5 w-3.5" /></IconBtn>
@@ -338,6 +341,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
           nodeCanvasObject={draw as any}
           nodePointerAreaPaint={(n: any, c: string, ctx: CanvasRenderingContext2D) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3, 0, Math.PI * 2); ctx.fill(); }}
           linkColor={linkColor as any}
+          linkLineDash={(l: any) => l.valid_until_round != null ? [4, 3] : []}
           linkWidth={(l: any) => Math.min(3, 0.5 + Math.log10((l.weight || 1) + 1))}
           linkCurvature={(l: any) => (l.relation === "replied_to" || l.relation === "follows" ? 0.25 : 0)}
           linkDirectionalParticles={(l: any) => (live && (l.relation === "commented_on" || l.relation === "reposted" || l.relation === "replied_to" || l.relation === "engaged") ? 1 : 0)}

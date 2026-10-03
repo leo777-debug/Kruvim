@@ -94,10 +94,14 @@ export function useSimulationStream(simId: string | undefined, graphRef: React.R
             s().nodes.push(node);
           }
           for (const e of p.edges || []) {
-            const k = `${e.source}|${e.target}|${e.relation}`;
+            const k = e.id != null ? String(e.id) : `${e.source}|${e.target}|${e.relation}`;
             if (edgeKeys.current.has(k) || !nodeIdx.current.has(e.source) || !nodeIdx.current.has(e.target)) continue;
             edgeKeys.current.add(k);
             s().edges.push({ ...e });
+          }
+          for (const update of p.updated_edges || []) {
+            const old = s().edges.find((e) => e.id === update.id);
+            if (old) Object.assign(old, { valid_until_round: update.valid_until_round, valid_until_at: update.valid_until_at });
           }
           s().graphVersion++;
           break;
@@ -111,7 +115,7 @@ export function useSimulationStream(simId: string | undefined, graphRef: React.R
           const id = (v: any) => (typeof v === "string" ? v : v.id);
           s().edges = s().edges.filter((e) => {
             const keep = !gone.has(id(e.source)) && !gone.has(id(e.target)) && !(p.min_round != null && (e.round ?? -1) >= p.min_round);
-            if (!keep) edgeKeys.current.delete(`${id(e.source)}|${id(e.target)}|${e.relation}`);
+            if (!keep) edgeKeys.current.delete(e.id != null ? String(e.id) : `${id(e.source)}|${id(e.target)}|${e.relation}`);
             return keep;
           });
           s().graphVersion++;

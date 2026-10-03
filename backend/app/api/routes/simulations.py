@@ -176,9 +176,9 @@ async def build_graph(sim_id: str, p: Principal = Depends(role("member")), s: As
 
 
 @router.get("/simulations/{sim_id}/graph")
-async def graph(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), round: int | None = Query(None)):
+async def graph(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), round: int | None = Query(None), history: bool = False):
     await get_sim(s, p, sim_id)
-    return await knowledge.snapshot(sim_id, round)
+    return await knowledge.snapshot(sim_id, round, history=history)
 
 
 @router.get("/simulations/{sim_id}/graph/search")

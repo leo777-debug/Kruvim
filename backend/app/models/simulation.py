@@ -71,6 +71,7 @@ class GraphNode(Base):
 
 class GraphEdge(Base):
     __tablename__ = "graph_edges"
+    __table_args__ = (Index("ix_graph_edges_current", "simulation_id", "valid_until_round"),)
     id: Mapped[int] = mapped_column(BigID, primary_key=True, autoincrement=True)
     simulation_id: Mapped[str] = mapped_column(ForeignKey("simulations.id", ondelete="CASCADE"), index=True)
     src: Mapped[str] = mapped_column(String(160))
@@ -80,6 +81,10 @@ class GraphEdge(Base):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     round: Mapped[int] = mapped_column(Integer, default=-1)
     attributes: Mapped[dict] = mapped_column(default=dict)
+    valid_from_round: Mapped[int] = mapped_column(Integer, default=-1, server_default="-1")
+    valid_until_round: Mapped[int | None] = mapped_column(Integer)
+    valid_from_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    valid_until_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

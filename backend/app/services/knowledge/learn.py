@@ -53,7 +53,7 @@ async def learn_round(writer, posts, llm, usage):
             data = rule_extract(posts)
     for e in data.get("entities", [])[:30]:
         if isinstance(e, dict) and isinstance(e.get("name"), str) and e["name"].strip():
-            writer.node("entity:" + slug(e["name"]), "entity", e["name"], str(e.get("type") or "Topic"),
+            writer.node("ent:" + slug(e["name"]), "entity", e["name"], str(e.get("type") or "Topic"),
                         str(e.get("summary") or "Mentioned in simulated debate"), origin="debate")
     for claim in data.get("claims", [])[:80]:
         if not isinstance(claim, dict) or not isinstance(claim.get("statement"), str):
