@@ -283,3 +283,13 @@ Interview calls use bounded concurrency, save partial answers for reloads and st
 
 ### Part B · All runs
 The sidebar's All runs page searches runs and project/content titles across the workspace. Filters cover project, format, platform, status, score range, UTC creation-date range and reviewer status. Sort by newest/oldest, score or name; switch between cards and a scrollable table. Both views link to the run. `/runs` returns a paginated summary projection without loading internal model arrays, and validates both project and simulation workspace ownership. Tests cover combined filters, date inclusivity, sorting, pagination, invalid ranges and tenant isolation.
+
+
+### Final delivery verification
+Part A and Part B are separate commits, with individual commits for B2–B9. A12 also has a follow-up regression fix: small voice samples allocate region totals before gender/age segments, preventing an entire region from disappearing when there are more strata than slots. A fresh 16-voice AE/SA run returned 8 Dubai and 8 Riyadh agents in mixed order.
+
+Round extraction makes one completion request with a bounded batch for local-model contexts. Native extraction preserves every remaining source, including short comments and malformed model stances. Graph learning is included in the run's credit estimate. Starting a new execution reopens original seed facts and clears learned facts from the previous execution.
+
+Final checks: **46 backend tests passed**, Ruff passed, `tsc --noEmit` passed, and the production Vite build passed. All 17 formats completed against a fresh isolated SQLite/dry-run server; 80 reads at concurrency 20 returned HTTP 200 (median 256ms, p95 416ms; this is a small local check, not a production capacity benchmark). Browser checks covered 16 pages at 390px, plus the graph history control, cited analyst report/console, All runs search and table view, all-voice survey estimate/completion, and anonymous sharing/revocation. No horizontal page scroll was found. Live UAE and Saudi Google Trends RSS checks returned HTTP 200 with ten entries each.
+
+Not verified: PostgreSQL/pgvector execution and migrations on a production database, paid model quality, a paid 2,000-respondent survey, all upstream connectors' ongoing availability, and visual Word rendering (bundled LibreOffice unavailable). PDF layout and all three export contents/images were verified. Local-model requests without an API key were tested using the OpenAI-compatible protocol fixture; no installed Ollama model or GPU inference was exercised. LLM key defaults remain blank.

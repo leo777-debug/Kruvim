@@ -1,6 +1,6 @@
 param([string]$Base = 'http://127.0.0.1:5174', [string]$ProjectId = '', [string]$RunId = '', [string]$Browser = 'agent-browser')
 $ErrorActionPreference = 'Stop'
-$routes = @('/', '/projects', '/data-pool', '/population', '/audiences', '/my-audience', '/monitoring', '/calibration', '/accuracy', '/settings', '/usage', '/admin')
+$routes = @('/', '/projects', '/runs', '/data-pool', '/population', '/audiences', '/my-audience', '/monitoring', '/calibration', '/accuracy', '/settings', '/usage', '/admin')
 if ($ProjectId) { $routes += @("/projects/$ProjectId", "/projects/$ProjectId/new") }
 if ($RunId) { $routes += "/simulations/$RunId" }
 & $Browser --session kruvim-gaps set viewport 390 844

@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 
 from app.services.knowledge.learn import learn_round
@@ -17,15 +18,17 @@ async def test_one_batch_per_round_and_grounded_stances():
     assert all(e["round"] == 2 for e in writer.edges)
     # Live extraction makes one request and rejects fabricated source ids/authors.
     llm.is_dry = False
-    llm.complete_json = AsyncMock(return_value={"claims": [{"statement": "A claim", "post_ids": [1], "stances": [
+    llm.complete = AsyncMock(return_value=json.dumps({"claims": [{"statement": "A claim", "post_ids": [1], "stances": [
         {"agent": "p:2", "post_id": 1, "relation": "supports"}]},
-        {"statement": "Invented", "post_ids": [999], "stances": []}]})
+        {"statement": "Invented", "post_ids": [999], "stances": []}]}))
     other = GraphWriter("run", 3)
     other.known.update(writer.known)
     await learn_round(other, posts, llm, Usage())
-    llm.complete_json.assert_awaited_once()
-    assert len(other.nodes) == 1
-    assert [e["relation"] for e in other.edges] == ["asserts"]
+    llm.complete.assert_awaited_once()
+    assert all(n["label"] != "Invented" for n in other.nodes)
+    model_key = next(n["key"] for n in other.nodes if n["label"] == "A claim")
+    assert not [e for e in other.edges if e["dst"] == model_key and e["relation"] == "supports"]
+    assert {e["src"] for e in other.edges if e["relation"] == "asserts"} == {"post:1", "post:2"}
 
 
 async def test_temporal_graph_current_history_and_tenant_access(client, auth):
@@ -102,3 +105,49 @@ async def test_hybrid_insight_panorama_and_report_citations(client, auth):
     assert "[node:analysis:" in report.summary
     assert all("[node:analysis:" in section["content"] for section in report.sections)
     assert "unverified reference omitted" in tb.cite("Invented [node:does-not-exist]")
+
+
+async def test_large_round_retains_every_source_with_one_local_model_call():
+    posts = [{"id": i, "author_ref": f"p:{i}", "content": f"Useful audience observation number {i}."}
+             for i in range(150)] + [{"id": 150, "author_ref": "p:150", "content": "Good!"}]
+    writer = GraphWriter("large-run", 1)
+    writer.known.update({f"post:{i}" for i in range(151)} | {f"agent:p:{i}" for i in range(151)})
+    llm = make_llm(ProviderSettings())
+    llm.is_dry = False
+    llm.complete = AsyncMock(return_value='{"claims": [], "entities": []}')
+    await learn_round(writer, posts, llm, Usage())
+    llm.complete.assert_awaited_once()
+    assert len(json.loads(llm.complete.call_args.kwargs["user"])["posts"]) == 40
+    assert {e["src"] for e in writer.edges if e["relation"] == "asserts"} == {f"post:{i}" for i in range(151)}
+    assert {e["src"] for e in writer.edges if e["relation"] == "supports"} == {f"agent:p:{i}" for i in range(151)}
+
+
+async def test_rerun_reopens_original_seed_facts(client, auth, monkeypatch):
+    from app.db.session import session_scope
+    from app.models import Simulation
+    from app.services import lifecycle
+    from app.services.knowledge.store import snapshot
+    headers, _ = auth
+    project = (await client.post("/projects", headers=headers, json={"name": "Restart graph"})).json()
+    run = (await client.post(f"/projects/{project['id']}/simulations", headers=headers,
+           json={"name": "Restart", "content": {"type": "text", "text": "Original guide"}})).json()
+    writer = GraphWriter(run["id"], -1)
+    writer.node("claim:seed", "claim", "Original guide is useful")
+    writer.node("agent:seed", "agent", "Author")
+    writer.edge("agent:seed", "claim:seed", "supports", "Original guide is useful")
+    await writer.flush()
+    writer.round = 1
+    writer.node("claim:later", "claim", "Original guide is misleading")
+    writer.edge("claim:later", "claim:seed", "contradicts", "Original guide is misleading")
+    await writer.flush()
+    monkeypatch.setattr(lifecycle.jobs, "enqueue", AsyncMock(return_value="restart-job"))
+    async with session_scope() as s:
+        sim = await s.get(Simulation, run["id"])
+        sim.status = "completed"
+        sim.config = {"agents": {"voice": 1, "crowd": 0}, "time": {"hours": 1, "rounds": 2}}
+        await s.commit()
+        await lifecycle.queue_run(s, sim)
+    graph = await snapshot(run["id"], history=True)
+    assert len(graph["edges"]) == 1
+    assert graph["edges"][0]["relation"] == "supports"
+    assert graph["edges"][0]["valid_until_round"] is None

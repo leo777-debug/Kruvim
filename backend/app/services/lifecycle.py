@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, Conflict
@@ -63,6 +63,9 @@ async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = Non
         await s.execute(delete(model).where(model.simulation_id == sim.id))
     await s.execute(delete(GraphNode).where(and_(GraphNode.simulation_id == sim.id, GraphNode.round >= 0)))
     await s.execute(delete(GraphEdge).where(and_(GraphEdge.simulation_id == sim.id, GraphEdge.round >= 0)))
+    # A new execution starts from the original, current seed facts.
+    await s.execute(update(GraphEdge).where(GraphEdge.simulation_id == sim.id, GraphEdge.round < 0)
+                    .values(valid_until_round=None, valid_until_at=None))
     await s.execute(delete(Report).where(Report.simulation_id == sim.id))
     await s.execute(delete(SimEvent).where(and_(SimEvent.simulation_id == sim.id, SimEvent.type.notlike("graph.%"), SimEvent.type.notlike("env.%"))))
     sim.status, sim.error, sim.results, sim.progress, sim.report_status = "queued", None, {}, {"round": 0, "rounds": sim.config["time"]["rounds"]}, "none"
@@ -70,6 +73,9 @@ async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = Non
     await s.commit()
     # graph.delta events from an earlier run stay in the log; clients replaying it drop that run's nodes here
     await bus.publish(sim.id, "graph.prune", {"min_round": 0})
+    from app.services.knowledge.store import edge_public
+    seed_edges = (await s.execute(select(GraphEdge).where(GraphEdge.simulation_id == sim.id, GraphEdge.round < 0))).scalars().all()
+    await bus.publish(sim.id, "graph.delta", {"nodes": [], "edges": [], "updated_edges": [edge_public(e) for e in seed_edges]})
     await bus.publish(sim.id, "simulation.queued", {"rounds": sim.config["time"]["rounds"]})
     sim.job_id = await jobs.enqueue("run_simulation", sim_id=sim.id)
     await s.commit()

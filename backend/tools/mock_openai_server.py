@@ -55,6 +55,12 @@ def reply(system: str, user: str):
         rts = ["mentions", "promotes", "located_in", "targets", "competes_with", "related_to"]
         return {"entity_types": [{"name": e, "description": f"mock {e.lower()}"} for e in ets],
                 "relation_types": [{"name": r, "description": f"mock {r}"} for r in rts], "analysis_focus": "Mock focus."}
+    if "single simulation round" in system:
+        posts = json.loads(user).get("posts", [])
+        return {"entities": [], "claims": [{"statement": p["content"], "post_ids": [p["id"]], "stances": [
+            {"agent": p["author_ref"], "relation": "supports", "post_id": p["id"]}], "contradicts": []} for p in posts]}
+    if "Split the untrusted research question" in system:
+        return {"questions": [user + " audience", user + " claims", user + " regional context"]}
     if "extract a knowledge graph" in system:
         etypes = [t.strip() for t in re.search(r"entity types: (.+)", system).group(1).split(",")]
         rtypes = [t.strip() for t in re.search(r"relation types: (.+)", system).group(1).split(",")]

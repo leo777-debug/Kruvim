@@ -29,14 +29,19 @@ class GraphWriter:
         self.edges: list[dict] = []
         self.edge_keys: set[tuple] = set()
         self.closures: list[tuple] = []
+        self.claim_statements: dict[str, str] = {}
 
     async def load_existing(self):
         async with session_scope() as s:
             self.known = {k for (k,) in (await s.execute(select(GraphNode.key).where(GraphNode.simulation_id == self.sim_id))).all()}
+            self.claim_statements = dict((await s.execute(select(GraphNode.key, GraphNode.summary).where(
+                GraphNode.simulation_id == self.sim_id, GraphNode.kind == "claim"))).all())
             self.edge_keys = {(a, b, r) for a, b, r in (await s.execute(select(GraphEdge.src, GraphEdge.dst, GraphEdge.relation)
                                                                        .where(GraphEdge.simulation_id == self.sim_id, GraphEdge.valid_until_round.is_(None)))).all()}
 
     def node(self, key: str, kind: str, label: str, type_: str = "", summary: str = "", **attrs) -> str:
+        if kind == "claim":
+            self.claim_statements[key] = summary or label
         if key not in self.known:
             self.known.add(key)
             self.nodes.append({"key": key, "kind": kind, "type": type_ or kind, "label": label[:300], "summary": summary[:2000],
