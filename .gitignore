@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime data (SQLite, population cache, uploads)
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+*.npz
+
+# Node
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# Local verification artifacts
+frontend/browser-*.png
+backend/verification-results.json
