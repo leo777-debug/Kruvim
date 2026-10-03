@@ -37,12 +37,13 @@ export const STANCE_COLORS: Record<string, string> = {
 
 export const KIND_COLORS: Record<string, string> = {
   content: "#2155cd", entity: "#6f7fbf", region: "#4b5563", signal: "#a3a9b3", agent: "#4e79a7", stakeholder: "#b07aa1",
-  post: "#b8bec7", crowd: "#8b939f", event: "#c43a2c",
+  claim: "#c99a2e", analysis: "#76b7b2", post: "#b8bec7", crowd: "#8b939f", event: "#c43a2c",
 };
 
 export const ENTITY_PALETTE = CATEGORICAL;
 
 export const ACTION_COLORS: Record<string, string> = {
+  SEARCH_POSTS: "#4e79a7", SEARCH_USER: "#4e79a7", VIEW_TRENDS: "#b07aa1", REFRESH: "#9aa1ac", MUTE: "#c99a2e", LIKE_COMMENT: "#59a14f", DISLIKE_COMMENT: "#e15759",
   POST: "#4b5563", COMMENT: "#4e79a7", REPOST: "#59a14f", QUOTE: "#b07aa1", LIKE: "#e15759", FOLLOW: "#c99a2e",
   UPVOTE: "#59a14f", DOWNVOTE: "#e15759", EVENT: "#c43a2c", CROWD_LIKE: "#e15759", CROWD_REPOST: "#59a14f", CROWD_UPVOTE: "#59a14f",
 };

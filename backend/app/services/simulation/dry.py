@@ -64,12 +64,18 @@ def action(agent, feed: list[dict], platform: str, rng: np.random.Generator) -> 
     ex = agent.persona.get("ocean", {}).get("extraversion", 0.5) if agent.persona.get("ocean") else 0.6
     acts = []
     op = agent.opinion
+    if rng.random() < .2:
+        choice = str(rng.choice(["SEARCH_POSTS", "SEARCH_USER", "VIEW_TRENDS", "REFRESH"]))
+        query = (feed[0].get("content", "").split() or ["content"])[0] if feed else "content"
+        acts.append({"type": choice, "query": query})
+    if feed and rng.random() < .03:
+        acts.append({"type": "MUTE", "handle": feed[0].get("author")})
     for f in feed[:4]:
         align = 1 - abs(op - f.get("stance", 5)) / 10
         if rng.random() < 0.35 * align:
-            acts.append({"type": "LIKE" if platform == "feed" else "UPVOTE", "post_id": f["id"]})
-        elif platform == "forum" and rng.random() < 0.12 * (1 - align):
-            acts.append({"type": "DOWNVOTE", "post_id": f["id"]})
+            acts.append({"type": "LIKE_COMMENT" if f.get("kind") == "comment" else "LIKE" if platform == "feed" else "UPVOTE", "post_id": f["id"]})
+        elif (platform == "forum" or f.get("kind") == "comment") and rng.random() < 0.12 * (1 - align):
+            acts.append({"type": "DISLIKE_COMMENT" if f.get("kind") == "comment" else "DOWNVOTE", "post_id": f["id"]})
         if rng.random() < 0.12 * (0.5 + ex) and len(acts) < 3:
             verb = "agree" if align > 0.6 else "disagree"
             acts.append({"type": "COMMENT", "post_id": f["id"], "content": f"{TAG} {verb} ({op:.0f}/10)"})

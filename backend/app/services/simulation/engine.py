@@ -12,6 +12,7 @@ segment, emotion, quote) - the basis for the heatmap and the population projecti
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import time
@@ -28,6 +29,7 @@ from app.models import Action, Post, SimAgent, Simulation
 from app.services import jobs
 from app.services.content import card_block, topic_vector
 from app.services.creator import short_video_metrics, weighted_sample
+from app.services.datapool.retrieval import embed
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
 from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
@@ -61,6 +63,9 @@ class AgentRT:
     initial: float | None = None
     memory: list = field(default_factory=list)
     following: set = field(default_factory=set)
+    muted: set = field(default_factory=set)
+    comment_votes: dict = field(default_factory=dict)
+    discoveries: set = field(default_factory=set)
     seen: set = field(default_factory=set)
     actions: int = 0
     trajectory: list = field(default_factory=list)
@@ -247,7 +252,7 @@ class Engine:
         scored = []
         for pid in cand:
             p = self.posts[pid]
-            if p.author_ref == a.ref or pid in a.seen or p.kind == "repost":
+            if p.author_ref == a.ref or pid in a.seen or p.kind == "repost" or p.author_ref in a.muted:
                 continue
             rec = math.exp(-(self.round - p.round) / 5.0)
             rel = (0.5 if p.author_region == a.region else 0.0) + (1.0 if p.author_ref in a.following else 0.0) + \
@@ -257,6 +262,35 @@ class Engine:
             scored.append((sc + self.rng.gumbel() * 0.15, p))
         scored.sort(key=lambda x: -x[0])
         return [p for _, p in scored[:k]]
+
+    def search_posts(self, a: AgentRT, platform: str, query: str) -> list[dict]:
+        if not query.strip():
+            return []
+        qv, terms = embed(query), query.lower().split()
+        ranked = []
+        for p in self.posts.values():
+            if p.platform != platform or p.author_ref in a.muted or p.kind == "repost":
+                continue
+            lexical = sum(t in p.content.lower() for t in terms) / max(1, len(terms))
+            score = .55 * lexical + .45 * max(0, float(embed(p.content) @ qv))
+            if score > .05:
+                ranked.append((score, p))
+        return [self.post_view(p) for _, p in sorted(ranked, key=lambda x: (-x[0], x[1].id))[:6]]
+
+    def search_users(self, a: AgentRT, query: str) -> list[dict]:
+        if not query.strip():
+            return []
+        qv, terms = embed(query), query.lower().split()
+        ranked = []
+        for user in self.agents.values():
+            if user.ref in a.muted:
+                continue
+            text = f"{user.name} {user.handle} {user.region} {user.persona.get('description', '')}"
+            score = .55 * sum(t in text.lower() for t in terms) / max(1, len(terms)) + .45 * max(0, float(embed(text) @ qv))
+            if score > .05:
+                ranked.append((score, user))
+        return [{"ref": u.ref, "handle": u.handle, "name": u.name, "region": u.region}
+                for _, u in sorted(ranked, key=lambda x: (-x[0], x[1].ref))[:6]]
 
     # ---- round 0: first exposure ------------------------------------------------------------------------
     async def first_exposure(self):
@@ -527,8 +561,6 @@ class Engine:
         tot = sum(weights.values())
         pl = self.rng.choice(list(weights), p=[w / tot for w in weights.values()])
         feed = self.recommend(a, pl, self.cfg["platforms"][pl].get("feed_size", 6))
-        if not feed:
-            return a, pl, [], None
         views = [self.post_view(p) for p in feed]
         for p in feed:
             a.seen.add(p.id)
@@ -547,7 +579,7 @@ class Engine:
 
     async def apply_turn(self, a: AgentRT, pl: str, views: list[dict], out: dict) -> list[dict]:
         allowed = FEED_ACTIONS if pl == "feed" else FORUM_ACTIONS
-        valid_ids = {v["id"] for v in views}
+        valid_ids = {v["id"] for v in views} | a.discoveries
         handles = {x.handle: x.ref for x in self.agents.values()}
         acts = out.get("actions") if isinstance(out.get("actions"), list) else []
         done = []
@@ -564,9 +596,55 @@ class Engine:
                 except ValueError:
                     pid = None
                 text = str(act.get("content") or "").strip()[:600]
-                if t in ("COMMENT", "REPOST", "QUOTE", "LIKE", "UPVOTE", "DOWNVOTE") and pid not in valid_ids:
+                if t in ("COMMENT", "REPOST", "QUOTE", "LIKE", "UPVOTE", "DOWNVOTE", "LIKE_COMMENT", "DISLIKE_COMMENT") and pid not in valid_ids:
                     continue
-                if t in ("LIKE", "UPVOTE", "DOWNVOTE"):
+                if pid is not None and t in ("COMMENT", "REPOST", "QUOTE", "LIKE", "UPVOTE", "DOWNVOTE", "LIKE_COMMENT", "DISLIKE_COMMENT"):
+                    target = self.posts.get(pid)
+                    if not target or target.platform != pl or target.author_ref in a.muted:
+                        continue
+                if t in ("LIKE_COMMENT", "DISLIKE_COMMENT"):
+                    post = self.posts.get(pid)
+                    if not post or post.kind != "comment" or post.platform != pl or post.author_ref in a.muted:
+                        continue
+                    previous = a.comment_votes.get(pid)
+                    if previous == t:
+                        continue
+                    if previous == "LIKE_COMMENT":
+                        post.likes -= 1
+                    elif previous == "DISLIKE_COMMENT":
+                        post.down -= 1
+                    self.apply_vote(post, "LIKE" if t == "LIKE_COMMENT" else "DOWNVOTE")
+                    a.comment_votes[pid] = t
+                    self.log_action(s, a, pl, t, target_post=pid)
+                    done.append({"type": t, "target": pid})
+                elif t in ("SEARCH_POSTS", "SEARCH_USER", "VIEW_TRENDS", "REFRESH"):
+                    query = str(act.get("query") or text or "")[:200]
+                    if t == "SEARCH_POSTS":
+                        result = self.search_posts(a, pl, query)
+                    elif t == "SEARCH_USER":
+                        result = self.search_users(a, query)
+                    elif t == "VIEW_TRENDS":
+                        result = [{"title": x.get("title"), "value": x.get("value"), "region": a.region}
+                                  for x in (self.cfg.get("context", {}).get(a.region) or {}).get("trending", [])][:10]
+                    else:
+                        result = [self.post_view(p) for p in self.recommend(a, pl, 6)]
+                    for item in result:
+                        if isinstance(item.get("id"), int):
+                            a.discoveries.add(item["id"])
+                            valid_ids.add(item["id"])
+                    note = json.dumps(result, ensure_ascii=False)[:2500]
+                    a.memory.append(f"{t} {query}: {note}")
+                    self.log_action(s, a, pl, t, content=query, meta={"results": result})
+                    done.append({"type": t, "content": query, "results": result})
+                elif t == "MUTE":
+                    ref = handles.get(str(act.get("handle") or "").lstrip("@"))
+                    if ref and ref != a.ref and ref not in a.muted:
+                        a.muted.add(ref)
+                        a.discoveries = {pid for pid in a.discoveries if self.posts[pid].author_ref != ref}
+                        valid_ids = {pid for pid in valid_ids if self.posts[pid].author_ref != ref}
+                        self.log_action(s, a, pl, t, target_ref=ref)
+                        done.append({"type": t, "target_ref": ref})
+                elif t in ("LIKE", "UPVOTE", "DOWNVOTE"):
                     self.apply_vote(self.posts[pid], t)
                     self.log_action(s, a, pl, t, target_post=pid)
                     if t != "DOWNVOTE":
@@ -697,7 +775,7 @@ class Engine:
                 for act in ("like", "upvote", "repost"):
                     if c.get(act):
                         pl = self.posts[pid].platform
-                        self.log_action(s, None, pl, f"CROWD_{act.upper()}", target_post=pid, actor_ref="crowd",
+                        self.log_action(s, None, pl, f"CROWD_{act.upper()}" + ("_COMMENT" if self.posts[pid].kind == "comment" and act in ("like", "upvote") else ""), target_post=pid, actor_ref="crowd",
                                         actor_name="Crowd", meta={"count": int(c[act]), "regions": regs})
                 for code, v in regs.items():
                     if v >= 3 and f"post:{pid}" in self.writer.known:
@@ -746,7 +824,7 @@ class Engine:
             for a in self.agents.values():
                 await s.execute(update(SimAgent).where(SimAgent.id == a.id).values(
                     state={"opinion": a.opinion, "initial": a.initial, "trajectory": a.trajectory, "actions": a.actions,
-                           "following": sorted(a.following), "memory": a.memory[-8:]}, followers=a.followers))
+                           "following": sorted(a.following), "muted": sorted(a.muted), "comment_votes": a.comment_votes, "memory": a.memory[-8:]}, followers=a.followers))
         from .analytics import finalize
         results = await asyncio.to_thread(finalize, self)
         results["runtime_seconds"] = round(time.time() - t0, 1)

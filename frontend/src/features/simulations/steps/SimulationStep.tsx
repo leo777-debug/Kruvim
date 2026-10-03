@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { ActivityChart, OpinionTimeline } from "@/components/charts";
 import type { GraphHandle } from "@/components/graph/LiveGraph";
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/overlay";
+import { Dialog, Select } from "@/components/ui/overlay";
 import { Callout, Progress, Segmented, Stat, Textarea } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { ACTION_COLORS, REGION_COLORS, scoreColor } from "@/lib/colors";
@@ -15,6 +15,7 @@ import type { FeedItem, StreamState } from "../useSimulationStream";
 const ICON: Record<string, any> = { LIKE: Heart, COMMENT: MessageCircle, REPOST: Repeat2, QUOTE: Quote, FOLLOW: UserPlus, UPVOTE: ThumbsUp, DOWNVOTE: ThumbsDown, POST: Zap };
 
 export function SimulationStep({ sim, stream, refetch, onAgent }: { sim: Simulation; stream: StreamState; refetch: () => void; onAgent: (r: string) => void; graphRef: React.RefObject<GraphHandle> }) {
+  const [action, setAction] = useState("*");
   const [inject, setInject] = useState(false);
   const [text, setText] = useState("");
   const [view, setView] = useState<"split" | "feed" | "forum">("split");
@@ -35,7 +36,7 @@ export function SimulationStep({ sim, stream, refetch, onAgent }: { sim: Simulat
     }
   }
 
-  const feed = useMemo(() => stream.feed.slice().reverse(), [stream.feed.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const feed = useMemo(() => stream.feed.slice().reverse().filter((f) => action === "*" || f.action === action), [stream.feed.length, action]); // eslint-disable-line react-hooks/exhaustive-deps
   const left = feed.filter((f) => f.platform === "feed" || f.platform === "both");
   const right = feed.filter((f) => f.platform === "forum" || f.platform === "both");
   const totals = useMemo(() => {
@@ -87,11 +88,12 @@ export function SimulationStep({ sim, stream, refetch, onAgent }: { sim: Simulat
         </div>
       )}
 
-      <div className="flex items-center justify-between px-5 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-3">
         <h3 className="section-title">Activity log</h3>
+        <Select className="max-w-40" value={action} onChange={setAction} options={[{value:"*",label:"All actions"}, ...[...new Set(stream.feed.map((f) => f.action).filter((a): a is string => !!a))].sort().map((a) => ({value:a,label:a.toLowerCase().replaceAll("_", " ")}))]} />
         <Segmented value={view} onChange={setView} options={[{ value: "split", label: "Both" }, { value: "feed", label: "Feed" }, { value: "forum", label: "Forum" }]} />
       </div>
-      <div className={cn("grid min-h-[420px] flex-1 gap-3 px-5 py-3", view === "split" ? "grid-cols-2" : "grid-cols-1")}>
+      <div className={cn("grid min-h-[420px] flex-1 gap-3 px-5 py-3", view === "split" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1")}>
         {view !== "forum" && <Column title="Feed" items={left} onAgent={onAgent} />}
         {view !== "feed" && <Column title="Forum" items={right} onAgent={onAgent} />}
       </div>
@@ -135,7 +137,7 @@ function Row({ f, onAgent }: { f: FeedItem; onAgent: (r: string) => void }) {
         <span className="max-w-[45%] truncate font-medium">{f.name || f.agent}</span>
         {f.agentKind === "stakeholder" && <span className="text-muted">account</span>}
         <span className="ml-auto flex items-center gap-1 font-medium" style={{ color }}>
-          <Icon className="h-3 w-3" />{f.kind === "reaction" ? `First reaction ${fmt.s1(f.score)}` : (f.action || "").charAt(0) + (f.action || "").slice(1).toLowerCase()}
+          <Icon className="h-3 w-3" />{f.kind === "reaction" ? `First reaction ${fmt.s1(f.score)}` : (f.action || "").charAt(0) + (f.action || "").slice(1).toLowerCase().replaceAll("_", " ")}
         </span>
         <span className="num w-12 text-right text-faint">{f.time ?? `R${f.round}`}</span>
       </div>

@@ -9,8 +9,9 @@ EMOTIONS = ["joy", "amusement", "trust", "anticipation", "surprise", "admiration
 DRIVERS = ["humor", "relatability", "curiosity gap", "usefulness", "identity/pride", "nostalgia", "social proof", "authority",
            "fomo", "outrage", "aesthetics", "faith/values", "novelty", "status"]
 DECISION_MODES = ["emotional", "rational", "social", "habitual"]
-FEED_ACTIONS = ["POST", "COMMENT", "REPOST", "QUOTE", "LIKE", "FOLLOW", "DO_NOTHING"]
-FORUM_ACTIONS = ["POST", "COMMENT", "UPVOTE", "DOWNVOTE", "DO_NOTHING"]
+DISCOVERY_ACTIONS = ["SEARCH_POSTS", "SEARCH_USER", "VIEW_TRENDS", "REFRESH", "MUTE", "LIKE_COMMENT", "DISLIKE_COMMENT"]
+FEED_ACTIONS = DISCOVERY_ACTIONS + ["POST", "COMMENT", "REPOST", "QUOTE", "LIKE", "FOLLOW", "DO_NOTHING"]
+FORUM_ACTIONS = DISCOVERY_ACTIONS + ["POST", "COMMENT", "UPVOTE", "DOWNVOTE", "DO_NOTHING"]
 
 
 def reaction_system(card_block: str, world_block: str, n_segments: int, platform_label: str, poll_n: int = 0) -> str:
@@ -63,6 +64,11 @@ Platforms: "feed" (short-form, like X / TikTok / Instagram) and "forum" (threads
 Feed actions: POST (content), COMMENT (post_id, content), REPOST (post_id), QUOTE (post_id, content), LIKE (post_id),
 FOLLOW (handle), DO_NOTHING. Forum actions: POST (content), COMMENT (post_id, content), UPVOTE (post_id),
 DOWNVOTE (post_id), DO_NOTHING.
+Both platforms also support SEARCH_POSTS (query), SEARCH_USER (query), VIEW_TRENDS, REFRESH,
+MUTE (handle), LIKE_COMMENT (post_id), DISLIKE_COMMENT (post_id).
+Search runs only over this simulation. Results enter your memory and can be acted on later.
+Mute removes that account from your own feed. Comment votes change comment ranking.
+Do not repeat a comment vote. Use a comment id for comment votes.
 Write any text in your own voice and language register, max 40 words, no hashtags spam. Never mention being simulated.
 Only reference post ids that appear in your feed.
 
@@ -75,7 +81,7 @@ Only reference post ids that appear in your feed.
 Focus of this simulation: {analysis_focus or 'how people react to the content and why'}
 
 Reply with JSON only:
-{{"actions": [{{"type": "...", "post_id": <id or null>, "handle": <for FOLLOW or null>, "content": "<text or empty>"}}, ... at most 3],
+{{"actions": [{{"type": "...", "post_id": <id or null>, "handle": <for FOLLOW or null>, "content": "<text or empty>", "query": "<search text or empty>"}}, ... at most 3],
  "opinion": <your opinion of the content now, 0-10>, "thought": "<one short private sentence>"}}"""
 
 

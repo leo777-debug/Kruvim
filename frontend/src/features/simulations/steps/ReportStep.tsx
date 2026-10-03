@@ -11,6 +11,7 @@ import type { Simulation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { OverviewPanel } from "../results/OverviewPanel";
 import { ResultsPanels } from "../results/ResultsPanels";
+import { ActionHistory } from "../results/ActionHistory";
 import { TranscriptPanel } from "../results/TranscriptPanel";
 import type { StreamState } from "../useSimulationStream";
 
@@ -79,7 +80,7 @@ export function ReportStep({ sim, stream, onAgent, onComment }: { sim: Simulatio
       )}
       {tab === "overview" && <OverviewPanel sim={sim} onTab={(t) => setTab(t === "analytics" ? "results" : t)} />}
       {tab === "results" && <ResultsPanels sim={sim} onAgent={onAgent} onComment={onComment} />}
-      {tab === "transcript" && <TranscriptPanel sim={sim} onAgent={onAgent} />}
+      {tab === "transcript" && <><TranscriptPanel sim={sim} onAgent={onAgent} /><ActionHistory simId={sim.id} /></>}
     </div>
   );
 }

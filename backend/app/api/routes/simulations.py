@@ -298,9 +298,14 @@ async def posts(sim_id: str, p: Principal = Depends(principal), s: AsyncSession 
 
 
 @router.get("/simulations/{sim_id}/actions")
-async def actions(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), after_id: int = 0, limit: int = 300):
+async def actions(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), after_id: int = 0, limit: int = 300, action: str = "", platform: str = ""):
     await get_sim(s, p, sim_id)
-    rows = (await s.execute(select(Action).where(and_(Action.simulation_id == sim_id, Action.id > after_id)).order_by(Action.id).limit(min(limit, 2000)))).scalars().all()
+    q = select(Action).where(Action.simulation_id == sim_id, Action.id > after_id)
+    if action:
+        q = q.where(Action.action == action.upper())
+    if platform:
+        q = q.where(Action.platform == platform)
+    rows = (await s.execute(q.order_by(Action.id).limit(max(1, min(limit, 2000))))).scalars().all()
     return [{"id": a.id, "round": a.round, "sim_time": a.sim_time, "platform": a.platform, "actor_ref": a.actor_ref, "actor": a.actor_name,
              "action": a.action, "post_id": a.post_id, "target_post": a.target_post_id, "target_ref": a.target_ref, "content": a.content, "meta": a.meta}
             for a in rows]
