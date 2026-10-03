@@ -13,6 +13,7 @@ optional S3 snapshot archives, audience presets, short-video metrics and trend l
 Hardening includes tenant isolation, encrypted tokens, expiring one-use OAuth state, ownership validation, sync leases,
 immutable seven-day accuracy snapshots, idempotent vector writes, concurrent snapshot creation, storage path validation,
 bounded feed downloads, production configuration checks, accessible form labels and dependency updates.
+The frontend build uses Node 24 LTS and its serving image follows the official nginx stable Alpine channel.
 
 ## Completed local checks
 
