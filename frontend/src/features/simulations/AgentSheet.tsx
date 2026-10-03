@@ -41,7 +41,10 @@ export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string
           <>
             <section>
               <div className="eyebrow mb-2">Who they are</div>
-              {d.kind === "stakeholder" ? <p className="text-muted leading-relaxed">{p.description}</p> : (
+              {d.kind === "stakeholder" ? <div className="space-y-3"><p className="text-muted leading-relaxed whitespace-pre-line">{p.description}</p>
+                <div className="grid grid-cols-1 gap-2 text-xs"><Kv k="Voice" v={p.voice} /><Kv k="Interests" v={(p.interests || []).join(", ")} /><Kv k="Likely stance" v={p.likely_stance} /><Kv k="Posting style" v={p.posting_style} /></div>
+                {p.graph_context?.related?.length > 0 && <details className="text-xs text-muted"><summary>Graph context</summary>{p.graph_context.related.map((n: any) => <p key={n.key} className="mt-1">{n.label}: {n.summary}</p>)}</details>}
+              </div> : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                   <Kv k="Age / gender" v={`${p.age} · ${p.gender}`} /><Kv k="Origin" v={p.origin} />
                   <Kv k="City" v={`${p.city}, ${p.region_name ?? ""}`} /><Kv k="Language" v={p.language} />

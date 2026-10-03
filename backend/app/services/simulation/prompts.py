@@ -107,10 +107,12 @@ def action_user(persona_txt: str, opinion: float, memory: list[str], clock: str,
 
 STAKEHOLDER_SYSTEM = """You turn entities from a knowledge graph into social-media accounts that will take part in a
 simulation about a piece of content. Pick only entities that would plausibly post or comment publicly (brands, public
-figures, media outlets, organisations, communities). For each, write a short persona.
+figures, media outlets, organisations, communities). For each, use its graph neighbourhood (related entities, facts and signals) to write a detailed persona.
+Do not invent facts; graph claims can be uncertain. Include voice, interests, likely_stance and posting_style.
 Return JSON: {"stakeholders": [{"entity": "<entity name>", "name": "<display name>", "handle": "<handle without @>",
  "role": "brand|media|public_figure|organisation|community", "region": "<one of the given region codes or *>",
- "stance": "supportive|opposing|neutral|observer", "persona": "2-3 sentences: who they are, what they care about, how they
+ "stance": "supportive|opposing|neutral|observer", "voice": "tone and language register", "interests": ["specific topics"], "likely_stance": "stance and motivation grounded in context",
+ "posting_style": "format, frequency and response style", "persona": "4-6 sentences: who they are, what they care about, how they
  post", "activity": 0-1}] }"""
 
 CONFIG_SYSTEM = """You configure a social-media simulation that tests how audiences react to a piece of content.

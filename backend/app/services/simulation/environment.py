@@ -113,6 +113,8 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     async with session_scope() as s:
         ents = [{"key": n.key, "label": n.label, "type": n.type, "summary": n.summary} for n in (await s.execute(
             select(GraphNode).where(GraphNode.simulation_id == sim_id, GraphNode.kind == "entity").limit(80))).scalars()]
+    from app.services.knowledge.personas import enrich_stakeholder, neighbourhoods
+    neighbours = await neighbourhoods(sim_id, org_id, [e["key"] for e in ents])
     stakes = []
     if d["stakeholders"] > 0 and ents:
         if llm.is_dry:
@@ -121,12 +123,19 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             try:
                 out = await llm.complete_json(system=STAKEHOLDER_SYSTEM, role="persona", max_tokens=2000, usage=usage, user=json.dumps({
                     "question": requirement, "content": card.get("summary"), "regions": regions_in, "max": d["stakeholders"],
-                    "entities": [{"name": e["label"], "type": e["type"], "summary": e["summary"][:200]} for e in ents[:40]]}, ensure_ascii=False))
+                    "entities": [{"name": e["label"], "type": e["type"], "summary": e["summary"][:400], "neighbourhood": neighbours.get(e["key"], {})} for e in ents[:40]]}, ensure_ascii=False))
                 stakes = [x for x in out.get("stakeholders", []) if isinstance(x, dict) and x.get("name")][: d["stakeholders"]]
             except LLMAuthError:
                 raise
             except Exception:
                 stakes = dry.stakeholders(ents, regions_in, d["stakeholders"])
+    entity_by_name = {e["label"].casefold(): e for e in ents}
+    grounded = []
+    for st in stakes:
+        entity = entity_by_name.get(str(st.get("entity") or st.get("name") or "").casefold())
+        if entity:
+            grounded.append(enrich_stakeholder(st, entity, neighbours.get(entity["key"], {})))
+    stakes = grounded
     await progress(f"{len(stakes)} stakeholder accounts from the knowledge graph", 0.45)
 
     # model-generated configuration
@@ -193,7 +202,8 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             reg = st.get("region") if st.get("region") in [r["code"] for r in REGIONS] else (regions_in[0] if regions_in else "AE")
             handle = "".join(ch for ch in str(st.get("handle") or st["name"]).lower() if ch.isalnum() or ch == "_")[:20] or f"acct{k}"
             persona = {"name": st["name"], "handle": handle, "role": st.get("role", "organisation"), "stance": st.get("stance", "neutral"),
-                       "description": st.get("persona", ""), "entity": st.get("entity"), "region": reg}
+                       "description": st.get("persona", ""), "entity": st.get("entity"), "region": reg,
+                       **{key: st.get(key) for key in ("voice", "interests", "likely_stance", "posting_style", "graph_context")}}
             cfg = {"activity": clamp(st.get("activity"), 0.05, 0.9, 0.4), "platform_weights": {"feed": 1.0, "forum": 0.4},
                    "tz_offset": region(reg)["tz_offset"], "stance": persona["stance"], "sentiment_bias": 0.0}
             acts.append(cfg["activity"])
