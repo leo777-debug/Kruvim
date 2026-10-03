@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, BigID, IdMixin, TimestampMixin, UTCDateTime, utcnow
@@ -59,6 +60,7 @@ class GraphNode(Base):
     __table_args__ = (Index("ix_graph_nodes_sim_key", "simulation_id", "key", unique=True),)
     id: Mapped[int] = mapped_column(BigID, primary_key=True, autoincrement=True)
     simulation_id: Mapped[str] = mapped_column(ForeignKey("simulations.id", ondelete="CASCADE"), index=True)
+    vector: Mapped[list | None] = mapped_column(Vector(128).with_variant(JSON(), "sqlite"))
     key: Mapped[str] = mapped_column(String(160))                     # stable id within the simulation
     kind: Mapped[str] = mapped_column(String(24))                     # entity | agent | post | signal | content | region
     type: Mapped[str] = mapped_column(String(80), default="")        # ontology entity type, agent kind, platform ...
@@ -68,6 +70,9 @@ class GraphNode(Base):
     round: Mapped[int] = mapped_column(Integer, default=-1)          # -1 = graph build, 0.. = simulation round
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
+
+Index("ix_graph_nodes_cosine", GraphNode.vector, postgresql_using="hnsw",
+      postgresql_ops={"vector": "vector_cosine_ops"}).ddl_if(dialect="postgresql")
 
 class GraphEdge(Base):
     __tablename__ = "graph_edges"

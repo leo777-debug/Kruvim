@@ -59,3 +59,46 @@ async def test_temporal_graph_current_history_and_tenant_access(client, auth):
                 "name": "Other", "org_name": "Other Graph"})).json()
     response = await client.get(f"/simulations/{sim['id']}/graph?history=true", headers={"Authorization": "Bearer " + second["access_token"]})
     assert response.status_code == 404
+
+
+async def test_hybrid_insight_panorama_and_report_citations(client, auth):
+    from app.db.session import session_scope
+    from app.models import Simulation
+    from app.services.knowledge.store import search
+    from app.services.report.agent import generate
+    from app.services.report.tools import Toolbox
+    headers, data = auth
+    project = (await client.post("/projects", headers=headers, json={"name": "Analyst tools"})).json()
+    run = (await client.post(f"/projects/{project['id']}/simulations", headers=headers,
+                            json={"name": "Learning", "content": {"type": "text", "text": "Python learning"}})).json()
+    writer = GraphWriter(run["id"], 0)
+    writer.node("topic:python", "entity", "Python learning", summary="Daily useful practice")
+    writer.node("agent:student", "agent", "Student", summary="Enjoys useful practice")
+    writer.edge("agent:student", "topic:python", "supports", "Daily useful practice helps learning")
+    await writer.flush()
+    writer.round = 2
+    writer.edge("agent:student", "topic:python", "opposes", "Daily useful practice helps learning")
+    await writer.flush()
+    org = data["orgs"][0]["id"]
+    current = await search(run["id"], "Python", hops=1, org_id=org)
+    assert {n["key"] for n in current["nodes"]} == {"topic:python", "agent:student"}
+    assert [e["relation"] for e in current["facts"]] == ["opposes"]
+    assert not (await search(run["id"], "Python", org_id="other-workspace"))["nodes"]
+    async with session_scope() as s:
+        sim = await s.get(Simulation, run["id"])
+        sim.card = {"title": "Python learning"}
+        sim.results = {"score": {"mean": 7, "first_impression": 6}}
+    tb = Toolbox(sim, make_llm(ProviderSettings()), Usage())
+    panorama = await tb.t_panorama_search({"query": "Python"})
+    assert len(panorama["facts"]) == 2 and panorama["facts"][1]["valid_from_at"]
+    insights = await tb.t_insight_search({"query": "Python", "hops": 2})
+    assert len(insights["sub_questions"]) == 3
+    assert insights["source_edge_ids"] and insights["source_node_ids"]
+    tb.llm.is_dry = False
+    tb.llm.complete_json = AsyncMock(return_value={"questions": ["Python learning", "useful practice", "student stance"]})
+    await tb.t_insight_search({"query": "Why Python?"})
+    tb.llm.complete_json.assert_awaited_once()
+    report = await generate(run["id"], make_llm(ProviderSettings()), Usage())
+    assert "[node:analysis:" in report.summary
+    assert all("[node:analysis:" in section["content"] for section in report.sections)
+    assert "unverified reference omitted" in tb.cite("Invented [node:does-not-exist]")

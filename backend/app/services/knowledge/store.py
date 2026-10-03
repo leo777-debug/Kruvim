@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import and_, or_, select
+import numpy as np
+from sqlalchemy import or_, select
 
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models import GraphEdge, GraphNode
+from app.models import GraphEdge, GraphNode, Simulation
+from app.services.datapool.retrieval import embed
 from app.services.events import bus
 
 
@@ -77,7 +79,8 @@ class GraphWriter:
             self.closures = []
             for n in nodes:
                 s.add(GraphNode(simulation_id=self.sim_id, key=n["key"], kind=n["kind"], type=n["type"], label=n["label"],
-                                summary=n["summary"], attributes=n["attributes"], round=n["round"]))
+                                summary=n["summary"], attributes=n["attributes"], round=n["round"],
+                                vector=embed(n["label"] + " " + n["summary"]).tolist()))
             saved_edges = []
             for e in edges:
                 row = GraphEdge(simulation_id=self.sim_id, src=e["src"], dst=e["dst"], relation=e["relation"], fact=e["fact"],
@@ -127,21 +130,48 @@ async def snapshot(sim_id: str, max_round: int | None = None, history: bool = Fa
             "edges": [edge_public(e) for e in edges]}
 
 
-async def search(sim_id: str, query: str, limit: int = 12) -> dict:
-    terms = [t for t in re.findall(r"[\w؀-ۿ]{3,}", query.lower())][:8]
-    if not terms:
-        return {"nodes": [], "facts": []}
+async def search(sim_id: str, query: str, limit: int = 12, *, history: bool = False, hops: int = 0,
+                 org_id: str | None = None) -> dict:
+    """Hybrid lexical/vector retrieval, followed by bounded relation expansion. Local vectors cost no API calls."""
+    terms = re.findall(r"[\w؀-ۿ]{2,}", query.lower())[:16]
+    qv = embed(query)
+    limit = max(1, min(40, limit))
     async with session_scope() as s:
-        cond = or_(*[GraphNode.label.ilike(f"%{t}%") for t in terms], *[GraphNode.summary.ilike(f"%{t}%") for t in terms])
-        nodes = (await s.execute(select(GraphNode).where(and_(GraphNode.simulation_id == sim_id, cond)).limit(200))).scalars().all()
-        econd = or_(*[GraphEdge.fact.ilike(f"%{t}%") for t in terms], *[GraphEdge.relation.ilike(f"%{t}%") for t in terms])
-        edges = (await s.execute(select(GraphEdge).where(and_(GraphEdge.simulation_id == sim_id, econd)).limit(300))).scalars().all()
+        # Workers pass a validated simulation; public callers also pass their workspace id.
+        if org_id and not (await s.execute(select(Simulation.id).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar():
+            return {"nodes": [], "facts": [], "source_node_ids": [], "source_edge_ids": []}
+        base = select(GraphNode).where(GraphNode.simulation_id == sim_id)
+        if s.bind.dialect.name == "postgresql":
+            vec_nodes = (await s.execute(base.where(GraphNode.vector.is_not(None)).order_by(GraphNode.vector.cosine_distance(qv.tolist())).limit(200))).scalars().all()
+            cond = or_(*[GraphNode.label.ilike(f"%{t}%") for t in terms], *[GraphNode.summary.ilike(f"%{t}%") for t in terms]) if terms else GraphNode.id < 0
+            lexical = (await s.execute(base.where(cond).order_by(GraphNode.id.desc()).limit(400))).scalars().all()
+            candidates = list({n.key: n for n in [*vec_nodes, *lexical]}.values())
+        else:
+            candidates = (await s.execute(base.order_by(GraphNode.id.desc()).limit(5000))).scalars().all()
+        eq = select(GraphEdge).where(GraphEdge.simulation_id == sim_id)
+        if not history:
+            eq = eq.where(GraphEdge.valid_until_round.is_(None))
+        edges = (await s.execute(eq.order_by(GraphEdge.id.desc()).limit(10000))).scalars().all()
 
-    def score(text: str) -> int:
-        tl = (text or "").lower()
-        return sum(tl.count(t) for t in terms)
+        def score(text, vector=None):
+            keyword = sum(text.lower().count(t) for t in terms) / max(1, len(terms))
+            v = np.asarray(vector, dtype=np.float32) if vector is not None else embed(text)
+            return .55 * min(1.0, keyword) + .45 * max(0.0, float(v @ qv))
 
-    nodes = sorted(nodes, key=lambda n: -(score(n.label) * 3 + score(n.summary)))[:limit]
-    facts = sorted([e for e in edges if e.fact], key=lambda e: -score(e.fact))[:limit]
-    return {"nodes": [{"key": n.key, "kind": n.kind, "type": n.type, "label": n.label, "summary": n.summary[:300]} for n in nodes],
-            "facts": [{"src": e.src, "dst": e.dst, "relation": e.relation, "fact": e.fact, "round": e.round} for e in facts]}
+        ranked = sorted(((score(n.label + " " + n.summary, n.vector), n) for n in candidates), key=lambda x: (-x[0], x[1].key))
+        picked = {n.key: n for sc, n in ranked[:limit] if sc > .05}
+        ranked_edges = sorted(((score(e.fact + " " + e.relation), e) for e in edges), key=lambda x: (-x[0], x[1].id))
+        facts = {e.id: e for sc, e in ranked_edges[:limit] if sc > .05}
+        frontier = set(picked) | {k for e in facts.values() for k in (e.src, e.dst)}
+        for _ in range(max(0, min(2, hops))):
+            related = [e for e in edges if e.src in frontier or e.dst in frontier][:80]
+            facts.update({e.id: e for e in related})
+            frontier |= {k for e in related for k in (e.src, e.dst)}
+        missing = frontier - set(picked)
+        if missing:
+            extra = (await s.execute(base.where(GraphNode.key.in_(sorted(missing)[:160])))).scalars().all()
+            picked.update({n.key: n for n in extra})
+    return {"nodes": [{"key": n.key, "kind": n.kind, "type": n.type, "label": n.label, "summary": n.summary[:600],
+                       "round": n.round, "created_at": n.created_at.isoformat()} for n in picked.values()],
+            "facts": [edge_public(e) for e in facts.values()], "source_node_ids": list(picked),
+            "source_edge_ids": list(facts), "method": "hybrid/local-hash-v1", "history": history}

@@ -184,7 +184,7 @@ async def graph(sim_id: str, p: Principal = Depends(principal), s: AsyncSession 
 @router.get("/simulations/{sim_id}/graph/search")
 async def graph_search(sim_id: str, q: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     await get_sim(s, p, sim_id)
-    return await knowledge.search(sim_id, q, 20)
+    return await knowledge.search(sim_id, q, 20, org_id=p.org_id)
 
 
 # ---- Step 2 · environment ------------------------------------------------------------------------------------

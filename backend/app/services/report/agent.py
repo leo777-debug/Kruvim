@@ -29,7 +29,7 @@ Tools:
 {tools}
 Rules:
 - Use at least {min_calls} tools before writing; never more than {max_calls}.
-- Every claim must come from tool observations. Cite numbers and quote simulated people with > blockquotes.
+- Every claim must come from tool observations. Cite its supplied [node:<key>] or [edge:<id>] references; never invent ids. Cite numbers and quote simulated people with > blockquotes.
 - Be specific and actionable for a content creator. No generic advice. No headings inside the section (use **bold**).
 - 150-350 words."""
 
@@ -119,6 +119,7 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
     tb = Toolbox(sim, llm, usage)
     await bus.publish(sim_id, "report.started", {"report_id": rep_id})
     overview = await tb.call("simulation_stats", {"section": "overview"})
+    overview_refs = set(tb.node_ids)
     if llm.is_dry:
         outline = _dry_outline(sim)
     else:
@@ -130,12 +131,14 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
             raise
         except Exception:
             outline = _dry_outline(sim)
+    outline["summary"] = tb.cite(str(outline.get("summary") or ""))
     sections_plan = [x for x in outline.get("sections", []) if isinstance(x, dict) and x.get("title")][:5] or _dry_outline(sim)["sections"]
     await bus.publish(sim_id, "report.outline", {"title": outline.get("title"), "summary": outline.get("summary"),
                                                  "sections": [x["title"] for x in sections_plan]})
     sections = []
     system = REACT_SYSTEM.format(tools=_tools_text(), min_calls=2, max_calls=5)
     for i, sec in enumerate(sections_plan):
+        tb.node_ids, tb.edge_ids = set(overview_refs), set()
         async def emit(payload, i=i):
             await bus.publish(sim_id, "report.log", {"section": i, **payload})
 
@@ -145,6 +148,7 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
             task = (f"User question: {sim.requirement}\nReport title: {outline.get('title')}\nSection {i + 1}: {sec['title']}\n"
                     f"Goal: {sec.get('goal', '')}\nOverview: {overview}")
             content, used = await _react(llm, usage, tb, system, task, emit, 2, 5)
+        content = tb.cite(content)
         sections.append({"title": sec["title"], "content": content, "tools": used})
         await bus.publish(sim_id, "report.section", {"index": i, "title": sec["title"], "content": content})
         async with session_scope() as s:
@@ -180,7 +184,7 @@ async def chat(sim: Simulation, report_md: str, history: list[dict], question: s
     async def emit(p):
         log.append(p)
     answer, used = await _react(llm, usage, tb, system, (convo + "\n" if convo else "") + f"User: {question}", emit, 0, 2)
-    return {"answer": answer, "tools": used}
+    return {"answer": tb.cite(answer), "tools": used}
 
 
 # ---- dry run ----------------------------------------------------------------------------------------------
