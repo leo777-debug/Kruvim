@@ -6,6 +6,7 @@ from .datapool import Connector, Dataset, PopulationVersion, RegionSnapshot, Sig
 from .monitoring import Alert, Watch  # noqa: F401
 from .project import Asset, Project  # noqa: F401
 from .providers import ProviderConfig  # noqa: F401
+from .sharing import ResultShare  # noqa: F401
 from .simulation import (  # noqa: F401
     Action,
     ChatMessage,

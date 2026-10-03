@@ -9,6 +9,7 @@ import { Callout, Empty, UnderlineTabs } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import type { Simulation } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ReportSharing } from "../results/ReportSharing";
 import { OverviewPanel } from "../results/OverviewPanel";
 import { ResultsPanels } from "../results/ResultsPanels";
 import { ActionHistory } from "../results/ActionHistory";
@@ -20,7 +21,7 @@ export function ReportStep({ sim, stream, onAgent, onComment }: { sim: Simulatio
   const rep = useQuery({ queryKey: ["report", sim.id, sim.report_status, stream.report.status], queryFn: () => api(`/simulations/${sim.id}/report`),
     enabled: sim.status === "completed" });
   const r = rep.data;
-  const running = sim.report_status === "running" || sim.report_status === "queued" || stream.report.status === "running";
+  const running = r?.status !== "done" && (sim.report_status === "running" || sim.report_status === "queued" || stream.report.status === "running");
   const sections = r?.status === "done" ? r.sections : Object.entries(stream.report.sections).sort((a, b) => +a[0] - +b[0]).map(([, v]) => v);
   const outline = r?.status === "done" ? { title: r.title, summary: r.summary } : stream.report.outline;
   const log = r?.status === "done" && r.log?.length ? r.log : stream.report.log;
@@ -37,6 +38,7 @@ export function ReportStep({ sim, stream, onAgent, onComment }: { sim: Simulatio
   }
   return (
     <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6">
+      {r?.status === "done" && <ReportSharing simId={sim.id} />}
       <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[
         { key: "overview", label: "Overview" },
         { key: "report", label: "Analyst report", badge: running ? <Loader2 className="h-3 w-3 animate-spin text-brand" /> : undefined },

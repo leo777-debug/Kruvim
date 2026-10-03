@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select
 
-from app.api.routes import auth, collab, creator, datapool, monitoring, platform, projects, simulations, workspace
+from app.api.routes import auth, collab, creator, datapool, monitoring, platform, projects, sharing, simulations, workspace
 from app.core import errors
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -97,7 +97,7 @@ def create_app() -> FastAPI:
                        allow_headers=["*"], expose_headers=["x-request-id"])
     app.add_middleware(RequestContextMiddleware)
     errors.install(app)
-    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, monitoring.router, datapool.router, platform.router):
+    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, monitoring.router, sharing.router, datapool.router, platform.router):
         app.include_router(r, prefix="/api/v1")
     app.add_api_route("/healthz", platform.healthz, include_in_schema=False)
     app.add_api_route("/readyz", platform.readyz, include_in_schema=False)

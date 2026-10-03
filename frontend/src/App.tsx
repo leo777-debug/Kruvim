@@ -16,6 +16,7 @@ const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
 const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
+const PublicResults = lazy(() => import("./features/simulations/PublicResultsPage"));
 const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
 const Settings = lazy(() => import("./features/settings/SettingsPage"));
 const Usage = lazy(() => import("./features/settings/UsagePage"));
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/share/:token" element={<PublicResults />} />
         <Route path="/accuracy" element={<PublicAccuracy />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route index element={<Dashboard />} />

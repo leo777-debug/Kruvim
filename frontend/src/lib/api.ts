@@ -76,6 +76,17 @@ function safeJson(t: string) {
   }
 }
 
+export async function downloadFile(path: string, filename: string, retry = true): Promise<void> {
+  const r = await fetch(`${API}${path}`, {headers: headers(undefined, false)});
+  if (r.status === 401 && retry && await refreshSession()) return downloadFile(path, filename, false);
+  if (!r.ok) throw new Error("The report download failed. Please try again.");
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Authenticated Server-Sent Events over fetch (EventSource cannot send headers). Reconnects from the last seq. */
 export function streamEvents(simId: string, onEvent: (e: SimEvent) => void, opts: { after?: number; onStatus?: (s: "open" | "closed" | "error") => void } = {}) {
   let last = opts.after ?? 0;

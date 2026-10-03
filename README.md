@@ -270,3 +270,8 @@ Feed and forum agents can SEARCH_POSTS, SEARCH_USER, VIEW_TRENDS, REFRESH, MUTE,
 
 ### Part B · Stakeholder personas
 Environment preparation retrieves each stakeholder entity's current neighbours, related facts and live signals from its own workspace's graph. The persona batch receives that context and writes voice, interests, likely stance and posting style; deterministic dry-run personas retain the same evidence and fields. Accounts referring to unknown entities are rejected. The agent sheet exposes the richer persona and graph context. Tests verify context inclusion and workspace isolation.
+
+### Part B · Report downloads and read-only sharing
+Completed reports download as PDF, Word and Markdown, with score, attention heatmap and regional segment charts. Exports use workspace name, accent, footer and a logo when its public image can be safely fetched. Markdown embeds PNGs and also includes numeric tables for readers that do not render data URIs. The report screen's existing analyst console remains streamed and replayable.
+
+Migration `0006` stores expiring capabilities as hashes. Members create links lasting 1–30 days, list their view counts, and revoke them. `/share/<token>` is read-only and needs no account. Public responses omit model internals/configuration, disallow caching/indexing and increment counts atomically. Management and downloads validate workspace ownership. Tests verify file contents/images, branding, unauthorized downloads, expiry/revocation, counts and tenant isolation. PDF layout was rendered and inspected. Word structure was verified; visual rendering remains unverified because the bundled LibreOffice executable is unavailable.

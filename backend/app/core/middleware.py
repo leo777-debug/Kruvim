@@ -41,7 +41,8 @@ class RequestContextMiddleware:
                 status_holder["status"] = message["status"]
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", rid.encode()))
-                headers.extend(SECURITY_HEADERS)
+                existing = {k.lower() for k, _ in headers}
+                headers.extend((k, v) for k, v in SECURITY_HEADERS if k not in existing)
                 message["headers"] = headers
             await send(message)
 
