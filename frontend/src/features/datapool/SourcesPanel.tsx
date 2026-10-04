@@ -56,7 +56,7 @@ export function SourcesPanel() {
 
 export function ObservationMappingDialog({ d, onClose }: { d: any; onClose: () => void }) {
   const cols: string[] = d.columns;
-  const [mapping, setMapping] = useState<any>(d.mapping?.value_col ? d.mapping : { metric: "population_share", unit: "percent", geography: "AE", value_col: "", period_col: "", period_format: "year", dimensions: {} });
+  const [mapping, setMapping] = useState<any>(d.mapping?.value_col ? d.mapping : { metric: "", unit: "", geography: "", value_col: "", period_col: "", period_format: "date", dimensions: {} });
   const [summary, setSummary] = useState<any>(d.summary?.native_grain ? d.summary : null);
   const [dimensionText, setDimensionText] = useState(JSON.stringify(mapping.dimensions));
   let dimensionValid = false;
@@ -68,6 +68,7 @@ export function ObservationMappingDialog({ d, onClose }: { d: any; onClose: () =
       {["metric", "unit", "geography"].map((k) => <Field key={k} label={k[0].toUpperCase() + k.slice(1)} hint="Fixed value, or use a mapped column below"><Input value={mapping[k] || ""} onChange={(e) => setMapping({ ...mapping, [k]: e.target.value })} /></Field>)}
       <Field label="Period format"><Select value={mapping.period_format} onChange={(v) => setMapping({ ...mapping, period_format: v })} options={["year", "month", "date"].map((v) => ({ value: v, label: v }))} /></Field>
       {pick("metric_col", "Metric column (optional)")}{pick("unit_col", "Unit column (optional)")}{pick("geography_col", "Geography column (optional)")}
+      {pick("period_start_col", "Period start column (optional)")}{pick("period_end_col", "Period end column (optional)")}
     </div>
     <Field className="mt-4" label="Dimension mapping" help={'JSON keys to columns, e.g. {"emirate":"Emirate","sex":"Sex","age_band":"Age band"}. No absent dimensions are filled.'}><textarea aria-invalid={!dimensionValid} className="min-h-20 w-full rounded border border-line bg-canvas p-2 text-sm" value={dimensionText} onChange={(e) => { setDimensionText(e.target.value); setSummary(null); try { const dimensions = JSON.parse(e.target.value); setMapping({ ...mapping, dimensions }); } catch { /* Preview is disabled until valid. */ } }} /></Field>
     {summary && <div className="mt-4 space-y-2"><p className="text-sm">{summary.observations} native observations · {summary.missing_cells} missing cells skipped · {summary.geographies.join(", ")}</p><div className="overflow-x-auto"><table className="dt"><thead><tr><th>Metric</th><th>Dimensions</th><th>Value</th><th>Period</th></tr></thead><tbody>{summary.preview.map((o: any, i: number) => <tr key={i}><td>{o.metric}</td><td>{JSON.stringify(o.dimensions)}</td><td>{o.value} {o.unit}</td><td>{o.period_start} — {o.period_end}</td></tr>)}</tbody></table></div><p className="text-xs text-muted">Close the preview, then Apply to store the figures. Licence approval is a separate platform admin action.</p></div>}

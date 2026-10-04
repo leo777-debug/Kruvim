@@ -33,6 +33,17 @@ class FollowerSplit(BaseModel):
 class AudienceProfileIn(BaseModel):
     split: FollowerSplit
     label: str = Field(default="My audience", max_length=200)
+    filters: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_filters(self):
+        from app.schemas.simulation import AudienceIn
+        allowed = {"emirates", "nationality_groups", "income_bands", "languages", "include_visitors"}
+        if set(self.filters) - allowed:
+            raise ValueError("My audience filters support only UAE attributes and the visitor toggle")
+        validated = AudienceIn.model_validate(self.filters)
+        self.filters = {k: validated.model_dump()[k] for k in allowed}
+        return self
 
 
 class PostLinkIn(BaseModel):

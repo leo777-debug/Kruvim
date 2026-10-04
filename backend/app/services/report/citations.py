@@ -85,6 +85,10 @@ async def present_report(s, report, org_id, private=True):
         sections = [{"title": chunk.partition("\n")[0], "content": chunk.partition("\n")[2]} for chunk in chunks[1:]]
     else:
         summary = report.summary
+    from app.services.population.uae import notice
+    sim = (await s.execute(select(Simulation).where(Simulation.id == report.simulation_id, Simulation.org_id == org_id))).scalar_one_or_none()
+    if sim:
+        sections.append({"title": "Audience sources and limitations", "content": notice((sim.config or {}).get("population_provenance"))})
     labels = await source_labels(s, report.simulation_id, org_id, [summary, *[x.get("content", "") for x in sections]])
     intro = render_section(summary, labels, private)
     rendered = [{**({"title": clean(x["title"]), "content": x.get("content", "")} if private else {"title": clean(x["title"])}),

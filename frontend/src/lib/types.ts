@@ -7,6 +7,8 @@ export interface Session { access_token: string; refresh_token: string; expires_
 
 export interface Region { code: string; name: string; short: string; city: string; mena: boolean; tz_offset: number }
 export interface Reference {
+  uae_dimensions: Record<string, string[]>;
+  emirates: { code: string; name: string }[];
   regions: Region[];
   platforms: { key: string; label: string }[];
   stances: string[];

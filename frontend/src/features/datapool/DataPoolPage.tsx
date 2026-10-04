@@ -281,7 +281,7 @@ function Barometers() {
           ))}</tbody>
         </table>
       </Card>
-      {mapFor && (mapFor.registered_source_id ? <ObservationMappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} /> : <MappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} />)}
+      {mapFor && (mapFor.registered_source_id && !mapFor.mapping?.country_col ? <ObservationMappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} /> : <MappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} />)}
     </div>
   );
 }

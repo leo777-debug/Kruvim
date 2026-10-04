@@ -32,6 +32,7 @@ def real_world(casc: dict, followers: int | None, platform: str | None) -> dict 
     cap = sum(r.get("social_users_m", 0) for r in REGIONS) * 1e6
     runs = np.minimum(np.array(casc["people_runs"], dtype=np.float64) * first / casc["seed_people"], cap)
     return {"followers": int(followers), "organic_rate": rate, "first_viewers": round(first), "median": int(np.median(runs)),
+            "population_status": "placeholder", "population_label": "estimate, source pending",
             "p10": int(np.percentile(runs, 10)), "p90": int(np.percentile(runs, 90)),
             "p_over_100k": round(float((runs >= 1e5).mean()), 3), "p_over_1m": round(float((runs >= 1e6).mean()), 3),
             "method": f"Your {followers:,} followers × {rate:.0%} typical first-day organic reach on this platform = {first:,.0f} first "
@@ -61,7 +62,13 @@ def finalize(e) -> dict:
     rs = np.random.default_rng(e.seed + 3)
     samp = rs.choice(aud, min(30000, aud.size), replace=False)
     lo, hi = projection.bootstrap_mean(e.X0, Yf[:, 0], projection.design(pop, samp, e.topic_vec, e.platform_key, surface.history), e.seed)
+    confidence = min((x.get("confidence", 0) for x in pop.provenance.get("attribute_confidence", {}).values()), default=0)
+    widening = (1 - confidence) * .5 + sum(x.get("uncertainty_widening", 0) for x in pop.provenance.get("conflicts", []))
+    lo, hi = max(0, lo - widening), min(10, hi + widening)
     res: dict = {"seed": e.seed}
+    res["population_provenance"] = pop.provenance
+    res["population_version"] = pop.version
+    res["population_uncertainty"] = {"additional_half_width": widening, "method": "Explicit heuristic widening for placeholder coverage and source conflicts; not a measured error bound"}
     memory = e.cfg.get("agent_memory", {})
     res["agent_memory"] = {key: memory.get(key) for key in ("fresh", "returning", "voice", "recalled", "requested_share", "achieved_share", "shortfall", "snapshot_at", "label")}
     res["memory_first_impressions"] = {variant: {"with_memory": round(float(np.mean([r["score"] for r in reactions])), 3),
@@ -81,7 +88,7 @@ def finalize(e) -> dict:
                     "crowd_first": round(float(e.c_op0.mean()), 2) if getattr(e, "c_op0", None) is not None else None,
                     "crowd_final": round(float(e.c_op.mean()), 2) if getattr(e, "c_op", None) is not None else None,
                     "positive": round(float((sc >= 6.5).mean()), 3), "negative": round(float((sc < 4).mean()), 3),
-                    "method": "Projected post-discussion opinion over the full audience; 95% interval from 150 bootstrap refits."}
+                    "method": "Projected post-discussion opinion; bootstrap interval from 150 refits, widened for weak population evidence. Source uncertainty is a labelled heuristic, not a measured accuracy guarantee."}
     res["model"] = {"r2": dict(zip(surface.targets[:6], surface.r2[:6])), "features": int(e.X0.shape[1]), "lambda": surface.lam,
                     "voice_n": int(ids.size)}
 
@@ -105,6 +112,20 @@ def finalize(e) -> dict:
                      "age": gstats(band, vband, 5, lambda k: AGE_BAND_LABELS[k]),
                      "gender": gstats(male, vmale, 2, lambda k: ["Women", "Men"][k]),
                      "stance": gstats(stance, vst, len(STANCES), lambda k: STANCES[k])}
+    from app.services.population.uae import EMIRATES
+    ae_aud, ae_voice = aud[reg == 0], ids[vreg == 0]
+    if ae_aud.size:
+        # Dedicated emirate segments retain real row counts; country AE remains the compatible union.
+        emirate_rows = []
+        for k, (code, label) in enumerate(EMIRATES.items()):
+            members = ae_aud[pop.uae["residence_emirate"][ae_aud] == k]
+            if members.size:
+                values = P[members, 0].astype(np.float32)
+                score = float(values.mean())
+                emirate_rows.append({"key": code, "label": label, "n": int(members.size), "score": round(score, 2),
+                    "low": max(0, score - widening), "high": min(10, score + widening), "population_status": pop.provenance["status"],
+                    "voice_n": int((pop.uae["residence_emirate"][ae_voice] == k).sum())})
+        res["groups"]["emirate"] = emirate_rows
     ikey = (reg * 5 + band) * 2 + male
     vikey = (vreg * 5 + vband) * 2 + vmale
     inter = gstats(ikey, vikey, len(REGIONS) * 10, lambda k: group_label(k // 10, (k // 2) % 5, k % 2))

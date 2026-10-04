@@ -204,7 +204,7 @@ class Engine:
         self.mpr = int(t["minutes_per_round"])
         self.rounds = int(t["rounds"])
         self.rng = np.random.default_rng(self.seed)
-        self.pop = await get_population()
+        self.pop = await get_population(self.cfg.get("population_version"))
         self.topic_vec = topic_vector(self.card.get("topics"))
         self.snaps = self.cfg.get("context", {})
         self.world_block = "\n".join(f"{v.get('name')} ({v.get('city')}): {v.get('brief')}" for v in self.snaps.values()) or "No live context."

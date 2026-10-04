@@ -27,6 +27,7 @@ export function ResultsPanels({ sim, onAgent, onComment }: { sim: Simulation; on
           <button key={k} onClick={() => go(k)} className="whitespace-nowrap rounded-md px-2.5 py-1 text-[13px] text-muted hover:bg-raised hover:text-fg">{l}</button>
         ))}
       </nav>
+      <Callout tone="warn" className="mb-5" title={r.population_provenance?.label || "estimate, source pending"}>Population-based figures describe simulated agents. Unloaded demographic cells and reach-scale priors are estimates; see Method for registered sources, conflicts and coverage gaps.</Callout>
       <div className="space-y-10">
         <Verdict r={r} />
         <Attention r={r} sim={sim} onComment={onComment} />
@@ -468,6 +469,11 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
         <Card className="space-y-2 p-4 text-muted leading-relaxed">
           <div className="eyebrow mb-1">Method</div>
           <p>{r.score.method}</p>
+          <p>Audience population: {r.population_provenance?.label || "estimate, source pending"}.</p>
+          {r.population_provenance?.sources?.map((s: any) => <p key={s.url}><a href={s.url} target="_blank" rel="noreferrer" className="text-brand hover:underline">{s.name}</a> · {s.status}</p>)}
+          {!!r.population_provenance?.attribute_confidence && <p>Placeholder support: {Object.entries(r.population_provenance.attribute_confidence).filter(([, v]: any) => v.status !== "sourced").map(([k]) => k.replaceAll("_", " ")).join(", ")}</p>}
+          {r.population_provenance?.conflicts?.map((c: any, i: number) => <p key={i}>Source conflict in {c.geography}: {Object.keys(c.dimensions).join(", ")}. Competing figures retained; uncertainty widened.</p>)}
+          {r.population_provenance?.coverage_gaps?.map((g: any, i: number) => <p key={i}>Coverage gap: {g.attribute.replaceAll("_", " ")} — {g.reason}</p>)}
           {r.agent_memory && <p>Simulated audience memory: {r.agent_memory.returning ?? 0} of {r.agent_memory.voice ?? 0} voice agents were returning; {r.agent_memory.recalled ?? 0} memories recalled.
             {r.agent_memory.fresh ? " Fresh audience was on; history was ignored." : " Fresh audience was off."}
             {!!r.agent_memory.shortfall && ` ${r.agent_memory.shortfall} requested returning places could not be filled within the audience segments.`}</p>}

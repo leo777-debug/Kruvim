@@ -46,6 +46,18 @@ pause, resume, change pacing, stop early or inject a breaking-news event.
   Data pool → Sources shows the import/licence checklist; Survey data accepts registered CSV/XLSX imports with
   mapping and preview. [Import instructions, adapters and download locations](docs/source-registry.md) describe
   outstanding publisher permissions and the FCSC endpoint's access restriction. No remembered figures are seeded.
+* **UAE reconciliation**: AE remains a country-wide union with stable `p:<row>` identities. Namespaced arrays
+  add Dubai, Abu Dhabi, Sharjah and northern-emirate residence/work, nationality groups, occupation/income,
+  household, language, visa and calendar membership. Unloaded attributes are labelled **estimate, source pending**;
+  remittance amounts and salary dates remain unknown rather than invented. Native approved population shares
+  (or counts with an explicit same-source/period/geography total) are fitted by bounded iterative proportional
+  fitting. Reliability, exponential recency and geography match rank competing cells. Conflicting values are
+  retained, the strongest-supported target is selected transparently, and uncertainty widens; disagreements
+  are never averaged away. Missing/unmapped cells and non-convergent fits remain coverage gaps. Public proxy
+  tables are retained at their native grain and require an explicit transformation before becoming marginals.
+  Rebuild versions record source/observation ids, confidence, conflicts and gaps, and require platform-admin
+  activation; previous ready versions can be reactivated. New runs freeze the population version. Method,
+  reports and exports disclose assumptions; source uncertainty widening is explicitly a model heuristic.
 
 ```
             ┌────────────┐   /api (REST + SSE)   ┌──────────────┐   jobs (arq)   ┌──────────────┐

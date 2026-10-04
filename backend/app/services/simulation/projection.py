@@ -86,6 +86,14 @@ def fit(X: np.ndarray, Y: np.ndarray, targets: list[str], seed: int, lam: float 
 
 
 def _apply(m: Surface, X: np.ndarray, noise: np.ndarray | None) -> np.ndarray:
+    if X.shape[1] != m.W.shape[0]:
+        # Historical surfaces predate the appended UAE dimensions. Preserve their exact old layout.
+        if m.W.shape[0] == 42 and m.history is not None:
+            X = np.concatenate([X[:, :39], X[:, -3:]], 1)
+        elif m.W.shape[0] == 39 and m.history is None:
+            X = X[:, :39]
+        else:
+            raise ValueError("Population feature schema does not match the stored reaction surface")
     P = ((X - m.mu) / m.sd) @ m.W + m.b
     if noise is not None:
         P = P + noise * (m.sigma * 0.9)

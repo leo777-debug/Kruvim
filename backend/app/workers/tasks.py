@@ -358,9 +358,11 @@ async def build_population(ctx, version_id: str):
         pop = await asyncio.to_thread(store.build_to_disk, version_id, size, seed, priors)
         st = await asyncio.to_thread(stats, pop)
         async with session_scope() as s:
-            await s.execute(update(PopulationVersion).values(is_active=False))
             v = await s.get(PopulationVersion, version_id)
-            v.status, v.is_active, v.stats = "ready", True, st
+            activate = not priors.get("_manual_activation")
+            if activate:
+                await s.execute(update(PopulationVersion).values(is_active=False))
+            v.status, v.is_active, v.stats = "ready", activate, st
     except Exception as exc:
         async with session_scope() as s:
             v = await s.get(PopulationVersion, version_id)

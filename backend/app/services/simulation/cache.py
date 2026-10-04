@@ -34,7 +34,7 @@ async def get(sim_id: str, results: dict, audience: dict) -> dict | None:
     from app.services.population import get_population
 
     from .projection import Surface, project_population
-    pop = await get_population()
+    pop = await get_population(results.get("population_version"))
     preds = {}
     for v, m in results["models"].items():
         tvv = np.array((results.get("topic_vectors") or {}).get(v, results["topic_vector"]), np.float32)

@@ -7,6 +7,7 @@ import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
 import { RegionPicker } from "@/components/ui/RegionPicker";
+import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
 import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -258,6 +259,7 @@ export default function NewSimulationPage() {
               label="Match my audience" />
             <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
             <Field label="Audience regions"><RegionPicker value={aud.regions} onChange={(value) => setAud({ ...aud, regions: value })} /></Field>
+            {(aud.regions.includes("AE") || aud.regions.some((v: string) => v.startsWith("AE-"))) && <UaeAudienceFilters value={aud} onChange={setAud} />}
             <div className="space-y-3 rounded-md border border-line p-3">
               <Field label="Creator or channel" hint="Use the same name in each test to retain this creator's simulated audience history.">
                 <Input maxLength={120} value={creatorSubject} onChange={(e) => setCreatorSubject(e.target.value)} placeholder="workspace" />

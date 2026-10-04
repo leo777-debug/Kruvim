@@ -19,7 +19,7 @@ async def explore(sim: Simulation, filters: dict) -> dict | None:
     d = await cache.get(sim.id, sim.results, sim.audience)
     if not d:
         return None
-    pop = await get_population()
+    pop = await get_population((sim.config or {}).get("population_version"))
     sub = d["mask"] & pop.mask(filters)
     idx = np.flatnonzero(sub)
     out = {"size": int(idx.size), "share_of_audience": round(float(idx.size / max(1, d["mask"].sum())), 4)}
@@ -90,7 +90,7 @@ def _slice_recs(o: dict) -> list[str]:
 
 
 async def agent_detail(sim: Simulation, ref: str) -> dict | None:
-    pop = await get_population()
+    pop = await get_population((sim.config or {}).get("population_version"))
     async with session_scope() as s:
         row = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim.id, SimAgent.ref == ref))).scalar_one_or_none()
         posts = (await s.execute(select(Post).where(Post.simulation_id == sim.id, Post.author_ref == ref).order_by(Post.id).limit(40))).scalars().all()

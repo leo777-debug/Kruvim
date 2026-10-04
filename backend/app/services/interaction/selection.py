@@ -14,7 +14,9 @@ def returning_panel(pop, mask, baseline, returning_ids, share, rng):
     returning = np.asarray(sorted(set(returning_ids)), dtype=np.int64)
     returning = returning[(returning >= 0) & (returning < pop.n)]
     returning = returning[mask[returning]]
-    keys = lambda idx: (pop.region[idx].astype(int) * 2 + pop.male[idx]) * 5 + pop.age_band[idx]  # noqa: E731
+    def keys(idx):
+        emirate = np.where(pop.region[idx] == 0, pop.uae["residence_emirate"][idx] + 1, 0)
+        return ((pop.region[idx].astype(int) * 5 + emirate) * 2 + pop.male[idx]) * 5 + pop.age_band[idx]
     groups, quotas = np.unique(keys(baseline), return_counts=True)
     desired = min(len(baseline), round(len(baseline) * share))
     raw = quotas * share

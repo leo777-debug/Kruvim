@@ -151,6 +151,7 @@ def test_returning_panel_preserves_exact_segment_counts():
 
     from app.services.interaction.selection import returning_panel
     pop = SimpleNamespace(n=200, region=np.repeat([0, 1], 100), male=np.tile(np.repeat([0, 1], 50), 2), age_band=np.zeros(200, dtype=int))
+    pop.uae = {"residence_emirate": np.tile(np.arange(4), 50)}
     baseline = np.array([0, 1, 2, 3, 50, 51, 100, 101, 150, 151])
     mask = np.ones(200, dtype=bool)
     old = list(range(30)) + list(range(50, 80)) + list(range(100, 130)) + list(range(150, 180))

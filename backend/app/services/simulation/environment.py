@@ -81,6 +81,8 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
                 snapshot["source_weights"][source] = snapshot["source_weights"].get(source, 1) * tone.get("source_weight", 1)
         if audience.get("use_creator_audience"):
             profile = (org.settings or {}).get("creator_audience", {})
+            audience.update({k: v for k, v in profile.get("filters", {}).items()
+                             if k in ("emirates", "nationality_groups", "income_bands", "languages", "include_visitors")})
             split = profile.get("split")
             if profile.get("connection_id"):
                 connection = (await s.execute(select(SocialConnection).where(SocialConnection.id == profile["connection_id"],
@@ -255,6 +257,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             "audience_twin": twin, "creator_memory": creator_memory, "accuracy_live_model": not llm.is_dry,
             "retrieval_usage": retrieval_usage,
             "agent_memory": memory_snapshot,
+            "population_version": pop.version, "population_provenance": pop.provenance,
         }
         for k in ("autopilot", "watch_id", "rerun_of"):        # lifecycle markers survive regeneration
             if k in (sim.config or {}):

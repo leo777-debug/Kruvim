@@ -5,9 +5,10 @@ statistical policy and every row receives a projected reaction (see simulation/p
 """
 from __future__ import annotations
 
+import copy
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -80,8 +81,12 @@ class Population:
     fol_ptr: np.ndarray
     fol_idx: np.ndarray
     followers_n: np.ndarray
+    uae: dict = field(default_factory=dict)
+    provenance: dict = field(default_factory=dict)
 
     def uses(self, platform: str) -> np.ndarray:
+        if platform == "whatsapp":
+            return self.uae["whatsapp"]
         return (self.platforms & (1 << PLATFORMS.index(platform))) > 0
 
     def mask(self, f: dict | None) -> np.ndarray:
@@ -89,8 +94,20 @@ class Population:
         m = np.ones(self.n, dtype=bool)
         codes = f.get("regions")
         if codes:
+            from .uae import EMIRATES
             ids = [i for i, r in enumerate(REGIONS) if r["code"] in set(codes)]
-            m &= np.isin(self.region, np.array(ids, dtype=np.int8))
+            country_mask = np.isin(self.region, np.array(ids, dtype=np.int8))
+            for code in codes:
+                if code in EMIRATES:
+                    country_mask |= (self.region == 0) & (self.uae["residence_emirate"] == list(EMIRATES).index(code))
+            m &= country_mask
+        from .uae import DOMAINS
+        for key in ("nationality_group", "residence_emirate", "income_band", "language"):
+            selected = f.get({"nationality_group": "nationality_groups", "residence_emirate": "emirates", "income_band": "income_bands", "language": "languages"}[key])
+            if selected:
+                m &= (self.region == 0) & np.isin(self.uae[key], [DOMAINS[key].index(v) for v in selected if v in DOMAINS[key]])
+        if not f.get("include_visitors"):
+            m &= (self.region != 0) | (self.uae["status"] == 0)
         if f.get("age_min") not in (None, ""):
             m &= self.age >= int(f["age_min"])
         if f.get("age_max") not in (None, ""):
@@ -103,7 +120,7 @@ class Population:
         if f.get("platforms"):
             pm = np.zeros(self.n, dtype=bool)
             for p in f["platforms"]:
-                if p in PLATFORMS:
+                if p in PLATFORMS or p == "whatsapp":
                     pm |= self.uses(p)
             m &= pm
         if f.get("stances"):
@@ -134,13 +151,15 @@ class Population:
         langs = reg["languages"]
         lang = langs[int(self.lang[i]) % len(langs)]
         plats = [PLATFORM_LABELS[p] for k, p in enumerate(PLATFORMS) if int(self.platforms[i]) & (1 << k)]
+        if self.uae.get("whatsapp") is not None and self.uae["whatsapp"][i]:
+            plats.append("WhatsApp")
         top = np.argsort(-self.interests[i].astype(np.float32))[:3]
         interests = [{"key": INTERESTS[k], "label": INTEREST_LABELS[INTERESTS[k]], "w": round(float(self.interests[i, k]), 2)} for k in top]
         oc = [round(float(x), 2) for x in self.ocean[i]]
         at = [round(float(x), 2) for x in self.attitudes[i]]
         male = bool(self.male[i])
         name, handle = name_for(i, reg["code"], origin, male)
-        return {
+        result = {
             "id": i, "name": name, "handle": handle, "age": int(self.age[i]), "age_band": AGE_BAND_LABELS[int(self.age_band[i])],
             "gender": GENDERS[int(male)], "region": reg["code"], "region_name": reg["name"], "city": reg["city"],
             "origin": origin, "citizen": bool(self.citizen[i]), "language": lang,
@@ -152,6 +171,14 @@ class Population:
             "interests": interests, "stance": STANCES[int(self.stance[i])],
             "follows": int(self.follows_n[i]), "followers": int(self.followers_n[i]),
         }
+        from .uae import LABEL, PLACEHOLDER_ID, persona
+        result.update(persona(self, i))
+        result.setdefault("population_status", "placeholder")
+        result.setdefault("population_label", LABEL)
+        result.setdefault("population_provenance", {"status": "placeholder", "label": LABEL, "source_ids": [PLACEHOLDER_ID]})
+        if self.region[i] == 0:
+            result["name"], result["handle"] = name_for(i, "AE", result["origin"], male)
+        return result
 
     def followers_of(self, i: int) -> np.ndarray:
         return self.fol_idx[self.fol_ptr[i]:self.fol_ptr[i + 1]]
@@ -261,10 +288,15 @@ def generate(n: int, seed: int, priors: dict | None = None, version: str = "defa
                         2, 30).astype(np.int16)
     fol_ptr, fol_idx, followers_n = _build_graph(rng, region, age_band, infl, follows_n, R)
     log.info("population generated", extra={"duration_ms": round((time.time() - t0) * 1000)})
-    return Population(n=n, seed=seed, version=version, regions=regions, region=region, age=age, age_band=age_band, male=male,
+    pop = Population(n=n, seed=seed, version=version, regions=regions, region=region, age=age, age_band=age_band, male=male,
                       citizen=citizen, origin=origin, education=education, income=income, profession=prof, ocean=ocean,
                       attitudes=attitudes.astype(np.float16), platforms=plat, screen=screen, interests=interests, stance=stance,
                       lang=lang, infl=infl, follows_n=follows_n, fol_ptr=fol_ptr, fol_idx=fol_idx, followers_n=followers_n)
+    from .uae import fit, placeholder_provenance
+    from .uae import seed as seed_uae
+    pop.provenance = copy.deepcopy((priors or {}).get("_provenance") or placeholder_provenance())
+    seed_uae(pop)
+    return fit(pop, (priors or {}).get("_uae_targets", []))
 
 
 def _build_graph(rng, region, age_band, infl, follows_n, R):
@@ -301,10 +333,15 @@ def _build_graph(rng, region, age_band, infl, follows_n, R):
 
 
 def stats(pop: Population) -> dict:
+    from .uae import EMIRATES
     rs = np.random.default_rng(1)
     s = rs.choice(pop.n, min(200_000, pop.n), replace=False)
     fol = pop.followers_n
     return {
+        "provenance": pop.provenance,
+        "status": pop.provenance.get("status", "placeholder"), "label": pop.provenance.get("label", "estimate, source pending"),
+        "emirates": [{"code": code, "name": name, "n": int(((pop.region == 0) & (pop.uae["residence_emirate"] == k)).sum())}
+                      for k, (code, name) in enumerate(EMIRATES.items())],
         "n": pop.n, "edges": int(pop.fol_idx.size),
         "regions": [{"code": r["code"], "name": r["name"], "n": int(c)}
                     for r, c in zip(pop.regions, np.bincount(pop.region.astype(np.int64), minlength=len(pop.regions)))],

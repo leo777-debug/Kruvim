@@ -5,10 +5,12 @@ by importing real survey data (Data Pool → Barometers): Arab Barometer, Pew Gl
 World Values Survey or census tables. Imported marginals override these per region.
 
 `weight` is the share of Kruvim's synthetic population assigned to a region (a product decision,
-MENA-first), not a share of world population. `social_users_m` is the approximate number of social-media users in
-millions (DataReportal 2025, rounded); it only scales simulated reach to a rough real-world estimate.
+MENA-first), not a share of world population. Legacy reach-scale constants are UNSOURCED placeholder
+configuration; they are not attributed to DataReportal. Their outputs must carry estimate, source pending.
 """
 from __future__ import annotations
+
+from .uae import NATIONALITIES, PLACEHOLDER_ID
 
 AGE_BANDS = [(16, 24), (25, 34), (35, 44), (45, 54), (55, 70)]
 AGE_BAND_LABELS = ["16-24", "25-34", "35-44", "45-54", "55-70"]
@@ -106,6 +108,14 @@ REGIONS = [
      "news_rss": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en", "gdelt_country": "india", "wiki_lang": "hi",
      "holiday_cc": "IN", "subreddits": ["india", "mumbai"], "yt_region": "IN", "lang_code": "hi"},
 ]
+
+# Model configuration, never demographic observations. Native approved cells are fitted at rebuild.
+REGIONS[0]["expat_labels"] = NATIONALITIES[1:]
+REGIONS[0]["expat_mix"] = [1] * (len(NATIONALITIES) - 1)
+for _region in REGIONS:
+    _region["population_status"] = "placeholder"
+    _region["population_label"] = "estimate, source pending"
+    _region["source_ids"] = [PLACEHOLDER_ID]
 
 REGION_CODES = [r["code"] for r in REGIONS]
 REGION_INDEX = {r["code"]: i for i, r in enumerate(REGIONS)}

@@ -47,6 +47,11 @@ class AudienceIn(BaseModel):
     follower_split: FollowerSplit | None = None
     use_creator_audience: bool = False
     regions: list[str] = Field(default_factory=list)
+    emirates: list[str] = Field(default_factory=list)
+    nationality_groups: list[str] = Field(default_factory=list)
+    income_bands: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    include_visitors: bool = False
     age_min: int | None = Field(default=None, ge=16, le=70)
     age_max: int | None = Field(default=None, ge=16, le=70)
     genders: list[Literal["female", "male"]] = Field(default_factory=list)
@@ -62,6 +67,11 @@ class AudienceIn(BaseModel):
 
     @model_validator(mode="after")
     def _ranges(self):
+        from app.services.population.uae import DOMAINS
+        for field, dimension in (("emirates", "residence_emirate"), ("nationality_groups", "nationality_group"),
+                                 ("income_bands", "income_band"), ("languages", "language")):
+            if any(v not in DOMAINS[dimension] for v in getattr(self, field)):
+                raise ValueError(f"{field}: choose a supported UAE attribute")
         if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
             raise ValueError("The minimum age is higher than the maximum age.")
         for k, (lo, hi) in self.ocean.items():

@@ -97,6 +97,8 @@ async def edit_source(source_id: str, body: SourcePatch, p: Principal = Depends(
     # Changing the licence invalidates the previous grant unless re-approved explicitly.
     if "licence" in changes and changes["licence"] != row.licence:
         changes.setdefault("licence_approved", False)
+    if "config" in changes and changes["config"] != row.config:
+        changes.setdefault("licence_approved", False)
     if changes.get("licence_approved") and (not row.licence_approved or changes.get("licence", row.licence) != row.licence or body.approval_note.strip()):
         if not body.approval_note.strip():
             raise AppError("Record the commercial reuse grant or licence evidence in the approval note.")

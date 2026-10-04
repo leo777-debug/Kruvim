@@ -14,7 +14,7 @@ from app.api.routes.sources import router as sources_router
 from app.core.config import settings
 from app.core.errors import AppError, Forbidden, NotFound
 from app.db.session import get_session
-from app.models import Connector, Dataset, DataSource, PopulationVersion, RegionSnapshot, Signal, User
+from app.models import Connector, Dataset, DataSource, PopulationVersion, RegionSnapshot, Signal, SourceObservation, User
 from app.schemas.simulation import AudienceIn
 from app.services import audit, jobs, storage
 from app.services.datapool import REGISTRY, ensure_platform_connectors, listen, snapshots_at
@@ -218,7 +218,7 @@ async def map_dataset(dataset_id: str, mapping: dict, p: Principal = Depends(rol
     if not d.registered_source_id and not mapping.get("country_col"):
         raise AppError("Choose the column that holds the country.")
     try:
-        if d.registered_source_id:
+        if d.registered_source_id and not mapping.get("country_col"):
             from app.services.sources.adapters import parse_table
             observations, missing = parse_table(await storage.get(d.storage_key), mapping, d.filename)
             summary = {"observations": len(observations), "missing_cells": missing, "preview": observations[:20],
@@ -244,7 +244,21 @@ async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), 
          (Dataset.org_id == p.org_id) | Dataset.org_id.is_(None)))).scalar_one_or_none()
     if not d or d.status not in ("mapped", "applied"):
         raise AppError("Map the dataset's columns first.")
-    if d.registered_source_id:
+    if not d.registered_source_id:
+        # Legacy respondent imports must receive the same explicit licence review as native tables.
+        source = DataSource(key="survey_" + d.id, name=d.name[:240], publisher=d.source[:240], country="*",
+            geography_level="country", url="https://github.com/leo777-debug/Kruvim/tree/kruvim",
+            access_method="manual", licence="licence to confirm — uploader must provide the original publisher's commercial reuse grant",
+            attribution="Uploaded survey; cite original publisher, survey wave and retained upload", cadence="irregular", reliability=.5,
+            notes="Original file retained as asset:" + d.id + ". Respondent summary cannot weight the shared population until reuse approval.",
+            attributes=["survey_demographics"], config={}, status="pending_import")
+        s.add(source)
+        await s.flush()
+        d.registered_source_id = source.id
+        await s.commit()
+        raise AppError("Survey registered for licence review. Approve its commercial reuse in Sources, then apply again.")
+    registered = await s.get(DataSource, d.registered_source_id)
+    if d.registered_source_id and not d.mapping.get("country_col"):
         from app.services.sources import eligible, store_observations
         from app.services.sources.adapters import parse_table
         registered = await s.get(DataSource, d.registered_source_id)
@@ -257,13 +271,19 @@ async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), 
                      meta={"dataset_id": d.id, "observations": count, "missing_cells": missing})
         await s.commit()
         return {"observations": count, "missing_cells": missing, "production_eligible": eligible(registered)}
-    applied = (await s.execute(select(Dataset).where(Dataset.status == "applied", Dataset.registered_source_id.is_(None),
+    from app.services.sources import eligible
+    if not eligible(registered):
+        raise AppError("Approve and activate this survey's commercial reuse in Sources before applying it.")
+    applied = (await s.execute(select(Dataset).join(DataSource, Dataset.registered_source_id == DataSource.id)
+        .where(Dataset.status == "applied", DataSource.status == "active", DataSource.licence_approved.is_(True), DataSource.reliability > 0,
                (Dataset.org_id == p.org_id) | Dataset.org_id.is_(None)))).scalars().all()
+    applied = [x for x in applied if x.mapping.get("country_col")]
     priors = priors_from_summaries([x.summary for x in applied if x.id != d.id] + [d.summary])
     if not priors:
         raise AppError("No region in this dataset has at least 100 respondents.")
     v = PopulationVersion(label=f"Calibrated with {d.name}", size=settings.population_size, seed=settings.population_seed, priors=priors,
-                          dataset_ids=[x.id for x in applied if x.id != d.id] + [d.id], status="pending")
+                          dataset_ids=[x.id for x in applied if x.id != d.id] + [d.id],
+                          source_ids=sorted({registered.id, *(x.registered_source_id for x in applied)}), status="pending")
     s.add(v)
     d.status = "applied"
     audit.record(s, "population.calibrate", org_id=p.org_id, user_id=p.user_id, target=d.name)
@@ -278,11 +298,64 @@ async def population(p: Principal = Depends(principal), s: AsyncSession = Depend
     from app.services.population.generator import stats
     pop = await get_population()
     v = (await s.execute(select(PopulationVersion).where(PopulationVersion.is_active.is_(True)))).scalar_one_or_none()
-    st = v.stats if v and v.stats else stats(pop)
+    st = v.stats if v and v.stats and "provenance" in v.stats else stats(pop)
     versions = (await s.execute(select(PopulationVersion).order_by(desc(PopulationVersion.created_at)).limit(20))).scalars().all()
     return {"active": {"id": v.id if v else "base", "label": v.label if v else "Base priors", "priors": v.priors if v else {}}, "stats": st,
             "versions": [{"id": x.id, "label": x.label, "status": x.status, "is_active": x.is_active, "created_at": x.created_at,
                           "regions": list((x.priors or {}).keys()), "error": x.error} for x in versions]}
+
+
+@router.post("/population/rebuild")
+async def rebuild_population(body: dict, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
+    from app.api.routes.sources import admin
+    from app.services.population.uae import reconcile
+    from app.services.sources import ensure_sources
+    admin(p)
+    await ensure_sources(s)
+    sources = {x.id: x for x in (await s.execute(select(DataSource))).scalars()}
+    query = select(SourceObservation)
+    if body.get("source_ids"):
+        if not isinstance(body["source_ids"], list) or any(x not in sources for x in body["source_ids"]):
+            raise AppError("Choose registered source IDs.")
+        query = query.where(SourceObservation.source_id.in_(body["source_ids"]))
+    observations = (await s.execute(query.order_by(SourceObservation.id).limit(100001))).scalars().all()
+    if len(observations) > 100000:
+        raise AppError("Select sources to keep this rebuild within 100,000 observations.")
+    targets, provenance = reconcile(observations, sources, datetime.now(UTC))
+    v = PopulationVersion(label=str(body.get("label") or "Sourced UAE rebuild")[:200], size=settings.population_size,
+        seed=settings.population_seed, priors={"_uae_targets": targets, "_provenance": provenance, "_manual_activation": True},
+        source_ids=provenance["source_ids"], observation_ids=provenance["observation_ids"],
+        attribute_confidence=provenance["attribute_confidence"], conflicts=provenance["conflicts"], coverage_gaps=provenance["coverage_gaps"], status="pending")
+    s.add(v)
+    await s.flush()
+    audit.record(s, "population.rebuild", org_id=p.org_id, user_id=p.user_id, target=v.id)
+    await s.commit()
+    await jobs.enqueue("build_population", version_id=v.id)
+    return {"version_id": v.id, "provenance": provenance, "requires_activation": True}
+
+
+@router.post("/population/versions/{version_id}/activate")
+async def activate_population(version_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
+    from sqlalchemy import update
+
+    from app.api.routes.sources import admin
+    from app.services.population.uae import PLACEHOLDER_ID
+    from app.services.sources import eligible
+    admin(p)
+    v = await s.get(PopulationVersion, version_id)
+    if not v or v.status != "ready":
+        raise AppError("Choose a completed population version.")
+    for source_id in v.source_ids or []:
+        if source_id == PLACEHOLDER_ID:
+            continue
+        source = await s.get(DataSource, source_id)
+        if not source or not eligible(source):
+            raise AppError("A source used by this version is no longer approved. Rebuild before activating.")
+    await s.execute(update(PopulationVersion).values(is_active=False))
+    v.is_active = True
+    audit.record(s, "population.activate", org_id=p.org_id, user_id=p.user_id, target=v.id)
+    await s.commit()
+    return {"active_version_id": v.id}
 
 
 @router.post("/population/count")

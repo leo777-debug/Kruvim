@@ -59,8 +59,10 @@ async def metrics():
 
 @router.get("/reference", tags=["reference"])
 async def reference():
+    from app.services.population.uae import DOMAINS, EMIRATES
     return {"regions": [{"code": r["code"], "name": r["name"], "short": r["short"], "city": r["city"], "mena": r["code"] in MENA_CODES,
                          "tz_offset": r["tz_offset"]} for r in REGIONS],
+            "uae_dimensions": DOMAINS, "emirates": [{"code": k, "name": v} for k, v in EMIRATES.items()],
             "platforms": [{"key": p, "label": PLATFORM_LABELS[p]} for p in PLATFORMS], "stances": STANCES, "age_bands": AGE_BAND_LABELS,
             "education": EDUCATION, "interests": [{"key": k, "label": INTEREST_LABELS[k]} for k in INTERESTS], "presets": PRESETS,
             "professions": PROFESSIONS, "incomes": INCOME_LABELS, "formats": formats.public(),

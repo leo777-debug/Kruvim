@@ -9,6 +9,7 @@ import { Card, Field, Input, Switch, Textarea } from "@/components/ui/primitives
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AudienceMemory } from "./AudienceMemory";
+import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
 
 type Split = { countries: Record<string, number>; ages: Record<string, number>; genders: Record<string, number> };
 type Connection = { id: string; platform: string; account_name: string; connected: boolean; share_accuracy: boolean;
@@ -31,12 +32,13 @@ export default function MyAudiencePage() {
   const qc = useQueryClient();
   const [params] = useSearchParams();
   const accounts = useQuery({ queryKey: [orgId, "social"], queryFn: () => api<Connections>("/social/connections"), refetchInterval: 60_000 });
-  const profile = useQuery({ queryKey: [orgId, "my-audience"], queryFn: () => api<{ profile: { split: Split; label: string; source: string } | null;
+  const profile = useQuery({ queryKey: [orgId, "my-audience"], queryFn: () => api<{ profile: { split: Split; label: string; source: string; filters?: Record<string, any> } | null;
     memory: { summary?: string; real_summary?: string; note?: string; observations?: { simulation_id: string; title: string; score: number; dry: boolean }[] } }>("/my-audience") });
   const [countries, setCountries] = useState("SA: 70%\nAE: 30%");
   const [ages, setAges] = useState("18-24: 60%\n25-34: 40%");
   const [genders, setGenders] = useState("female: 55%\nmale: 45%");
   const [label, setLabel] = useState("My audience");
+  const [uaeFilters, setUaeFilters] = useState<Record<string, any> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   async function action(key: string, path: string, method = "POST", json?: unknown) {
     setBusy(key);
@@ -81,8 +83,9 @@ export default function MyAudiencePage() {
           <Textarea value={countries} onChange={(e) => setCountries(e.target.value)} /></Field>
         <Field label="Age percentages" help="One age band and percentage per line, for example 18-24: 60%."><Textarea value={ages} onChange={(e) => setAges(e.target.value)} /></Field>
         <Field label="Gender percentages" help="Use female, male or unknown, followed by the percentage."><Textarea value={genders} onChange={(e) => setGenders(e.target.value)} /></Field>
+        <UaeAudienceFilters value={uaeFilters ?? profile.data?.profile?.filters ?? {}} onChange={setUaeFilters} />
         <Button variant="primary" disabled={busy !== null} loading={busy === "save"} onClick={() => {
-          try { const split = { countries: parsePercentages(countries), ages: parsePercentages(ages), genders: parsePercentages(genders) }; action("save", "/my-audience", "PUT", { label, split }); }
+          try { const split = { countries: parsePercentages(countries), ages: parsePercentages(ages), genders: parsePercentages(genders) }; action("save", "/my-audience", "PUT", { label, split, filters: uaeFilters ?? profile.data?.profile?.filters ?? {} }); }
           catch { toast.error("Use one category and percentage per line, without duplicates."); }
         }}>Save breakdown</Button>
       </Card>

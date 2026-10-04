@@ -27,7 +27,7 @@ def _pick(lst: list[str], h: int) -> str:
 def name_for(idx: int, region: str, origin: str, male: bool) -> tuple[str, str]:
     h = (idx * 2654435761) & 0xFFFFFFFF
     o = origin.lower()
-    if "south asian" in o or region == "IN":
+    if any(group in o for group in ("south asian", "indian", "pakistani", "bangladeshi")) or region == "IN":
         pool = SOUTH_ASIAN_M if male else SOUTH_ASIAN_F
     elif "filipino" in o:
         pool = FILIPINO_M if male else FILIPINO_F

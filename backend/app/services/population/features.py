@@ -11,7 +11,12 @@ def feature_names() -> list[str]:
     return ([f"region:{r['code']}" for r in REGIONS] + ["age", "age^2", "male", "citizen", "income", "education"]
             + ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"] + list(ATTITUDES)
             + [f"stance:{s}" for s in STANCES] + [f"uses:{p}" for p in PLATFORMS]
-            + ["topic_match", "on_target_platform", "screen_time", "influence"])
+            + ["topic_match", "on_target_platform", "screen_time", "influence"] + uae_feature_names())
+
+
+def uae_feature_names():
+    from .uae import DOMAINS
+    return [f"{key}:{value}" for key in ("residence_emirate", "nationality_group", "income_band", "language") for value in DOMAINS[key]]
 
 
 def features(pop: Population, idx, topic_vec: np.ndarray, target_platform: str | None) -> np.ndarray:
@@ -34,6 +39,10 @@ def features(pop: Population, idx, topic_vec: np.ndarray, target_platform: str |
     on_t = ((pl >> PLATFORMS.index(target_platform)) & 1).astype(np.float32) if target_platform in PLATFORMS else np.ones(k, np.float32)
     infl = np.log10(pop.followers_n[idx].astype(np.float32) + 1) - 1.0
     cols.append(np.stack([tm, on_t, pop.screen[idx].astype(np.float32), infl], 1))
+    from .uae import DOMAINS
+    ae = (reg == 0).astype(np.float32)
+    for key in ("residence_emirate", "nationality_group", "income_band", "language"):
+        cols.append((pop.uae[key][idx, None] == np.arange(len(DOMAINS[key]))[None, :]).astype(np.float32) * ae[:, None])
     return np.concatenate(cols, 1)
 
 
@@ -58,12 +67,14 @@ def stratified_sample(pop: Population, mask: np.ndarray, n: int, rng: np.random.
         allocation[order[:total - int(allocation.sum())]] += 1
         return allocation
 
-    regions, counts = np.unique(pop.region[idx], return_counts=True)
+    # Country totals remain compatible; UAE is stratified by residence emirate inside the country.
+    strata = pop.region[idx].astype(int) * 5 + np.where(pop.region[idx] == 0, pop.uae["residence_emirate"][idx] + 1, 0)
+    regions, counts = np.unique(strata, return_counts=True)
     out = []
     for region, count in zip(regions, allocate(counts, n), strict=True):
         if not count:
             continue
-        members = idx[pop.region[idx] == region]
+        members = idx[strata == region]
         keys = pop.male[members].astype(int) * 5 + pop.age_band[members]
         _, inverse, segment_counts = np.unique(keys, return_inverse=True, return_counts=True)
         for segment, size in enumerate(allocate(segment_counts, count)):
@@ -92,6 +103,11 @@ def persona_text(p: dict, platform_label: str = "social media") -> str:
         f"- Disposition toward new content: {p['stance']}\n"
         f"- Follows {p['follows']} accounts; {p['followers']} followers\n"
         f"- Encounters content on: {platform_label}"
+        + (f"\n- UAE residence: {p['residence_emirate']}; work: {p['work_emirate']}; nationality: {p['nationality_group']}; "
+           f"occupation/income: {p['income_band']}; household: {p['household_type']}; visa: {p['visa_type']}; "
+           f"calendar: {', '.join(p['calendar_memberships'])}; status: {p['status']}. "
+           f"Population assumptions: {p['population_label']}. Do not portray placeholder values as measured facts."
+           if p.get("residence_emirate") else "")
     )
 
 
