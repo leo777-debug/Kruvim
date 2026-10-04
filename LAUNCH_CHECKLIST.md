@@ -70,6 +70,13 @@ Codex has pushed all three latest prompts. None of it has been tested yet.
 - [ ] Customer twins from client segments
 - [ ] Enterprise: SSO, in-country hosting, private deployment option
 
+## Big idea: the weather forecast for culture
+The long-term moat. Full write-up: [docs/ideas/cultural-weather-forecast.md](docs/ideas/cultural-weather-forecast.md)
+- [ ] **Forecast Lite** (solo, start now): 10 public UAE forecasts every evening, auto-scored the next day, public scoreboard. Prompt: [docs/ideas/forecast-lite-codex-prompt.md](docs/ideas/forecast-lite-codex-prompt.md)
+- [ ] Post the forecast daily on X / LinkedIn / TikTok; after 4-6 weeks of public scores, pitch a media partner
+- [ ] "Drop it into tomorrow" for paid creators
+- [ ] The living, always-running simulated UAE, then "fork the world" for companies
+
 ## 9. Go-to-market
 - [ ] Twin study with a research partner (YouGov MENA / Ipsos / local), published
 - [ ] Data partnerships list and outreach (e&, du, Majid Al Futtaim, Network International, panel firms)
