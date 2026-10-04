@@ -69,14 +69,15 @@ def rule_memories(agent, sim, posts, actions, events):
         rows.append({"kind": kind, "subject": subject, "text": text, "importance": round(weight, 3),
                      "sentiment": round(sentiment, 3), "source_post_ids": ids or []})
     ending = "; I lost interest before the ending" if r.get("drop_segment") else "; I stayed interested through the ending"
-    add("episodic", creator, f"I {mood} the simulated {topic[6:]} content from {creator[8:]}{ending}.")
+    topic_label = topic[6:].replace("_", " ")
+    add("episodic", creator, f"I {mood} the simulated {topic_label} content from {creator[8:]}{ending}.")
     if own_ids or any(counters[a] for a in ("LIKE", "UPVOTE", "DOWNVOTE", "LIKE_COMMENT", "DISLIKE_COMMENT", "REPOST")):
         add("episodic", topic, "I joined the simulated discussion" + (" by posting or replying." if own_ids else " by voting or sharing."), own_ids[:8])
     if events:
         add("episodic", topic, "I reconsidered the simulated content while breaking events unfolded.")
     add("opinion", creator, f"I {mood} {creator[8:]}'s simulated content after this discussion.", weight=min(1, importance + .1))
-    add("opinion", topic, f"I {mood} the simulated content about {topic[6:]}.")
-    for action in [a for a in actions if a.action in ("FOLLOW", "MUTE")][:8]:
+    add("opinion", topic, f"I {mood} the simulated content about {topic_label}.")
+    for action in [a for a in actions if a.action in ("FOLLOW", "MUTE")][-8:]:
         target = action.target_ref or "creator"
         subject = creator if target == "creator" else "account:" + slug(target)[:120]
         add("relationship", subject, f"I {'followed' if action.action == 'FOLLOW' else 'muted'} the simulated account {subject.split(':', 1)[1]}.", weight=.9)
@@ -92,8 +93,10 @@ async def write_run(org_id, sim_id, llm, usage, now=None):
         if sim.status != "completed" or (sim.config or {}).get("memory_written") == execution:
             return 0
         agents = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim_id).order_by(SimAgent.ref))).scalars().all()
-        posts = (await s.execute(select(Post).where(Post.simulation_id == sim_id, Post.kind.in_(["post", "comment", "quote"])))).scalars().all()
-        actions = (await s.execute(select(Action).where(Action.simulation_id == sim_id, Action.actor_ref.in_([a.ref for a in agents])))).scalars().all()
+        posts = (await s.execute(select(Post).where(Post.simulation_id == sim_id, Post.kind.in_(["post", "comment", "quote"]))
+            .order_by(Post.id))).scalars().all()
+        actions = (await s.execute(select(Action).where(Action.simulation_id == sim_id, Action.actor_ref.in_([a.ref for a in agents]))
+            .order_by(Action.round, Action.id))).scalars().all()
         events = (await s.execute(select(func.count()).select_from(Post).where(Post.simulation_id == sim_id, Post.kind == "event"))).scalar()
     by_post, by_action = defaultdict(list), defaultdict(list)
     for post in posts:
@@ -155,6 +158,7 @@ async def write_run(org_id, sim_id, llm, usage, now=None):
                 if memory.kind in ("opinion", "relationship"):
                     for old in prior_by_key[(key, memory.kind, memory.subject)]:
                         old.superseded_by = identifier
+                    prior_by_key[(key, memory.kind, memory.subject)] = [memory]
                 count += 1
             affinity = by_affinity.get(key)
             sentiment = float(np.clip((float((agent.state or {}).get("opinion", (agent.reaction or {}).get("score", 5))) - 5) / 5, -1, 1))
@@ -353,18 +357,24 @@ async def reset(s, org_id, subject=None):
     org = (await s.execute(select(Organization).where(Organization.id == org_id).with_for_update())).scalar_one()
     memory = delete(AgentMemory).where(AgentMemory.org_id == org_id)
     affinity = delete(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org_id)
+    removed_count = 0
     if subject:
         subject = "creator:" + slug(subject.removeprefix("creator:"))[:120]
-        runs = select(Simulation.id).where(Simulation.org_id == org_id,
-            Simulation.content["creator_subject"].as_string() == subject[8:])
-        from sqlalchemy import or_
-        memory = memory.where(or_(AgentMemory.subject == subject, AgentMemory.source_simulation_id.in_(runs)))
+        # Compare with the same canonical key used by writes, including older unnormalised content.
+        runs = (await s.execute(select(Simulation.id, Simulation.content["creator_subject"].as_string())
+            .join(AgentMemory, AgentMemory.source_simulation_id == Simulation.id)
+            .where(Simulation.org_id == org_id, AgentMemory.org_id == org_id).distinct())).all()
+        source_ids = [identifier for identifier, creator in runs if "creator:" + (slug(creator or "workspace")[:120] or "workspace") == subject]
+        for offset in range(0, len(source_ids), 300):
+            removed = await s.execute(memory.where(AgentMemory.source_simulation_id.in_(source_ids[offset:offset + 300])))
+            removed_count += removed.rowcount
+        memory = memory.where(AgentMemory.subject == subject)
         affinity = affinity.where(AgentCreatorAffinity.subject == subject)
     removed = await s.execute(memory)
     states = await s.execute(affinity)
     org.settings = {**(org.settings or {}), "agent_memory_generation": (org.settings or {}).get("agent_memory_generation", 0) + 1,
                     **({"creator_memory": {}} if not subject else {})}
-    return {"memories_deleted": removed.rowcount, "affinities_deleted": states.rowcount, "subject": subject}
+    return {"memories_deleted": removed_count + removed.rowcount, "affinities_deleted": states.rowcount, "subject": subject}
 
 
 async def consolidate(now=None, org_id=None):
@@ -389,10 +399,14 @@ async def consolidate(now=None, org_id=None):
             for (ref, subject), memories in grouped.items():
                 if len(memories) < 2:
                     continue
-                sentiment = float(np.mean([m.sentiment for m in memories]))
+                previous = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == identifier, AgentMemory.population_ref == ref,
+                    AgentMemory.subject == subject, AgentMemory.kind == "reflection", AgentMemory.superseded_by.is_(None),
+                    AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90))))).scalars().all()
+                experiences = [*previous, *memories]
+                sentiment = float(np.mean([m.sentiment for m in experiences]))
                 feeling = "generally enjoy" if sentiment > .2 else "usually dislike" if sentiment < -.2 else "have mixed feelings about"
-                ending = "; I often lose interest before the ending" if any("lost interest" in m.text for m in memories) else ""
-                text = f"I {feeling} the simulated {subject.split(':', 1)[-1]} content{ending}."
+                ending = "; I often lose interest before the ending" if any("lost interest" in m.text or "lose interest" in m.text for m in experiences) else ""
+                text = f"I {feeling} the simulated {subject.split(':', 1)[-1].replace('_', ' ')} content{ending}."
                 reflection = AgentMemory(org_id=identifier, population_ref=ref, kind="reflection", text=text, subject=subject,
                     importance=.6, embedding=embed(text + " " + subject).tolist(), sentiment=sentiment, created_at=now,
                     source_simulation_id=memories[-1].source_simulation_id,
@@ -401,9 +415,6 @@ async def consolidate(now=None, org_id=None):
                 await s.flush()
                 for memory in memories:
                     memory.superseded_by = reflection.id
-                previous = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == identifier, AgentMemory.population_ref == ref,
-                    AgentMemory.subject == subject, AgentMemory.kind == "reflection", AgentMemory.id != reflection.id,
-                    AgentMemory.superseded_by.is_(None)))).scalars().all()
                 for memory in previous:
                     memory.superseded_by = reflection.id
                 merged += len(memories)

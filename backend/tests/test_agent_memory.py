@@ -234,6 +234,14 @@ async def test_consolidation_retention_cap_and_decay(auth, monkeypatch):
     async with session_scope() as s:
         state = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org))).scalar_one()
         assert before == (state.familiarity, state.fatigue)
+        for _ in range(2):
+            s.add(AgentMemory(org_id=org, population_ref="p:0", kind="episodic", subject="creator:gym", text="I liked the opening.",
+                importance=.2, sentiment=.4, embedding=embed("gym").tolist(), source_simulation_id=sim, created_at=now-timedelta(days=15)))
+    await consolidate(now, org)
+    async with session_scope() as s:
+        current = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org, AgentMemory.kind == "reflection",
+            AgentMemory.superseded_by.is_(None)))).scalar_one()
+        assert "lose interest before the ending" in current.text
 
 
 async def test_reset_requires_admin_confirmation_is_audited_and_tenant_scoped(client, auth):
@@ -266,6 +274,56 @@ async def test_reset_requires_admin_confirmation_is_audited_and_tenant_scoped(cl
         assert (await s.execute(select(AuditLog).where(AuditLog.org_id == org, AuditLog.action == "audience_memory.reset"))).scalars().all()
 
 
+async def test_creator_reset_canonical_names_preserves_other_creators_and_workspaces(auth):
+    from sqlalchemy import select
+
+    from app.db.session import session_scope
+    from app.models import AgentMemory, Organization, Simulation
+    from app.services.agent_memory import reset
+    org, sim = await memory_run(auth)
+    async with session_scope() as s:
+        run = await s.get(Simulation, sim)
+        run.content = {"creator_subject": "Demo Gym"}
+        other = Organization(name="Other memory workspace", slug="other-memory-workspace")
+        s.add(other)
+        await s.flush()
+        foreign = AgentMemory(org_id=other.id, population_ref="p:0", kind="opinion", text="I enjoyed it.",
+            subject="creator:demo-gym", importance=.5, sentiment=.5)
+        kept = AgentMemory(org_id=org, population_ref="p:0", kind="opinion", text="I liked another creator.",
+            subject="creator:other", importance=.5, sentiment=.5)
+        s.add_all([foreign, kept])
+        for subject in ("creator:demo-gym", "topic:fitness", "account:brand"):
+            s.add(AgentMemory(org_id=org, population_ref="p:0", kind="episodic", text="I enjoyed the simulated discussion.",
+                subject=subject, importance=.5, sentiment=.5, source_simulation_id=sim))
+        await s.flush()
+        result = await reset(s, org, "creator:Demo Gym")
+        assert result["memories_deleted"] == 3
+        remaining = (await s.execute(select(AgentMemory))).scalars().all()
+        assert {r.id for r in remaining} == {foreign.id, kept.id}
+
+
+async def test_relationship_change_closes_the_previous_memory_in_same_run(auth):
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from app.db.session import session_scope
+    from app.models import Action, AgentMemory
+    from app.services.agent_memory import write_run
+    from app.services.llm import Usage
+    org, sim = await memory_run(auth, agents=1)
+    async with session_scope() as s:
+        for index, action in enumerate(("FOLLOW", "MUTE")):
+            s.add(Action(simulation_id=sim, actor_ref="p:0", platform="feed", round=index,
+                action=action, target_ref="s:brand"))
+    await write_run(org, sim, SimpleNamespace(is_dry=True), Usage())
+    async with session_scope() as s:
+        rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org, AgentMemory.kind == "relationship"))).scalars().all()
+        current = next(r for r in rows if r.superseded_by is None)
+        assert "muted" in current.text and len(rows) == 2
+        assert next(r for r in rows if "followed" in r.text).superseded_by == current.id
+
+
 def test_memory_accuracy_comparison_requires_live_comparable_history():
     from app.services.memory_accuracy import comparison
     rows = [{"simulation_id": str(i), "platform": "youtube", "format": "short_video", "variant": "A", "memory_eligible": True,
@@ -278,3 +336,61 @@ def test_memory_accuracy_comparison_requires_live_comparable_history():
     assert not comparison([{**r, "memory_eligible": False} for r in rows])["available"]
     assert not comparison([{**r, "platform": "instagram" if r["fresh_audience"] else "youtube"} for r in rows])["available"]
     assert comparison(rows + [{**r, "variant": "B"} for r in rows]) == result
+
+
+async def test_memory_full_lifecycle_returners_ab_snapshot_and_fresh(client, auth, monkeypatch):
+    from sqlalchemy import select
+
+    from app.db.session import session_scope
+    from app.models import AgentMemory, GraphNode
+    from app.services import jobs
+    from app.services.simulation import engine
+    monkeypatch.setattr(engine, "DRY_PACE", 0)
+    h = auth[0]
+    project = (await client.post("/projects", headers=h, json={"name": "Returning panel"})).json()
+    async def create(fresh=False):
+        created = await client.post(f"/projects/{project['id']}/simulations", headers=h, json={
+            "name": "Simulated workout test", "content": {"format": "short_video", "type": "video", "platform": "tiktok",
+            "title": "Morning workouts", "text": "Try a quick workout before breakfast. Start gently and keep it comfortable.",
+            "creator_subject": "gym", "variant_b": {"title": "Workout B", "text": "A gentle morning routine. Warm up and build slowly."}},
+            "audience": {"regions": ["AE", "SA"]},
+            "overrides": {"voice": 20, "crowd": 30, "stakeholders": 1, "hours": 1, "seed": 71, "listening": False,
+                          "fresh_audience": fresh, "returning_share": 1 if not fresh else 0}})
+        assert created.status_code == 200, created.text
+        sid = created.json()["id"]
+        assert (await client.post(f"/simulations/{sid}/graph", headers=h)).status_code == 200
+        await jobs.drain()
+        async with session_scope() as s:
+            s.add(GraphNode(simulation_id=sid, key="ent:demo-gym", kind="entity", type="Brand", label="Demo Gym",
+                summary="A fictional gym stakeholder."))
+        assert (await client.post(f"/simulations/{sid}/environment", headers=h)).status_code == 200
+        await jobs.drain()
+        prepared = (await client.get(f"/simulations/{sid}", headers=h)).json()
+        assert prepared["status"] == "ready", prepared.get("error")
+        assert (await client.post(f"/simulations/{sid}/start", headers=h)).status_code == 200
+        await jobs.drain()
+        finished = (await client.get(f"/simulations/{sid}", headers=h)).json()
+        assert finished["status"] == "completed", finished.get("error")
+        return finished
+    first = await create()
+    assert first["config"]["agent_memory"]["recalled"] == 0
+    async with session_scope() as s:
+        initial = (await s.execute(select(AgentMemory).where(AgentMemory.source_simulation_id == first["id"]))).scalars().all()
+        assert initial and any(m.population_ref.startswith("s:") for m in initial)
+        first_ids = {m.id for m in initial}
+    second = await create()
+    memory = second["config"]["agent_memory"]
+    assert memory["returning"] == 20 and memory["recalled"] > 0
+    assert all(m["id"] in first_ids for rows in memory["snapshots"].values() for m in rows)
+    assert second["results"]["ab"]["paired_n"] == 20
+    agents = (await client.get(f"/simulations/{second['id']}/agents", headers=h)).json()
+    ref = next(a["ref"] for a in agents if a["kind"] == "voice")
+    detail = (await client.get(f"/simulations/{second['id']}/agents/{ref}", headers=h)).json()
+    assert detail["long_term_memory"]["memories"] and detail["long_term_memory"]["affinity"]["familiarity"] > 1.9
+    reply = (await client.post(f"/simulations/{second['id']}/agents/{ref}/chat", headers=h, json={"message": "Do you remember earlier tests?"})).json()
+    assert "simulated memory" in reply["reply"]
+    fresh = await create(True)
+    assert fresh["config"]["agent_memory"]["snapshots"] and all(not rows for rows in fresh["config"]["agent_memory"]["snapshots"].values())
+    assert fresh["config"]["agent_memory"]["affinity"] == {"people": {}, "segments": {}}
+    assert fresh["config"]["creator_memory"] == "" and fresh["results"]["agent_memory"]["fresh"]
+    assert fresh["results"]["memory_first_impressions"]["A"]["with_memory"] == fresh["results"]["memory_first_impressions"]["A"]["fresh"]

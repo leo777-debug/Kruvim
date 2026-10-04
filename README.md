@@ -59,6 +59,54 @@ pause, resume, change pacing, stop early or inject a breaking-news event.
   ledger, usage metering and an audit log.
 * **Operations**: JSON logs with request ids, Prometheus metrics at `/metrics`, `/healthz` and `/readyz`, Redis-backed
   rate limiting, security headers, rotating refresh tokens with reuse detection.
+* **Memory layers**: `AgentRT.memory` holds eight recent experiences during a run. Workspace creator memory keeps
+  aggregate simulated observations. Durable person memory lives in `agent_memories`, keyed by workspace and stable
+  population ID (or canonical stakeholder key); `agent_creator_affinity` holds familiarity, affinity and fatigue.
+  PostgreSQL uses native pgvector cosine search and an HNSW index; SQLite uses the existing deterministic `embed()`
+  fallback. There is no external memory service, and shared audience templates contain no memory.
+
+### Simulated audience memory
+
+Completed runs write first-person episodic, opinion and relationship memories using one configured-model call per
+20 agents, with a deterministic dry-run writer. The model receives coded synthetic experiences, not raw content or
+real people's posts. Writing is transactional and idempotent per execution. Importance reflects emotion, opinion
+changes, participation, follows/mutes and breaking events. Creator exposure increments familiarity; affinity is a
+moving average; similar recent topics increase fatigue.
+
+Environment preparation ranks retained memories by cosine relevance, exponential recency and importance, normally
+selecting six within an estimated 150-token budget. Exact IDs and texts, bounded strong opinions and numeric history
+are frozen in the run configuration. Both A/B variants use that snapshot; neither writes memory until both finish.
+Actions retain their separate short-term memory. Interviews and surveys recall current retained person memory.
+
+New tests identify the creator/channel with `content.creator_subject` (default `workspace`). Returning audience
+defaults to 60% when that creator has history, otherwise 0%. The sampler preserves the chosen segment counts and
+prefers returning people within each segment, reporting shortages. Fresh audience clears recalled text, workspace
+creator observations and numeric history; it prefers fresh people but reports returning people if the eligible
+fresh pool is too small. Crowd/projection models use numeric history only, including segment means where a person
+has no measured history. Fans receive a small positive adjustment; fatigue reduces novelty, sharing and rewatching.
+
+Every memory is explicitly simulated. Agent sheets and Interviews show retained memories, importance and source-run
+links. My audience shows creator history and lets workspace admins confirm an audit-logged reset for one creator or
+all creators. Reset increments a workspace generation so queued/prepared runs cannot resurrect old memory; historical
+run snapshots remain as audit records, and a previously prepared run ignores them after reset. Results → Method
+discloses returning counts, recalled memory count, shortages and Fresh audience status.
+
+The native consolidation job runs daily at 02:30 UTC with arq, or once per UTC day in local development. It merges
+older low-importance episodes into per-subject reflections, supersedes their sources, decays numeric state and
+enforces retention. Plan configuration controls the physical cap (default 60 rows per person, including superseded
+rows) and retention: Free 30, Pro 90, Business 180, Enterprise 365 days. Recall excludes expired/superseded rows even
+before maintenance runs. The consolidation clock is injectable for tests.
+
+Calibration compares memory and explicitly Fresh runs linked to eligible real outcomes, within the same platform,
+format and outcome metric. It needs at least three runs in each cohort and reports leave-one-run-out prediction
+errors and sample sizes. This is an observational comparison, not proof of a causal improvement; dry runs and
+competitor variants are excluded. Dry runs also retain cheap with-memory/fresh first-impression scores for debugging.
+
+Memory regression coverage is in `backend/tests/test_agent_memory.py`. To verify an actual PostgreSQL/pgvector upgrade
+from revision 0006 and tenant-isolated vector recall, provide a local test-server URL with CREATE DATABASE privileges
+in `KRUVIM_MEMORY_TEST_PG_URL`, then run `python -m tools.verify_memory_postgres` from `backend`. It creates and drops
+only a randomly named scratch database; the URL's existing database is unchanged. For an offline browser fixture,
+start `tools.serve_verify` with `KRUVIM_VERIFY_MEMORY=1`; this is restricted to its disposable test database.
 
 ## Quick start (local development)
 

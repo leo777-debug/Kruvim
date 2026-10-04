@@ -34,12 +34,15 @@ async def prepare():
     fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/news_tone.json").read_text(encoding="utf-8"))
     await store_signals("google_news", [SignalItem("headline", code, title, payload={"source": "Recorded regional headlines"})
                                        for code, titles in fixture["headlines"].items() for title in titles])
+    if os.environ.get("KRUVIM_VERIFY_MEMORY") == "1":
+        from tools.memory_fixture import prepare as memory_fixture
+        await memory_fixture()
 
 
 if __name__ == "__main__":
     import uvicorn
-    asyncio.run(prepare())
     datapool.run_due = AsyncMock(return_value=[])
     context.ensure_fresh = AsyncMock()
     targeted.prepare = AsyncMock()
+    asyncio.run(prepare())
     uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ.get("KRUVIM_VERIFY_PORT", "8000")), access_log=False)

@@ -40,6 +40,10 @@ def _caps(text: str, k: int) -> list[str]:
 
 
 def reply(system: str, user: str):
+    if "Rewrite each supplied simulated experience" in system:
+        data = json.loads(user)
+        return {"agents": [{"ref": agent["ref"], "memories": [{"text": memory["text"]} for memory in agent["memories"]]}
+                           for agent in data["agents"]]}
     if "Reply with exactly this JSON" in system:
         return {"ok": True, "word": "mock"}
     if "analyse a piece of social content" in system:
