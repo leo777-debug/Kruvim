@@ -18,6 +18,16 @@ export default function CalibrationPage() {
     <Page title="Calibration" subtitle="Linked analytics update real results automatically. Rank correlation measures how well predictions track actual outcomes across your runs.">
       <AccuracyReport />
       <p className="mb-5 text-sm"><Link to="/my-audience" className="text-brand">Connect analytics</Link> · <Link to="/accuracy" className="text-brand">View the public accuracy report</Link></p>
+      <Card className="mb-5 space-y-3 p-5"><h2 className="font-semibold">Does simulated memory improve accuracy?</h2>
+        <p className="text-xs text-muted">{c?.memory_comparison?.method || "Compare first-impression predictions from memory and Fresh audience tests against linked real outcomes. This comparison stays within your workspace."}</p>
+        {!c?.memory_comparison?.available ? <p className="text-sm text-muted">Not enough comparable outcomes yet. Complete at least three live-model tests with memory and three with Fresh audience on, on the same platform and format, then link their real outcomes.</p> :
+          <div className="overflow-x-auto"><table className="dt"><thead><tr><th>Platform / format</th><th>Outcome</th><th>Memory error</th><th>Fresh error</th><th>Tests</th></tr></thead>
+            <tbody>{c.memory_comparison.comparisons.map((row: any) => <tr key={`${row.platform}:${row.format}:${row.metric}`}>
+              <td>{platformName(row.platform)} · {row.format?.replaceAll("_", " ")}</td><td>{row.metric.replaceAll("_", " ")} ({row.unit})</td>
+              <td>{row.memory_error.toFixed(3)}</td><td>{row.fresh_error.toFixed(3)}</td><td>{row.memory_n} memory / {row.fresh_n} fresh</td>
+            </tr>)}</tbody></table></div>}
+        <p className="text-xs text-muted">Lower held-out error is better. These observational results do not automatically increase memory's influence.</p>
+      </Card>
       <Card className="mb-5 p-5"><h2 className="mb-2 font-semibold">Data source weights</h2><p className="text-xs text-muted">{weights.data?.method}</p>
         <table className="dt mt-3"><thead><tr><th>Source</th><th>Tests</th><th>Weight</th></tr></thead><tbody>{Object.entries(weights.data?.sources || {}).map(([key, value]) =>
           <tr key={key}><td>{key}</td><td>{value.n}</td><td>{value.weight.toFixed(2)}</td></tr>)}</tbody></table>

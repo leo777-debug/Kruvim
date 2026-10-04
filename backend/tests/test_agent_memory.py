@@ -264,3 +264,17 @@ async def test_reset_requires_admin_confirmation_is_audited_and_tenant_scoped(cl
     async with session_scope() as s:
         assert not (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org))).scalars().all()
         assert (await s.execute(select(AuditLog).where(AuditLog.org_id == org, AuditLog.action == "audience_memory.reset"))).scalars().all()
+
+
+def test_memory_accuracy_comparison_requires_live_comparable_history():
+    from app.services.memory_accuracy import comparison
+    rows = [{"simulation_id": str(i), "platform": "youtube", "format": "short_video", "variant": "A", "memory_eligible": True,
+             "memory_used": i < 3, "fresh_audience": i >= 3, "first_impression_score": 4+i/2, "retention": 40+i*5,
+             "views": 100+i*100, "engagement_rate": 2+i} for i in range(6)]
+    result = comparison(rows)
+    assert result["available"] and len(result["comparisons"]) == 3
+    assert all(c["memory_n"] == 3 and c["fresh_n"] == 3 for c in result["comparisons"])
+    assert not comparison(rows[:5])["available"]
+    assert not comparison([{**r, "memory_eligible": False} for r in rows])["available"]
+    assert not comparison([{**r, "platform": "instagram" if r["fresh_audience"] else "youtube"} for r in rows])["available"]
+    assert comparison(rows + [{**r, "variant": "B"} for r in rows]) == result

@@ -103,14 +103,22 @@ async def calibration(p: Principal = Depends(principal), s: AsyncSession = Depen
                      "source": "automatic" if pr.social_post_id else "manual", "predicted_score": predicted_score,
                      "predicted_viral": r.get("viral", {}).get("score") if pr.variant == "A" else None,
                      "predicted_share": r.get("viral", {}).get("raw", {}).get("mean_share_intent") if pr.variant == "A" else None,
-                     "views": pr.views, "engagement_rate": pr.engagement_rate, "retention": pr.retention, "reported_at": pr.created_at})
+                     "views": pr.views, "engagement_rate": pr.engagement_rate, "retention": pr.retention, "reported_at": pr.created_at,
+                     "format": (sim.content or {}).get("format"),
+                     "memory_used": bool((r.get("agent_memory") or {}).get("recalled") or (r.get("agent_memory") or {}).get("returning")),
+                     "fresh_audience": bool((r.get("agent_memory") or {}).get("fresh")),
+                     "first_impression_score": post.predicted_score if post is not None else r.get("score", {}).get("first_impression"),
+                     "memory_eligible": bool(not r.get("provider", {}).get("dry", True) and (sim.content or {}).get("b_kind") != "competitor"
+                         and (post is None or (post.metrics.get("window_eligible") and not post.last_error
+                              and post.published_at and post.predicted_at < post.published_at)))})
     corr = {}
     for pred in ("predicted_score", "predicted_viral", "predicted_share"):
         for real in ("engagement_rate", "views", "retention"):
             pairs = [(d[pred], d[real]) for d in data if d[real] is not None and d[pred] is not None]
             if len(pairs) >= 3:
                 corr[f"{pred}~{real}"] = {"rho": _spearman(*zip(*pairs)), "n": len(pairs)}
-    return {"rows": data, "n": len(data), "correlations": corr}
+    from app.services.memory_accuracy import comparison
+    return {"rows": data, "n": len(data), "correlations": corr, "memory_comparison": comparison(data)}
 
 
 # ---- platform administration --------------------------------------------------------------------------------

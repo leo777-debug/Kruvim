@@ -64,6 +64,10 @@ def finalize(e) -> dict:
     res: dict = {"seed": e.seed}
     memory = e.cfg.get("agent_memory", {})
     res["agent_memory"] = {key: memory.get(key) for key in ("fresh", "returning", "voice", "recalled", "requested_share", "achieved_share", "shortfall", "snapshot_at", "label")}
+    res["memory_first_impressions"] = {variant: {"with_memory": round(float(np.mean([r["score"] for r in reactions])), 3),
+        "fresh": round(float(np.mean([r["fresh_score"] for r in reactions])), 3) if all("fresh_score" in r for r in reactions) else None,
+        "method": "Paired deterministic dry-run scores" if all("fresh_score" in r for r in reactions) else "Use explicit Fresh audience run history; no extra model calls"}
+        for variant, reactions in {"A": [a.reaction for a in voices], "B": [a.reaction["B"] for a in voices if a.reaction.get("B")]}.items() if reactions}
     init_scores = np.array([by_idx[int(i)].initial for i in ids])
     final_scores = Yf[:, 0]
     res["audience"] = {"size": int(aud.size), "population": int(pop.n), "filters": e.audience, "voice_n": len(voices),

@@ -345,6 +345,7 @@ class Engine:
                 tm = float(topic_match(self.pop, np.array([idx]), topic_vector(c.get("topics")))[0])
                 on_t = self.platform_key not in PLATFORMS or bool((int(self.pop.platforms[idx]) >> PLATFORMS.index(self.platform_key)) & 1)
                 reaction = dry.reaction(a.persona, tm, on_t, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
+                reaction["fresh_score"] = reaction["score"]
                 from app.services.agent_memory import adjust_reaction
                 state = self.cfg.get("agent_memory", {}).get("affinity", {}).get("people", {}).get(str(idx), {})
                 reaction = adjust_reaction(reaction, state)
