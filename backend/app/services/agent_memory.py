@@ -347,3 +347,53 @@ async def audience_summary(s, org, subject=None):
         "affinity": mean("affinity"), "fatigue": mean("fatigue"), "fatigue_warning": mean("fatigue") >= .5,
         "default_returning_share": .6 if rows else 0, "subjects": sorted({r.subject for r in rows}),
         "retention_days": plan(org).get("memory_retention_days", 90), "cap_per_agent": plan(org).get("memory_cap_per_agent", 60)}
+
+
+async def consolidate(now=None, org_id=None):
+    """Nightly native consolidation and retention; injectable time makes decay idempotent."""
+    now = now or utcnow()
+    merged = 0
+    async with session_scope() as s:
+        query = select(Organization.id)
+        if org_id:
+            query = query.where(Organization.id == org_id)
+        ids = (await s.execute(query)).scalars().all()
+    for identifier in ids:
+        async with session_scope() as s:
+            org = (await s.execute(select(Organization).where(Organization.id == identifier).with_for_update())).scalar_one()
+            rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == identifier,
+                AgentMemory.kind == "episodic", AgentMemory.importance < .6, AgentMemory.superseded_by.is_(None),
+                AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)),
+                AgentMemory.created_at < now - timedelta(days=14)).order_by(AgentMemory.created_at))).scalars().all()
+            grouped = defaultdict(list)
+            for row in rows:
+                grouped[(row.population_ref, row.subject)].append(row)
+            for (ref, subject), memories in grouped.items():
+                if len(memories) < 2:
+                    continue
+                sentiment = float(np.mean([m.sentiment for m in memories]))
+                feeling = "generally enjoy" if sentiment > .2 else "usually dislike" if sentiment < -.2 else "have mixed feelings about"
+                ending = "; I often lose interest before the ending" if any("lost interest" in m.text for m in memories) else ""
+                text = f"I {feeling} the simulated {subject.split(':', 1)[-1]} content{ending}."
+                reflection = AgentMemory(org_id=identifier, population_ref=ref, kind="reflection", text=text, subject=subject,
+                    importance=.6, embedding=embed(text + " " + subject).tolist(), sentiment=sentiment, created_at=now,
+                    source_simulation_id=memories[-1].source_simulation_id,
+                    source_post_ids=memories[-1].source_post_ids or [], recall_count=0)
+                s.add(reflection)
+                await s.flush()
+                for memory in memories:
+                    memory.superseded_by = reflection.id
+                previous = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == identifier, AgentMemory.population_ref == ref,
+                    AgentMemory.subject == subject, AgentMemory.kind == "reflection", AgentMemory.id != reflection.id,
+                    AgentMemory.superseded_by.is_(None)))).scalars().all()
+                for memory in previous:
+                    memory.superseded_by = reflection.id
+                merged += len(memories)
+            states = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == identifier))).scalars().all()
+            for row in states:
+                state = decayed(row, now)
+                row.familiarity, row.fatigue, row.decayed_at = state["familiarity"], state["fatigue"], max(now, row.decayed_at)
+            await enforce_limits(s, org, now)
+            await s.execute(delete(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == identifier,
+                AgentCreatorAffinity.last_seen_at < now - timedelta(days=plan(org).get("memory_retention_days", 90))))
+    return {"merged": merged, "workspaces": len(ids)}

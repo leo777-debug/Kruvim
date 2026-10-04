@@ -167,11 +167,13 @@ def test_returning_panel_preserves_exact_segment_counts():
 
 async def test_affinity_changes_fans_fatigue_and_projection_features(auth):
     from types import SimpleNamespace
+
     import numpy as np
+
     from app.services.agent_memory import adjust_reaction, affinity_snapshot, write_run
+    from app.services.content import topic_vector
     from app.services.llm import Usage
     from app.services.population import get_population
-    from app.services.content import topic_vector
     from app.services.simulation import projection
     org, sim = await memory_run(auth)
     await write_run(org, sim, SimpleNamespace(is_dry=True), Usage())
@@ -193,3 +195,42 @@ async def test_affinity_changes_fans_fatigue_and_projection_features(auth):
     restored = projection.Surface.from_json(model.to_json())
     assert restored.history == history and X.shape[1] == len(projection.features(pop, ids, tv, "tiktok")[0]) + 3
     assert projection.project_idx(pop, restored, ids, tv, "tiktok", 1).shape == (20, 2)
+
+
+async def test_consolidation_retention_cap_and_decay(auth, monkeypatch):
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.db.base import utcnow
+    from app.db.session import session_scope
+    from app.models import AgentCreatorAffinity, AgentMemory, Organization
+    from app.services.agent_memory import consolidate
+    from app.services.datapool.retrieval import embed
+    from app.services.quotas import PLANS
+    org, sim = await memory_run(auth)
+    now = utcnow()
+    monkeypatch.setitem(PLANS, "free", {**PLANS["free"], "memory_cap_per_agent": 4, "memory_retention_days": 30})
+    async with session_scope() as s:
+        for i in range(8):
+            s.add(AgentMemory(org_id=org, population_ref="p:0", kind="episodic", subject="creator:gym", text="I lost interest in the ending.",
+                importance=.2, sentiment=.4, embedding=embed("gym").tolist(), source_simulation_id=sim, created_at=now-timedelta(days=16+i)))
+        s.add(AgentMemory(org_id=org, population_ref="p:expired", kind="episodic", subject="creator:gym", text="I liked it.",
+            importance=.2, sentiment=.4, embedding=embed("gym").tolist(), source_simulation_id=sim, created_at=now-timedelta(days=35)))
+        s.add(AgentCreatorAffinity(org_id=org, population_ref="p:0", subject="creator:gym", familiarity=4, affinity=.5, fatigue=.8,
+            last_seen_at=now-timedelta(days=7), decayed_at=now-timedelta(days=7), topic_embedding=embed("gym").tolist()))
+    result = await consolidate(now, org)
+    assert result["merged"] == 8
+    async with session_scope() as s:
+        rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org))).scalars().all()
+        assert len(rows) <= 4 and not any(r.population_ref == "p:expired" for r in rows)
+        reflection = next(r for r in rows if r.kind == "reflection")
+        assert all(r.superseded_by == reflection.id for r in rows if r.kind == "episodic")
+        state = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org))).scalar_one()
+        before = (state.familiarity, state.fatigue)
+        assert before[0] < 4 and before[1] < .8 and state.last_seen_at == now-timedelta(days=7)
+        assert await s.get(Organization, org)
+    await consolidate(now, org)
+    async with session_scope() as s:
+        state = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org))).scalar_one()
+        assert before == (state.familiarity, state.fatigue)

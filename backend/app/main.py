@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
         from app.services.datapool import run_due
 
         async def loop():
+            memory_day = None
             while True:
                 try:
                     await run_due()
@@ -81,6 +82,15 @@ async def lifespan(app: FastAPI):
                     await sync_due()
                 except Exception:
                     log.exception("analytics sync failed")
+                try:
+                    from app.db.base import utcnow
+                    from app.services.agent_memory import consolidate
+                    today = utcnow().date()
+                    if memory_day != today:
+                        await consolidate()
+                        memory_day = today
+                except Exception:
+                    log.exception("agent memory consolidation failed")
                 await asyncio.sleep(600)
         scheduler = asyncio.create_task(loop())
     try:

@@ -25,6 +25,10 @@ PLANS = {
 }
 RUNNING = ("queued", "running", "paused")
 
+# Native agent memory: bounds apply to every person in one workspace, including superseded rows.
+for _name, _days, _cap in (("free", 30, 60), ("pro", 90, 60), ("business", 180, 60), ("enterprise", 365, 60)):
+    PLANS[_name].update(memory_retention_days=_days, memory_cap_per_agent=_cap)
+
 
 def plan(org: Organization) -> dict:
     return PLANS.get(org.plan, PLANS["free"])
