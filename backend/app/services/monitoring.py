@@ -143,8 +143,8 @@ async def check_watch(watch_id: str) -> dict:
     return {"new": len(ids), "error": err, "simulations": ids}
 
 
-async def due_watches() -> list[str]:
-    cutoff = utcnow() - CHECK_EVERY
+async def due_watches(now=None) -> list[str]:
+    cutoff = (now or utcnow()) - CHECK_EVERY
     async with session_scope() as s:
         rows = (await s.execute(select(Watch.id).where(and_(Watch.active.is_(True), or_(Watch.last_checked_at.is_(None), Watch.last_checked_at < cutoff)))
                                 .limit(50))).all()
@@ -152,13 +152,14 @@ async def due_watches() -> list[str]:
 
 
 # ---- recurring re-runs -----------------------------------------------------------------------------------------
-async def due_reruns() -> list[str]:
+async def due_reruns(now=None) -> list[str]:
+    now = now or utcnow()
     async with session_scope() as s:
-        rows = (await s.execute(select(Simulation).where(and_(Simulation.next_rerun_at.is_not(None), Simulation.next_rerun_at <= utcnow()))
+        rows = (await s.execute(select(Simulation).where(and_(Simulation.next_rerun_at.is_not(None), Simulation.next_rerun_at <= now))
                                 .limit(50))).scalars().all()
         out = []
         for sim in rows:
-            sim.next_rerun_at = utcnow() + timedelta(days=sim.rerun_every_days or 7)
+            sim.next_rerun_at = now + timedelta(days=sim.rerun_every_days or 7)
             out.append(sim.id)
     for sid in out:
         async with session_scope() as s:
@@ -171,14 +172,15 @@ async def due_reruns() -> list[str]:
     return out
 
 
-async def tick() -> dict:
-    watches = await due_watches()
+async def tick(now=None) -> dict:
+    now = now or utcnow()
+    watches = await due_watches(now)
     for wid in watches:
         try:
             await check_watch(wid)
         except Exception:
             log.exception("watch check failed", extra={"job": "monitoring"})
-    reruns = await due_reruns()
+    reruns = await due_reruns(now)
     return {"watches": len(watches), "reruns": len(reruns)}
 
 

@@ -1,6 +1,5 @@
 """Full five-step workflow in dry-run mode: graph → environment → simulation → report → interaction,
 plus tenancy, API keys, quotas, calibration and the data pool."""
-import asyncio
 import json
 
 import pytest
@@ -10,15 +9,14 @@ SCRIPT = ("Stop paying for gym memberships you never use. Here is the 3 minute r
           "fitness needs an hour. It does not. Consistency beats intensity every single time. Follow for part two about Ramadan meals.")
 
 
-async def wait_for(client, h, sim_id, field, values, timeout=240):
-    for _ in range(timeout * 2):
-        r = (await client.get(f"/simulations/{sim_id}", headers=h)).json()
-        if r[field] in values:
-            return r
-        if r["status"] == "failed" and "failed" not in values:
-            raise AssertionError(f"failed: {r['error']}")
-        await asyncio.sleep(0.5)
-    raise AssertionError(f"timeout waiting for {field} in {values}; last {r[field]} / {r.get('error')}")
+async def wait_for(client, h, sim_id, field, values):
+    from app.services import jobs
+    await jobs.drain()
+    response = await client.get(f"/simulations/{sim_id}", headers=h)
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert row[field] in values, f"Queue finished with {field}={row[field]}; expected {values}; error={row.get('error')}"
+    return row
 
 
 @pytest.mark.asyncio
@@ -90,11 +88,9 @@ async def test_full_workflow(client, auth):
     assert ex["size"] > 0 and "retention" in ex
     sv = (await client.post(f"/simulations/{sid}/surveys", json={"question": "Would you follow this creator?", "n": 5}, headers=h)).json()
     assert sv["id"]
-    for _ in range(60):
-        rows = (await client.get(f"/simulations/{sid}/surveys", headers=h)).json()
-        if rows[0]["status"] != "running":
-            break
-        await asyncio.sleep(0.5)
+    from app.services import jobs
+    await jobs.drain()
+    rows = (await client.get(f"/simulations/{sid}/surveys", headers=h)).json()
     assert rows[0]["status"] == "done" and len(rows[0]["answers"]) == 5
     rc = (await client.post(f"/simulations/{sid}/report/chat", json={"message": "Who should I target?"}, headers=h)).json()
     assert rc["answer"]
@@ -115,6 +111,8 @@ async def test_full_workflow(client, auth):
 @pytest.mark.asyncio
 async def test_tenant_isolation(client, auth):
     h, _ = auth
+    created = await client.post("/projects", headers=h, json={"name": "Private owner project"})
+    assert created.status_code == 200
     r = await client.post("/auth/register", json={"email": "other@example.com", "password": "another-long-password", "org_name": "Other"})
     h2 = {"Authorization": f"Bearer {r.json()['access_token']}"}
     assert r.json()["user"]["is_superuser"] is False

@@ -169,13 +169,8 @@ async def test_creator_dry_workflow(client, auth, monkeypatch):
     assert result["agent_signals"] and all(result["agent_signals"].values())
     assert result["stale_sources"][0]["age_hours"] == 9
     assert "language_fit" in result and "trend" in completed["results"]
-    # The completion event precedes the follow-up memory write by a few milliseconds.
-    import asyncio
-    for _ in range(20):
-        memory = (await client.get("/my-audience", headers=h)).json()["memory"]
-        if any(x["simulation_id"] == sid for x in memory.get("observations", [])):
-            break
-        await asyncio.sleep(.05)
+    # wait_for drains the entire job, including the follow-up memory write.
+    memory = (await client.get("/my-audience", headers=h)).json()["memory"]
     assert any(x["simulation_id"] == sid for x in memory["observations"])
     assert (await client.delete("/my-audience/memory", headers=h)).status_code == 200
     assert (await client.get("/my-audience", headers=h)).json()["memory"] == {}

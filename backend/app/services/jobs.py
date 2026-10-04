@@ -15,6 +15,15 @@ _local_sem: asyncio.Semaphore | None = None
 _local_tasks: dict[str, asyncio.Task] = {}
 
 
+async def drain() -> None:
+    """Wait for local jobs and any jobs they enqueue, including post-run side effects."""
+    if settings.redis_url:
+        raise RuntimeError("Local queue draining is unavailable with Redis workers")
+    current = asyncio.current_task()
+    while pending := [task for task in _local_tasks.values() if task is not current]:
+        await asyncio.gather(*(asyncio.shield(task) for task in pending))
+
+
 async def _arq_pool():
     global _pool
     if _pool is None:
@@ -39,15 +48,15 @@ async def enqueue(name: str, *, delay: float = 0, **kwargs) -> str:
     fn = getattr(tasks, name)
 
     async def run():
-        if delay:
-            await asyncio.sleep(delay)
-        async with _local_sem:
-            try:
+        try:
+            if delay:
+                await asyncio.sleep(delay)
+            async with _local_sem:
                 await fn({"job_id": job_id}, **kwargs)
-            except Exception:
-                log.exception("local job failed", extra={"job": name})
-            finally:
-                _local_tasks.pop(job_id, None)
+        except Exception:
+            log.exception("local job failed", extra={"job": name})
+        finally:
+            _local_tasks.pop(job_id, None)
 
     _local_tasks[job_id] = asyncio.create_task(run())
     return job_id

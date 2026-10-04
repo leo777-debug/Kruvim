@@ -170,9 +170,8 @@ FEED = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Rival Gym</ti
 
 @pytest.mark.asyncio
 async def test_documents_autopilot_recurring_and_monitoring(client, auth, monkeypatch):
-    from datetime import timedelta
+    from datetime import UTC, datetime, timedelta
 
-    from app.db.base import utcnow
     from app.db.session import session_scope
     from app.models import Simulation
     from app.services import monitoring
@@ -207,11 +206,15 @@ async def test_documents_autopilot_recurring_and_monitoring(client, auth, monkey
 
     # recurring re-run: schedule, force it due, run the tick
     assert (await client.put(f"/simulations/{drafts[0]}/rerun-schedule", json={"every_days": 7}, headers=h)).json()["rerun_every_days"] == 7
+    frozen_now = datetime(2026, 10, 4, 12, tzinfo=UTC)
     async with session_scope() as ss:
         row = await ss.get(Simulation, drafts[0])
-        row.next_rerun_at = utcnow() - timedelta(minutes=1)
-    started = await monitoring.due_reruns()
+        row.next_rerun_at = frozen_now - timedelta(minutes=1)
+    started = await monitoring.due_reruns(now=frozen_now)
     assert started == [drafts[0]]
+    assert await monitoring.due_reruns(now=frozen_now) == []
+    async with session_scope() as ss:
+        assert (await ss.get(Simulation, drafts[0])).next_rerun_at == frozen_now + timedelta(days=7)
     vs = (await client.get(f"/simulations/{drafts[0]}/versions", headers=h)).json()
     rerun = next(v for v in vs if v["id"] != drafts[0])
     await wait_for(client, h, rerun["id"], "status", {"completed"})

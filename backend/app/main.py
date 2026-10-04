@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     setup_logging(json_logs=settings.env != "development")
     await _bootstrap()
     scheduler = None
-    if not settings.redis_url:
+    if not settings.redis_url and settings.env != "test":
         import asyncio
 
         from app.services.datapool import run_due
@@ -83,10 +83,15 @@ async def lifespan(app: FastAPI):
                     log.exception("analytics sync failed")
                 await asyncio.sleep(600)
         scheduler = asyncio.create_task(loop())
-    yield
-    if scheduler:
-        scheduler.cancel()
-    await close_redis()
+    try:
+        yield
+    finally:
+        if scheduler:
+            scheduler.cancel()
+            from contextlib import suppress
+            with suppress(asyncio.CancelledError):
+                await scheduler
+        await close_redis()
 
 
 def create_app() -> FastAPI:
