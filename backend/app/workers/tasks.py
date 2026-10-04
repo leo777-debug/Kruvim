@@ -201,7 +201,6 @@ async def run_simulation(ctx, sim_id: str):
         results["usage"] = usage.as_dict(res.settings)
         results["provider"] = {"name": res.settings.provider, "preset": res.settings.preset, "dry": llm.is_dry, "source": res.source,
                                "voice_model": llm.model_for("voice"), "report_model": llm.model_for("report")}
-        credits = await metering.record(org_id, sim_id, "simulation", usage, res)
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             sim.results, sim.status, sim.step, sim.finished_at = results, "completed", 4, _now()
@@ -209,8 +208,16 @@ async def run_simulation(ctx, sim_id: str):
             topics = (sim.card or {}).get("topics") or {}
             sim.niche = max(topics, key=topics.get) if topics else None
             sim.usage = {**(sim.usage or {}), "simulation": usage.as_dict(res.settings)}
-            sim.credits_charged = (sim.credits_charged or 0) + credits
             sim.report_status = "queued"
+        from app.services.agent_memory import write_run
+        await write_run(org_id, sim_id, llm, usage)
+        results["usage"] = usage.as_dict(res.settings)
+        credits = await metering.record(org_id, sim_id, "simulation", usage, res)
+        async with session_scope() as s:
+            sim = await s.get(Simulation, sim_id)
+            sim.results = results
+            sim.usage = {**(sim.usage or {}), "simulation": usage.as_dict(res.settings)}
+            sim.credits_charged = (sim.credits_charged or 0) + credits
         from app.services.creator_memory import update_memory
         await update_memory(org_id, sim_id)
         SIMULATIONS.labels("completed").inc()

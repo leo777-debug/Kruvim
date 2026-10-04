@@ -41,7 +41,9 @@ def estimate_credits(cfg: dict) -> dict:
     social = int(round((voice + stake) * rounds * act))
     report = 24
     learning = rounds + 1
-    return {"first_reactions": first, "social_turns": social, "report": report, "graph_learning": learning, "setup": 6, "total": first + social + learning + report + 6}
+    memory = (voice + stake + 19) // 20
+    return {"first_reactions": first, "social_turns": social, "report": report, "graph_learning": learning,
+            "agent_memory": memory, "setup": 6, "total": first + social + learning + memory + report + 6}
 
 
 async def balance(s: AsyncSession, org_id: str) -> int:
