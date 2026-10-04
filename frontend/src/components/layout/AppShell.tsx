@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart3, Building2, Contact, ChevronsUpDown, Database, FolderKanban, Gauge, LayoutGrid, LogOut, Menu as MenuIcon, Moon, Plus, Settings, Shield, Sun, Users2, X,
+  BarChart3, Building2, ChevronRight, Contact, ChevronsUpDown, Database, FolderKanban, Gauge, LayoutGrid, LogOut, Menu as MenuIcon, Moon, Plus, Settings, Shield, Sun, Users2, X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { refreshToken, useAuth } from "@/lib/auth";
@@ -11,19 +11,10 @@ import { cn, fmt, initials } from "@/lib/utils";
 import { Logo } from "./Logo";
 import { Menu } from "../ui/overlay";
 import { AlertsBell } from "@/features/monitoring/AlertsBell";
+import { Tip } from "../ui/primitives";
+import { isNavActive, readCollapsedSections, visibleSections, writeCollapsedSections, type CollapsedSections, type NavIcon, type NavItemDefinition, type SectionId } from "./navigation";
 
-const NAV = [
-  { to: "/", label: "Overview", icon: LayoutGrid, end: true },
-  { to: "/projects", label: "Projects", icon: FolderKanban },
-  { to: "/runs", label: "All runs", icon: LayoutGrid },
-  { to: "/data-pool", label: "Data pool", icon: Database },
-  { to: "/audiences", label: "Audiences", icon: Contact },
-  { to: "/my-audience", label: "My audience", icon: Users2 },
-  { to: "/monitoring", label: "Monitoring", icon: Gauge },
-  { to: "/population", label: "Population", icon: Users2 },
-  { to: "/calibration", label: "Calibration", icon: Gauge },
-  { to: "/accuracy", label: "Accuracy", icon: BarChart3 },
-];
+const ICONS: Record<NavIcon, LucideIcon> = { LayoutGrid, FolderKanban, Users2, Contact, Database, Gauge, BarChart3, Settings, Shield };
 
 function useTheme() {
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
@@ -53,17 +44,28 @@ export function useBranding() {
 }
 
 export function AppShell() {
+  const userId = useAuth((state) => state.user?.id);
+  return <ShellContent key={userId ?? "pending"} userId={userId} />;
+}
+
+function ShellContent({ userId }: { userId?: string }) {
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<CollapsedSections>(() => readCollapsedSections(userId));
+  function toggleSection(id: SectionId) {
+    const next = { ...collapsed, [id]: !collapsed[id] };
+    setCollapsed(next);
+    writeCollapsedSections(userId, next);
+  }
   useBranding();
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
   return (
     <div className="flex h-full">
-      <aside className="hidden w-[228px] shrink-0 border-r border-line bg-side lg:flex"><Sidebar /></aside>
+      <aside className="hidden w-[228px] shrink-0 border-r border-line bg-side lg:flex"><Sidebar collapsed={collapsed} onToggle={toggleSection} /></aside>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-[#0b1220]/30" onClick={() => setOpen(false)} />
-          <aside className="relative flex h-full w-[260px] border-r border-line bg-side shadow-pop animate-fade-in"><Sidebar onClose={() => setOpen(false)} /></aside>
+          <aside className="relative flex h-full w-[260px] border-r border-line bg-side shadow-pop animate-fade-in"><Sidebar collapsed={collapsed} onToggle={toggleSection} onClose={() => setOpen(false)} /></aside>
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -80,13 +82,15 @@ export function AppShell() {
   );
 }
 
-function Sidebar({ onClose }: { onClose?: () => void }) {
+function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; collapsed: CollapsedSections; onToggle: (id: SectionId) => void }) {
   const brand = useBranding();
   const { user, orgs, orgId, switchOrg, clear } = useAuth();
   const org = orgs.find((o) => o.id === orgId) ?? orgs[0];
   const qc = useQueryClient();
   const nav = useNavigate();
   const [dark, setDark] = useTheme();
+  const { pathname } = useLocation();
+  const navigationId = useId();
 
   async function logout() {
     const rt = refreshToken();
@@ -121,12 +125,26 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
           { label: "New workspace", icon: <Plus className="h-3.5 w-3.5" />, onSelect: () => nav("/settings?tab=org&new=1") },
         ]} />
       </div>
-      <nav className="flex-1 space-y-px overflow-y-auto px-2">
-        {NAV.map((n) => <NavItem key={n.to} {...n} />)}
-        <div className="px-2.5 pb-1 pt-5 text-xs font-medium text-faint">Workspace</div>
-        <NavItem to="/settings" label="Settings" icon={Settings} />
-        <NavItem to="/usage" label="Usage and credits" icon={BarChart3} />
-        {user?.is_superuser && <NavItem to="/admin" label="Platform admin" icon={Shield} />}
+      <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {visibleSections(!!user?.is_superuser).map((section) => {
+          const current = section.items.find((item) => isNavActive(item, pathname));
+          const isCollapsed = !!collapsed[section.id];
+          const sectionId = `${navigationId}-${section.id}`;
+          return <section key={section.id} aria-labelledby={`${sectionId}-heading`} className="pt-3 first:pt-0">
+            <h2 id={`${sectionId}-heading`} aria-label={section.label} className="text-xs font-medium text-faint">
+              <button type="button" aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${section.label} navigation`} aria-expanded={!isCollapsed}
+                aria-controls={`${sectionId}-links`} onClick={() => onToggle(section.id)}
+                className="flex w-full items-center gap-2 rounded px-2.5 pb-1 pt-2 text-left hover:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30">
+                <span className="flex-1">{section.label}</span>
+                {current && isCollapsed && <span className="h-1.5 w-1.5 rounded-full bg-brand"><span className="sr-only">Current page: {current.label}</span></span>}
+                <ChevronRight aria-hidden className={cn("h-3 w-3 transition-transform", !isCollapsed && "rotate-90")} />
+              </button>
+            </h2>
+            <div id={`${sectionId}-links`} hidden={isCollapsed} className="space-y-px">
+              {section.items.map((item) => <NavItem key={item.to} {...item} />)}
+            </div>
+          </section>;
+        })}
       </nav>
       <div className="border-t border-line p-2">
         <div className="flex items-center gap-2 px-1.5 py-1">
@@ -145,13 +163,18 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
   );
 }
 
-function NavItem({ to, label, icon: Icon, end }: { to: string; label: string; icon: LucideIcon; end?: boolean }) {
+function NavItem({ to, label, icon, end, description }: NavItemDefinition) {
+  const Icon = ICONS[icon];
+  const { pathname } = useLocation();
+  const isActive = isNavActive({ to, label, icon, end, description }, pathname);
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => cn("flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors",
-      isActive ? "bg-line/70 font-medium text-fg" : "text-muted hover:bg-raised hover:text-fg")}>
-      <Icon className="h-4 w-4" strokeWidth={1.75} />
-      {label}
-    </NavLink>
+    <Tip content={description} side="right" contentClassName="max-w-[calc(100vw-24px)] sm:max-w-none sm:whitespace-nowrap">
+      <NavLink to={to} end={end} className={cn("flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors",
+        isActive ? "bg-line/70 font-medium text-fg" : "text-muted hover:bg-raised hover:text-fg")}>
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
+        {label}
+      </NavLink>
+    </Tip>
   );
 }
 

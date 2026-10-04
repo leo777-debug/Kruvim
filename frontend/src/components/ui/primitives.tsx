@@ -218,12 +218,12 @@ export function Segmented<T extends string>({ options, value, onChange, size = "
   );
 }
 
-export function Tip({ content, children, side = "top" }: { content: ReactNode; children: ReactNode; side?: "top" | "bottom" | "left" | "right" }) {
+export function Tip({ content, children, side = "top", contentClassName }: { content: ReactNode; children: ReactNode; side?: "top" | "bottom" | "left" | "right"; contentClassName?: string }) {
   return (
     <RTooltip.Root delayDuration={200}>
       <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
       <RTooltip.Portal>
-        <RTooltip.Content side={side} sideOffset={6} className="z-50 max-w-xs rounded-md bg-[#111827] px-2.5 py-1.5 text-xs text-white shadow-pop animate-fade-in">
+        <RTooltip.Content side={side} sideOffset={6} className={cn("z-50 max-w-xs rounded-md bg-[#111827] px-2.5 py-1.5 text-xs text-white shadow-pop animate-fade-in", contentClassName)}>
           {content}
         </RTooltip.Content>
       </RTooltip.Portal>

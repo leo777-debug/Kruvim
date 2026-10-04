@@ -38,7 +38,7 @@ export default function AudiencesPage() {
     q.refetch();
   }
   return (
-    <Page title="Audiences" subtitle="Saved audience definitions you can load into any simulation. Share one and it appears in every workspace's community library; accuracy comes from calibration against real results."
+    <Page title="Saved audiences" subtitle="Saved audience definitions you can load into any simulation. Share one and it appears in every workspace's community library; accuracy comes from calibration against real results."
       actions={<Segmented size="md" value={scope} onChange={setScope} options={[{ value: "all", label: "All" }, { value: "mine", label: "This workspace" }, { value: "community", label: "Community" }]} />}>
       <Card className="overflow-hidden">
         {q.isLoading ? <div className="space-y-2 p-4"><Skeleton /><Skeleton /></div>

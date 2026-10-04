@@ -36,8 +36,14 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function LegacyAudiences() {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: "/saved-audiences", search, hash }} replace />;
+}
+
 export default function App() {
   const { markReady, setOrgs } = useAuth();
+  const signedIn = useAuth((state) => !!state.accessToken);
   useEffect(() => {
     (async () => {
       if (await refreshSession()) {
@@ -59,7 +65,9 @@ export default function App() {
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/share/:token" element={<PublicResults />} />
-        <Route path="/accuracy" element={<PublicAccuracy />} />
+        <Route path="/accuracy" element={signedIn ? <AppShell /> : <PublicAccuracy />}>
+          <Route index element={<PublicAccuracy />} />
+        </Route>
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route index element={<Dashboard />} />
           <Route path="runs" element={<AllRuns />} />
@@ -70,7 +78,8 @@ export default function App() {
           <Route path="simulations/:simId/edit" element={<NewSimulation />} />
           <Route path="data-pool" element={<DataPool />} />
           <Route path="population" element={<Population />} />
-          <Route path="audiences" element={<Audiences />} />
+          <Route path="saved-audiences" element={<Audiences />} />
+          <Route path="audiences" element={<LegacyAudiences />} />
           <Route path="my-audience" element={<MyAudience />} />
           <Route path="monitoring" element={<Monitoring />} />
           <Route path="calibration" element={<Calibration />} />

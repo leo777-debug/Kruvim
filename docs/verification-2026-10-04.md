@@ -37,3 +37,11 @@ The tool runs independent full suites and retains seed-specific diagnostic logs 
 ## Verification limits
 
 GDELT's AE/SA requests timed out during live diagnosis, so successful live recovery could not be certified. Regional RSS searches were captured successfully; assertions use recorded fixtures and do not call live networks. Connected-model scoring uses protocol/stub coverage, not paid-model quality or an installed Ollama/GPU model. PostgreSQL/pgvector and Redis execution were not exercised in this local SQLite run. Word visual rendering was unavailable because the bundled LibreOffice runtime was unavailable.
+
+## Sidebar navigation (item 5)
+
+The navigation regression check passed for all 13 links against explicit JSX routes, excluding the catch-all redirect. It also checks the requested group/item order, unique destinations, tooltip descriptions, nested active paths, case/trailing-slash matching, administrator visibility, per-user preferences and invalid/unavailable browser storage. The existing agent-selection regression check passed. The full backend suite passed all 57 tests; Ruff, `tsc --noEmit` and the production Vite build passed.
+
+Browser verification used the production build with a disposable SQLite/dry-run API server. Every destination opened and showed exactly one styled active item. The legacy `/audiences?scope=community#library` redirected to `/saved-audiences?scope=community#library`. A Saved audiences hover displayed its readable tooltip. The five groups rendered at desktop width and in a 390px drawer, without horizontal overflow. Mobile link selection closed the drawer; reopening highlighted Saved audiences. Collapses survived refresh and were shared between desktop and mobile. Signing in as a second user started with independent preferences and omitted Platform admin; returning to the platform administrator restored the first user's choices. Public accuracy rendered with active navigation when signed in and remained public with a sign-in link when logged out. No browser console errors were recorded.
+
+This item changes no backend schema. Preferences are browser-local and do not sync across devices. Production deployment, other browsers and device-specific touch/screen-reader behavior were not exercised.
