@@ -33,7 +33,7 @@ from app.services.datapool.retrieval import embed
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
 from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
-from app.services.population import features, get_population, persona_text, platform_label, topic_match
+from app.services.population import get_population, persona_text, platform_label, topic_match
 from app.services.population.regions import PLATFORMS, REGIONS, STANCES, region
 
 from . import dry, projection
@@ -339,10 +339,16 @@ class Engine:
                 tm = float(topic_match(self.pop, np.array([idx]), topic_vector(c.get("topics")))[0])
                 on_t = self.platform_key not in PLATFORMS or bool((int(self.pop.platforms[idx]) >> PLATFORMS.index(self.platform_key)) & 1)
                 reaction = dry.reaction(a.persona, tm, on_t, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
+                from app.services.agent_memory import adjust_reaction
+                state = self.cfg.get("agent_memory", {}).get("affinity", {}).get("people", {}).get(str(idx), {})
+                reaction = adjust_reaction(reaction, state)
                 return a, v, short_video_metrics(reaction)
             from app.services.agent_memory import remember_block
             personal = "\nWhat's on your mind today:\n" + "\n".join(x.get("title", "") for x in a.cfg.get("personal_signals", []))
             personal += remember_block(self.cfg.get("agent_memory", {}).get("snapshots", {}).get(a.ref, []))
+            history_state = self.cfg.get("agent_memory", {}).get("affinity", {}).get("people", {}).get(str(idx), {})
+            if history_state:
+                personal += "\nYour simulated creator history (small familiarity/affinity effects; fatigue reduces novelty): " + json.dumps(history_state)
             d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
                                              max_tokens=700, usage=self.usage)
             normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
@@ -446,10 +452,12 @@ class Engine:
         ids = np.array([int(a.ref[2:]) for a in reacted])
         Y = np.array([[a.reaction[t] if not t.startswith("seg") else a.reaction["segment_engagement"][int(t[3:])] for t in self.targets]
                       for a in reacted], dtype=np.float64)
-        self.X0 = features(self.pop, ids, self.topic_vec, self.platform_key)
+        self.history = self.cfg.get("agent_memory", {}).get("affinity")
+        self.X0 = projection.design(self.pop, ids, self.topic_vec, self.platform_key, self.history, exact=True)
         self.ids0 = ids
         self.Y0 = Y
         self.surface0 = projection.fit(self.X0, Y, self.targets, self.seed)
+        self.surface0.history = self.history
 
     def init_crowd(self):
         n = int(self.cfg["agents"]["crowd"])
@@ -577,6 +585,8 @@ class Engine:
                 f"{a.persona.get('description', '')}\nPublic stance toward the content: {a.persona.get('stance', 'neutral')}.")
             from app.services.agent_memory import remember_block
             remembered = self.cfg.get("agent_memory", {}).get("snapshots", {}).get(a.ref, [])
+            remembered = remembered + [m for m in self.cfg.get("agent_memory", {}).get("opinion_snapshots", {}).get(a.ref, [])
+                                      if m["id"] not in {x["id"] for x in remembered}]
             ptxt += remember_block(remembered)
             out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
                                                user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking))

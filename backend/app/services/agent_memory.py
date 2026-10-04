@@ -142,7 +142,7 @@ async def write_run(org_id, sim_id, llm, usage, now=None):
         affinities = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org_id,
             AgentCreatorAffinity.population_ref.in_(refs), AgentCreatorAffinity.subject == creator_subject(sim)))).scalars().all()
         by_affinity = {a.population_ref: a for a in affinities}
-        topic_vector = embed(topic_subject(sim)).tolist()
+        topic_vector = embed(query_text(sim.card or {}) or topic_subject(sim)).tolist()
         count = 0
         for agent in agents:
             key = person_key(agent.ref, agent.persona)
@@ -258,8 +258,63 @@ async def attach_snapshot(org_id, sim_id, card, agents, fresh=False):
         keys = [person_key(ref, persona) for ref, persona in agents]
         recalled = await recall_many(s, org, keys, card, now, fresh=fresh)
         snapshot = {ref: recalled.get(key, []) for (ref, _), key in zip(agents, keys, strict=True)}
+        opinions = {}
+        if not fresh:
+            run = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar_one()
+            query_vector = embed(query_text(card))
+            for offset in range(0, len(keys), 200):
+                rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org_id,
+                    AgentMemory.population_ref.in_(keys[offset:offset + 200]), AgentMemory.kind == "opinion",
+                    AgentMemory.subject.in_([creator_subject(run), topic_subject(run)]), AgentMemory.importance >= .65,
+                    AgentMemory.superseded_by.is_(None), AgentMemory.created_at <= now,
+                    AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90))))).scalars().all()
+                grouped = defaultdict(list)
+                for row in rows:
+                    grouped[row.population_ref].append((row, None))
+                for (ref, _), key in zip(agents, keys, strict=True):
+                    if key in grouped:
+                        opinions[ref] = ranked_memories(grouped[key], query_vector, now, k=2, budget=75)
+            extra = sorted({m["id"] for values in opinions.values() for m in values} - {m["id"] for values in snapshot.values() for m in values})
+            for offset in range(0, len(extra), 400):
+                await s.execute(update(AgentMemory).where(AgentMemory.org_id == org_id, AgentMemory.id.in_(extra[offset:offset + 400]))
+                    .values(recall_count=AgentMemory.recall_count + 1, last_recalled_at=now))
         return {"snapshot_at": now.isoformat(), "generation": (org.settings or {}).get("agent_memory_generation", 0),
-            "fresh": fresh, "snapshots": snapshot, "recalled": sum(len(rows) for rows in snapshot.values()), "label": LABEL}
+            "fresh": fresh, "snapshots": snapshot, "opinion_snapshots": opinions,
+            "recalled": len({m["id"] for values in [*snapshot.values(), *opinions.values()] for m in values}), "label": LABEL}
+
+
+async def affinity_snapshot(org_id, subject, fresh=False, card=None):
+    if fresh:
+        return {"people": {}, "segments": {}}
+    now = utcnow()
+    async with session_scope() as s:
+        org = await s.get(Organization, org_id)
+        rows = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org_id,
+            AgentCreatorAffinity.subject == subject, AgentCreatorAffinity.last_seen_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90))))).scalars().all()
+    grouped, people = defaultdict(list), {}
+    for row in rows:
+        state = decayed(row, now)
+        if card is not None:
+            state["fatigue"] *= max(0, float(np.asarray(row.topic_embedding) @ embed(query_text(card) or "topic:general")))
+        if row.population_ref.startswith("p:"):
+            people[row.population_ref[2:]] = state
+            grouped[row.segment].append(state)
+    return {"people": people, "segments": {key: {field: float(np.mean([r[field] for r in records]))
+        for field in ("familiarity", "affinity", "fatigue")} for key, records in grouped.items()},
+        "method": "Segment averages over remembered simulated people; extrapolated to the crowd, not real follower history."}
+
+
+def adjust_reaction(reaction, state):
+    """Conservative, explicit dry-run history prior; never an accuracy claim."""
+    reaction = dict(reaction)
+    affinity, fatigue = state.get("affinity", 0), state.get("fatigue", 0)
+    reaction["score"] = float(np.clip(reaction["score"] + .35 * affinity - .45 * fatigue, 0, 10))
+    reaction["would_share"] = float(np.clip(reaction.get("would_share", 0) + .04 * affinity - .04 * fatigue, 0, 1))
+    reaction["novelty"] = float(np.clip(reaction.get("novelty", .5) * (1 - .3 * fatigue), 0, 1))
+    reaction["rewatch_probability"] = float(np.clip(reaction.get("rewatch_probability", reaction["score"] / 10 * .35) * (1 - .3 * fatigue), 0, 1))
+    return reaction
+
+
 
 
 async def detail_memory(sim, ref, persona):

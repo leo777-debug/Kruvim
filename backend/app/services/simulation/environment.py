@@ -111,7 +111,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
 
     from app.db.base import utcnow
     from app.models import AgentCreatorAffinity
-    from app.services.agent_memory import creator_subject
+    from app.services.agent_memory import affinity_snapshot, creator_subject
     from app.services.interaction.selection import returning_panel
     from app.services.quotas import plan
     fresh_audience = bool((sim.config or {}).get("overrides", {}).get("fresh_audience"))
@@ -164,6 +164,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         [(f"s:{''.join(ch for ch in str(st.get('handle') or st['name']).lower() if ch.isalnum() or ch == '_')[:20] or f'acct{k}'}", st)
          for k, st in enumerate(stakes)], fresh=fresh_audience)
     memory_snapshot.update(panel)
+    memory_snapshot["affinity"] = await affinity_snapshot(org_id, creator_subject(sim), fresh_audience, card)
     await progress(f"{len(stakes)} stakeholder accounts from the knowledge graph", 0.45)
 
     # model-generated configuration

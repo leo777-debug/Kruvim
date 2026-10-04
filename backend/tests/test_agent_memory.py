@@ -163,3 +163,33 @@ def test_returning_panel_preserves_exact_segment_counts():
     scarce, report = returning_panel(pop, mask, baseline, [0], .6, np.random.default_rng(7))
     assert report["returning"] == 1 and report["shortfall"] == 5
     assert sorted(keys(scarce)) == sorted(keys(baseline))
+
+
+async def test_affinity_changes_fans_fatigue_and_projection_features(auth):
+    from types import SimpleNamespace
+    import numpy as np
+    from app.services.agent_memory import adjust_reaction, affinity_snapshot, write_run
+    from app.services.llm import Usage
+    from app.services.population import get_population
+    from app.services.content import topic_vector
+    from app.services.simulation import projection
+    org, sim = await memory_run(auth)
+    await write_run(org, sim, SimpleNamespace(is_dry=True), Usage())
+    history = await affinity_snapshot(org, "creator:gym")
+    assert history["people"]["0"]["familiarity"] > .9
+    assert await affinity_snapshot(org, "creator:gym", fresh=True) == {"people": {}, "segments": {}}
+    base = {"score": 5, "would_share": .2, "novelty": .8, "rewatch_probability": .3}
+    fan = adjust_reaction(base, {"affinity": .8, "fatigue": 0})
+    tired = adjust_reaction(base, {"affinity": .8, "fatigue": 1})
+    assert fan["score"] > base["score"] and fan["would_share"] > base["would_share"]
+    assert tired["novelty"] < base["novelty"] and tired["rewatch_probability"] < base["rewatch_probability"]
+    pop = await get_population()
+    ids = np.arange(20)
+    tv = topic_vector({})
+    X = projection.design(pop, ids, tv, "tiktok", history, exact=True)
+    Y = np.column_stack([np.arange(20) / 4, np.full(20, .2)])
+    model = projection.fit(X, Y, ["score", "would_share"], 1)
+    model.history = history
+    restored = projection.Surface.from_json(model.to_json())
+    assert restored.history == history and X.shape[1] == len(projection.features(pop, ids, tv, "tiktok")[0]) + 3
+    assert projection.project_idx(pop, restored, ids, tv, "tiktok", 1).shape == (20, 2)

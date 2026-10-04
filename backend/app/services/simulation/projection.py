@@ -27,6 +27,7 @@ class Surface:
     seed: int
     lam: float
     r2: list
+    history: dict | None = None
 
     def to_json(self) -> dict:
         return {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in self.__dict__.items()}
@@ -35,7 +36,30 @@ class Surface:
     def from_json(d: dict) -> Surface:
         arr = lambda k: np.array(d[k], np.float32)  # noqa: E731
         return Surface(targets=d["targets"], mu=arr("mu"), sd=arr("sd"), W=arr("W"), b=arr("b"), sigma=arr("sigma"), lo=arr("lo"),
-                       hi=arr("hi"), seed=int(d["seed"]), lam=float(d["lam"]), r2=d.get("r2", []))
+                   hi=arr("hi"), seed=int(d["seed"]), lam=float(d["lam"]), r2=d.get("r2", []), history=d.get("history"))
+
+
+def history_features(pop, idx, history, exact=False):
+    idx = np.asarray(idx)
+    out = np.zeros((idx.size, 3), dtype=np.float32)
+    segments = (history or {}).get("segments", {})
+    if not exact:
+        codes = [r["code"] for r in REGIONS]
+        keys = (pop.region[idx].astype(int) * 5 + pop.age_band[idx]) * 2 + pop.male[idx]
+        for key in np.unique(keys):
+            state = segments.get(f"{codes[key // 10]}:{(key // 2) % 5}:{key % 2}", {})
+            out[keys == key] = [min(1, state.get("familiarity", 0) / 5), state.get("affinity", 0), state.get("fatigue", 0)]
+    people = (history or {}).get("people", {})
+    for position, identifier in enumerate(idx):
+        state = people.get(str(int(identifier)))
+        if state:
+            out[position] = [min(1, state.get("familiarity", 0) / 5), state.get("affinity", 0), state.get("fatigue", 0)]
+    return out
+
+
+def design(pop, idx, topic_vec, platform, history=None, exact=False):
+    base = features(pop, idx, topic_vec, platform)
+    return np.concatenate([base, history_features(pop, idx, history, exact)], 1) if history is not None else base
 
 
 def _ridge(Xs, Y, lam):
@@ -69,7 +93,7 @@ def _apply(m: Surface, X: np.ndarray, noise: np.ndarray | None) -> np.ndarray:
 
 
 def project_idx(pop: Population, m: Surface, idx: np.ndarray, topic_vec, platform, noise_seed: int) -> np.ndarray:
-    X = features(pop, idx, topic_vec, platform)
+    X = design(pop, idx, topic_vec, platform, m.history)
     noise = np.random.default_rng([m.seed, noise_seed]).standard_normal((idx.size, len(m.targets))).astype(np.float32)
     return _apply(m, X, noise)
 
@@ -78,7 +102,7 @@ def project_population(pop: Population, m: Surface, topic_vec, platform) -> np.n
     out = np.empty((pop.n, len(m.targets)), dtype=np.float16)
     for c, start in enumerate(range(0, pop.n, CHUNK)):
         idx = np.arange(start, min(pop.n, start + CHUNK))
-        X = features(pop, idx, topic_vec, platform)
+        X = design(pop, idx, topic_vec, platform, m.history)
         noise = np.random.default_rng([m.seed, c]).standard_normal((idx.size, len(m.targets))).astype(np.float32)
         out[idx] = _apply(m, X, noise).astype(np.float16)
     return out
@@ -88,7 +112,7 @@ def project_one(pop: Population, m: Surface, topic_vec, platform, i: int) -> dic
     c, start = i // CHUNK, (i // CHUNK) * CHUNK
     size = min(pop.n, start + CHUNK) - start
     noise = np.random.default_rng([m.seed, c]).standard_normal((size, len(m.targets))).astype(np.float32)[i - start]
-    v = _apply(m, features(pop, np.array([i]), topic_vec, platform), noise[None, :])[0]
+    v = _apply(m, design(pop, np.array([i]), topic_vec, platform, m.history), noise[None, :])[0]
     return {t: round(float(x), 3) for t, x in zip(m.targets, v)}
 
 

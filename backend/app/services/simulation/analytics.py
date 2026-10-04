@@ -8,7 +8,6 @@ import numpy as np
 
 from app.services.creator import audience_weights, creator_checks
 from app.services.datapool.context import trend_alignment
-from app.services.population import features
 from app.services.population.regions import AGE_BAND_LABELS, INTERESTS, PLATFORM_LABELS, PLATFORMS, REGIONS, STANCES
 
 from . import cache, insights, projection
@@ -54,14 +53,17 @@ def finalize(e) -> dict:
     Yf = e.Y0.copy()
     Yf[:, 0] = [by_idx[int(i)].opinion for i in ids]
     surface = projection.fit(e.X0, Yf, e.targets, e.seed)
+    surface.history = getattr(e, "history", None)
     P = projection.project_population(pop, surface, e.topic_vec, e.platform_key)
     cache.put(e.sim_id, {"A": P}, mask)
     sc = P[aud, 0].astype(np.float32)
     share = P[aud, 1].astype(np.float32)
     rs = np.random.default_rng(e.seed + 3)
     samp = rs.choice(aud, min(30000, aud.size), replace=False)
-    lo, hi = projection.bootstrap_mean(e.X0, Yf[:, 0], features(pop, samp, e.topic_vec, e.platform_key), e.seed)
+    lo, hi = projection.bootstrap_mean(e.X0, Yf[:, 0], projection.design(pop, samp, e.topic_vec, e.platform_key, surface.history), e.seed)
     res: dict = {"seed": e.seed}
+    memory = e.cfg.get("agent_memory", {})
+    res["agent_memory"] = {key: memory.get(key) for key in ("fresh", "returning", "voice", "recalled", "requested_share", "achieved_share", "shortfall", "snapshot_at", "label")}
     init_scores = np.array([by_idx[int(i)].initial for i in ids])
     final_scores = Yf[:, 0]
     res["audience"] = {"size": int(aud.size), "population": int(pop.n), "filters": e.audience, "voice_n": len(voices),
@@ -261,10 +263,11 @@ def finalize(e) -> dict:
             tb = ["score", "would_share", "would_comment", "would_follow", "emotion_intensity", "novelty"] + [f"seg{k}" for k in range(nb)]
             from app.services.content import topic_vector
             tvb = topic_vector(e.card_b.get("topics"))
-            Xb = features(pop, idsb, tvb, e.platform_key)
+            Xb = projection.design(pop, idsb, tvb, e.platform_key, getattr(e, "history", None), exact=True)
             Yb = np.array([[a.reaction["B"][t] if not t.startswith("seg") else a.reaction["B"]["segment_engagement"][int(t[3:])] for t in tb]
                            for a in withb], dtype=np.float64)
             sb = projection.fit(Xb, Yb, tb, e.seed + 1)
+            sb.history = getattr(e, "history", None)
             Pb = projection.project_population(pop, sb, tvb, e.platform_key)
             cache.put(e.sim_id, {"B": Pb}, mask)
             models["B"] = sb.to_json()
