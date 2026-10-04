@@ -75,6 +75,10 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         learned = await learned_weights(s, max(topics, key=topics.get) if topics else None)
         for snapshot in context.values():
             snapshot["source_weights"] = {key: value["weight"] for key, value in learned["sources"].items()}
+            tone = snapshot.get("tone")
+            if tone:
+                source = tone.get("tone_source", "gdelt")
+                snapshot["source_weights"][source] = snapshot["source_weights"].get(source, 1) * tone.get("source_weight", 1)
         if audience.get("use_creator_audience"):
             profile = (org.settings or {}).get("creator_audience", {})
             split = profile.get("split")

@@ -125,9 +125,35 @@ async def pool_stats(p: Principal = Depends(principal), s: AsyncSession = Depend
 
 
 @router.get("/world")
-async def world(p: Principal = Depends(principal), regions: str = "", at: datetime | None = None):
+async def world(p: Principal = Depends(principal), regions: str = "", at: datetime | None = None,
+                s: AsyncSession = Depends(get_session)):
     codes = [c for c in regions.split(",") if c in REGION_CODES] or REGION_CODES
-    return await snapshots_at(codes, at)
+    from app.services.llm import Usage, make_llm
+    from app.services.providers import resolve
+    from app.services.quotas import ensure_monthly_grant, ledger, reserve
+    resolved = await resolve(s, p.org_id)
+    usage = Usage()
+    llm, held = make_llm(resolved.settings), 0
+    reference = "headline-tone:" + uuid.uuid4().hex
+    try:
+        if resolved.metered and not llm.is_dry:
+            await ensure_monthly_grant(s, p.org)
+            maximum = 2 * len(codes)
+            if p.org.credits_balance >= maximum:
+                await reserve(s, p.org_id, maximum, "headline_tone_reserve", reference)
+                held = maximum
+                await s.commit()
+            else:
+                # Regional context remains usable when there are no model credits.
+                await llm.aclose()
+                llm = None
+        return await snapshots_at(codes, at, llm, usage, org_id=p.org_id, with_briefs=False)
+    finally:
+        if held:
+            await ledger(s, p.org_id, held - usage.calls, "headline_tone_refund", reference)
+            await s.commit()
+        if llm:
+            await llm.aclose()
 
 
 @router.post("/listen")

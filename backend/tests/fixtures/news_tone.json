@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-10-04",
+  "headlines": {
+    "SA": [
+      "إليك موعد وملعب نهائي \"خليجي 27\" بين السعودية والإمارات",
+      "الحوثيون: هاجمنا منشأة لأرامكو في الرياض بصواريخ ومسيّرات",
+      "بحضور جماهيري واسع.. السعودية إلى نهائي خليجي 27 على حساب قطر",
+      "كيفية مشاهدة مباراة السعودية وقطر اليوم.. الموعد والقنوات الناقلة في خليجي 27",
+      "السعودية... الثبات على الأسس والمرونة في الأدوات",
+      "السعودية الامارات تتأهلان لنهائي كأس الخليج \"خليجي 27\""
+    ],
+    "AE": [
+      "Ax-wielding FlyDubai co-pilot had been flagged over extremism concerns",
+      "FlyDubai co-pilot used crash ax to attempt terrorist act, UAE says",
+      "UAE source criticizes Israel's use of 'rescue flights' after flydubai incident",
+      "FlyDubai Attacker Used ‘Crash Ax,’ a Common Fixture on Many Jets",
+      "Flydubai co-pilot attacked captain with crash axe in ‘terrorist act’: UAE",
+      "How the Dubai flight became a front in the struggle against Iran"
+    ]
+  },
+  "gdelt_diagnostic": "ConnectTimeout for sourcecountry:unitedarabemirates and sourcecountry:saudiarabia",
+  "capture_queries": {
+    "AE": "Dubai UAE when:1d",
+    "SA": "السعودية when:1d"
+  }
+}

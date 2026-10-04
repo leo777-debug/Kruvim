@@ -51,6 +51,7 @@ function World() {
               ["Upcoming", w.events?.length ? w.events.slice(0, 2).map((e: any) => e.days_away == null ? e.name : `${e.name} (${e.days_away} d)`).join(", ") : "Source unavailable"],
               ["Economy", w.economy?.[0]?.title || "–"],
             ]} />
+            {w.tone && <p className="mt-1 text-[11px] text-muted">{w.tone.source_label || "GDELT"}</p>}
             <div className="mt-4 text-xs font-medium text-muted">Headlines</div>
             <ul className="mt-1 space-y-1 text-[13px]">{(w.news || []).slice(0, 4).map((n: any, i: number) => <li key={i} dir="auto" className="line-clamp-1">{n.title} <span className="text-faint">· {n.source}</span></li>)}</ul>
             {w.trending?.length > 0 && <><div className="mt-3 text-xs font-medium text-muted">Most read</div>

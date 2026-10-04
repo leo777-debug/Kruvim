@@ -468,6 +468,7 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
         <Card className="space-y-2 p-4 text-muted leading-relaxed">
           <div className="eyebrow mb-1">Method</div>
           <p>{r.score.method}</p>
+          {Object.entries(sim.config?.context || {}).map(([code, context]: any) => context.tone && <p key={code}>{context.city || code} news tone: {context.tone.source_label || "GDELT"} · source weight {context.tone.source_weight ?? 1}{context.tone.warning ? `. ${context.tone.warning}.` : ""}</p>)}
           <p>Reaction surface: ridge regression on {r.model.features} persona features (λ={r.model.lambda}) fitted on {r.model.voice_n} interviewed agents, applied to {fmt.n(r.audience.population)} agents.</p>
         </Card>
         <Card className="space-y-1.5 p-4">

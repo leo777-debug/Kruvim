@@ -125,7 +125,7 @@ async def build_graph(ctx, sim_id: str):
             cards["B"] = await build_card(prep_b, {**meta, "title": b_title}, llm, usage)
         await progress("Fetching live context from the data pool", 0.1)
         regions = (sim.audience or {}).get("regions") or datapool.context.all_codes()
-        snaps = await datapool.snapshots_at(regions, sim.publish_at, llm, usage)
+        snaps = await datapool.snapshots_at(regions, sim.publish_at, llm, usage, org_id=org_id)
         if not sim.publish_at or sim.publish_at >= _now() - timedelta(hours=2):
             from app.services.datapool.targeted import prepare as prepare_targeted
             await prepare_targeted(sim_id, org_id, cards["A"], regions, snaps)

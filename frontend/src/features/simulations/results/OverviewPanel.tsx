@@ -77,7 +77,7 @@ export function OverviewPanel({ sim, onTab }: { sim: Simulation; onTab: (t: stri
         {r.creator.audience_twin && <><p className="text-sm">Matched to your audience breakdown. {r.creator.audience_twin.warning}</p>
           <KV rows={Object.entries(r.creator.audience_twin.coverage || {}).map(([key, value]) => [`Supported ${key}`, `${value}%`])} />
           <p className="text-xs text-muted">Largest difference from your supplied breakdown: {r.creator.audience_twin.max_marginal_error_percent ?? 0} percentage points. Interests and behavior remain synthetic.</p></>}
-        {!!r.creator.stale_sources?.length && <div role="status" className="text-sm">{r.creator.stale_sources.map((x: any, i: number) => <p key={i}>{x.region}: {x.source} {x.age_hours == null ? (x.source === "archive" ? "archive unavailable" : "has no recent data") : `was ${x.age_hours} hours old`}</p>)}</div>}
+        {!!r.creator.stale_sources?.length && <div role="status" className="text-sm">{r.creator.stale_sources.map((x: any, i: number) => <p key={i}>{x.region}: {x.note || `${x.source} ${x.age_hours == null ? (x.source === "archive" ? "archive unavailable" : "has no recent data") : `was ${x.age_hours} hours old`}`}</p>)}</div>}
         {r.creator.short_video && <KV rows={[["Rewatch probability", fmt.pct(r.creator.short_video.rewatch_probability)],
           ["Stitch or duet likelihood", fmt.pct(r.creator.short_video.stitch_duet_likelihood)], ["Sound reuse likelihood", fmt.pct(r.creator.short_video.sound_reuse_likelihood)]]} />}
         {!!r.creator.language_fit?.flags?.length && <p className="text-xs text-muted">{r.creator.language_fit.flags.length} language-fit objections. {r.creator.language_fit?.note}</p>}

@@ -23,6 +23,7 @@ from app.services.population.regions import REGIONS, region
 
 from .runner import run_connector
 from .safety import clean_snapshot, safe_title
+from .tone import select_tone
 
 log = logging.getLogger("kruvim.datapool")
 ON_DEMAND = ["open_meteo", "google_news", "wikipedia", "calendar", "regional_trends"]
@@ -48,7 +49,7 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
     from app.services.datapool.retrieval import embed
     async with session_scope() as s:
         w = await _latest(s, code, ["weather"], at - timedelta(hours=3), 1)
-        tone = await _latest(s, code, ["tone"], at - timedelta(hours=30), 1)
+        tone = await select_tone(s, code, at)
         news = await _latest(s, code, ["headline"], at - timedelta(hours=24), 12)
         trends = await _latest(s, code, ["trend"], at - timedelta(hours=48), 10)
         social = await _latest(s, code, ["social_trend"], at - timedelta(hours=24), 12)
@@ -64,6 +65,8 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
             Signal.observed_at >= at - timedelta(days=30)).order_by(Signal.observed_at.desc()).limit(500))).scalars().all()
     freshness = {}
     for item in prepared:
+        if item.kind == "tone":
+            continue
         age = max(0, (at - _aware(item.observed_at)).total_seconds() / 3600)
         maximum = settings.signal_max_age_hours.get(item.kind, 6)
         key = item.source
@@ -75,11 +78,11 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
                                  "max_age_hours": settings.signal_max_age_hours.get(kind, 6), "stale": True, "status": "source_unavailable"}
     reg = region(code)
     local = at + timedelta(hours=reg["tz_offset"])
-    return {
+    data = {
         "region": code, "name": reg["name"], "city": reg["city"], "at": at.isoformat(),
         "local_time": local.strftime("%a %H:%M"), "local_hour": local.hour,
         "weather": w[0].payload if w else None,
-        "tone": ({"avg": tone[0].value, **tone[0].payload} if tone else None),
+        "tone": tone,
         "news": [{"title": x.title, "source": x.payload.get("source", ""), "url": x.url} for x in news],
         "trending": [{"title": x.title, "views": x.value, "at": x.observed_at.isoformat()} for x in trends],
         "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url, "at": x.observed_at.isoformat()} for x in social],
@@ -94,6 +97,30 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         "cultural_moment_by": moment.model if moment else "template",
         "trend_series": [{"title": x.title, "source": x.source, "value": x.value, "at": x.observed_at.isoformat()} for x in series],
     }
+    apply_tone(data, tone)
+    return data
+
+
+def apply_tone(data, tone):
+    from .retrieval import embed
+    data["tone"] = tone
+    data["signals"] = [x for x in data.get("signals", []) if x.get("kind") != "tone"]
+    freshness = [x for x in data.get("freshness", []) if x["source"] not in ("gdelt", "headline_tone")]
+    if tone:
+        source = tone["tone_source"]
+        data.setdefault("source_weights", {})[source] = tone["source_weight"]
+        title = f"News tone {tone['avg']:+.1f} · {tone['source_label']}"
+        data["signals"].append({"id": tone["signal_id"], "source": source, "kind": "tone", "title": title,
+                                "value": tone["avg"], "source_weight": tone["source_weight"], "at": tone["observed_at"],
+                                "summary": tone.get("warning") or "Regional article tone", "embedding": embed(title).tolist()})
+        freshness.append({"source": "gdelt", "region": data["region"], "age_hours": tone["age_hours"],
+                          "stale": bool(tone.get("warning")), "status": "fallback" if tone.get("warning") else "ok",
+                          "note": tone.get("warning"), "tone_source": source})
+    else:
+        freshness.append({"source": "gdelt", "region": data["region"], "age_hours": None, "stale": True,
+                          "status": "source_unavailable", "note": "News tone source unavailable: no GDELT, regional headlines or previous value"})
+    data["freshness"] = freshness
+    data["stale_sources"] = [x for x in freshness if x["stale"]]
 
 
 def template_brief(d: dict) -> str:
@@ -104,7 +131,8 @@ def template_brief(d: dict) -> str:
     t = d.get("tone")
     if t and t.get("avg") is not None:
         mood = "sharply negative" if t["avg"] < -4 else "negative" if t["avg"] < -2 else "mixed" if t["avg"] < 0.5 else "positive"
-        parts.append(f"Local news tone is {mood} ({t['avg']:+.1f}).")
+        parts.append(f"Local news tone is {mood} ({t['avg']:+.1f}; {t.get('source_label', 'GDELT')})." +
+                     (" Treat this lower-confidence estimate cautiously." if t.get("source_weight", 1) < 1 else ""))
     if d.get("news"):
         parts.append("Top stories: " + "; ".join(n["title"] for n in d["news"][:3]) + ".")
     if d.get("trending"):
@@ -144,7 +172,8 @@ async def ensure_fresh(codes: list[str]) -> None:
                     task.cancel()
 
 
-async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None) -> dict[str, dict]:
+async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,
+                       org_id: str | None = None, with_briefs: bool = True) -> dict[str, dict]:
     """Snapshot per region for the given moment (creates and archives it if needed)."""
     now = utcnow()
     at = _aware(at) if at else now
@@ -190,18 +219,28 @@ async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | Non
             out[c] = {**clean_snapshot(row.data), "brief": row.brief if safe_title(row.brief) else template_brief(clean_snapshot(row.data)), "brief_by": row.brief_by, "archived": False}
             if row.brief_by == "template":
                 need_brief.append(c)
+    if org_id:
+        # Workspace model estimates never enter the shared hourly archive.
+        async with session_scope() as s:
+            for code, data in out.items():
+                tone = await select_tone(s, code, now, org_id, llm, usage)
+                apply_tone(data, tone)
+                data["brief"] = template_brief(data)
+                data["brief_by"] = "template"
+                if code not in need_brief:
+                    need_brief.append(code)
     if at > now + timedelta(hours=1):   # scheduled publish time: same live context, shifted clock + calendar
         for c in codes:
             reg = region(c)
             local = at + timedelta(hours=reg["tz_offset"])
             out[c]["scheduled_local_time"] = local.strftime("%a %d %b %H:%M")
             out[c]["brief"] += f" (Content will be published {local.strftime('%a %H:%M')} local time.)"
-    if need_brief and llm is not None and not llm.is_dry:
-        await _llm_briefs(out, need_brief, llm, usage or Usage(), bucket)
+    if with_briefs and need_brief and llm is not None and not llm.is_dry:
+        await _llm_briefs(out, need_brief, llm, usage or Usage(), bucket, persist=org_id is None)
     return out
 
 
-async def _llm_briefs(out: dict, codes: list[str], llm: BaseLLM, usage: Usage, bucket: datetime) -> None:
+async def _llm_briefs(out: dict, codes: list[str], llm: BaseLLM, usage: Usage, bucket: datetime, persist=True) -> None:
     payload = [{"region": c, "city": out[c]["city"], "local_time": out[c]["local_time"], "weather": out[c].get("weather"),
                 "headlines": [n["title"] for n in out[c].get("news", [])[:10]], "news_tone": out[c].get("tone"),
                 "most_read": [t["title"] for t in out[c].get("trending", [])[:8]],
@@ -218,7 +257,7 @@ async def _llm_briefs(out: dict, codes: list[str], llm: BaseLLM, usage: Usage, b
             b = briefs.get(c)
             if isinstance(b, str) and b.strip():
                 row = (await s.execute(select(RegionSnapshot).where(and_(RegionSnapshot.region == c, RegionSnapshot.hour == bucket)))).scalar_one_or_none()
-                if row:
+                if row and persist:
                     row.brief, row.brief_by = b.strip(), llm.model_for("brief")
                 out[c]["brief"], out[c]["brief_by"] = b.strip(), llm.model_for("brief")
 

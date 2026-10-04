@@ -25,6 +25,15 @@ async def prepare():
     await datapool.ensure_platform_connectors()
     async with session_scope() as s:
         await s.execute(update(Connector).values(enabled=False))
+    # Reproduce region-specific tone fallbacks without making external calls.
+    import json
+    from pathlib import Path
+
+    from app.services.datapool.base import SignalItem
+    from app.services.datapool.runner import store_signals
+    fixture = json.loads((Path(__file__).parents[1] / "tests/fixtures/news_tone.json").read_text(encoding="utf-8"))
+    await store_signals("google_news", [SignalItem("headline", code, title, payload={"source": "Recorded regional headlines"})
+                                       for code, titles in fixture["headlines"].items() for title in titles])
 
 
 if __name__ == "__main__":
