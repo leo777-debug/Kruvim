@@ -9,7 +9,7 @@ import { Menu } from "@/components/ui/overlay";
 import { Badge, Switch } from "@/components/ui/primitives";
 import { api, API, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import type { GNode, Simulation } from "@/lib/types";
+import type { GEdge, GNode, Simulation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AgentSheet } from "./AgentSheet";
 import { CollabSheet, REVIEW, ReviewStatus } from "./CollabSheet";
@@ -56,6 +56,7 @@ export default function SimulationPage() {
   const [step, setStep] = useState<number | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [selected, setSelected] = useState<GNode | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GEdge | null>(null);
   const [agentRef, setAgentRef] = useState<string | null>(null);
   const [team, setTeam] = useState<{ open: boolean; tab: "comments" | "versions"; anchor: string }>({ open: false, tab: "comments", anchor: "general" });
 
@@ -75,6 +76,12 @@ export default function SimulationPage() {
     if (t.endsWith(".failed")) toast.error("A step failed. See the details on the page.");
   });
 
+  useEffect(() => {
+    if (selected && step === 1) {
+      const frame = requestAnimationFrame(() => graphRef.current?.focus(selected.id));
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [selected, step]);
   const sim = q.data;
   const project = useQuery({ queryKey: [orgId, "project", sim?.project_id], queryFn: () => api<{ name: string }>(`/projects/${sim!.project_id}`), enabled: !!sim?.project_id, staleTime: 60_000 });
   useEffect(() => {
@@ -193,25 +200,35 @@ export default function SimulationPage() {
           {cur === 1 && <GraphStep sim={sim} stream={stream} onNext={() => setStep(2)} refetch={refetch} />}
           {cur === 2 && <EnvironmentStep sim={sim} stream={stream} onNext={() => setStep(3)} refetch={refetch} onAgent={setAgentRef} />}
           {cur === 3 && <SimulationStep sim={sim} stream={stream} refetch={refetch} onAgent={setAgentRef} graphRef={graphRef} />}
-          {cur === 4 && <ReportStep sim={sim} stream={stream} onAgent={setAgentRef} onComment={(a) => openTeam("comments", a)} />}
+          {cur === 4 && <ReportStep sim={sim} stream={stream} onAgent={setAgentRef} onComment={(a) => openTeam("comments", a)} onSource={(source) => {
+            if (source.agent_ref) { setAgentRef(source.agent_ref); return; }
+            const node = stream.nodes.find((n) => n.id === source.node_id);
+            if (node) { setSelected(node); setSelectedEdge(stream.edges.find((e) => e.id === source.edge_id) || null); setStep(1); }
+            else toast.info("This source is no longer in the graph. Reopen the report for its latest sources.");
+          }} />}
           {cur === 5 && <InteractionStep sim={sim} stream={stream} />}
         </div>
         {showGraph && (
           <div className="relative order-first h-[58vh] min-h-[360px] min-w-0 shrink-0 p-3 lg:order-none lg:h-auto lg:min-h-0">
             <LiveGraph ref={graphRef} nodes={stream.nodes} edges={stream.edges} version={stream.graphVersion} live={liveGraph}
-              opinions={stream.opinions} selectedId={selected?.id} height="100%" title="Knowledge and social graph"
+              opinions={stream.opinions} selectedId={selected?.id} selectedEdgeId={selectedEdge?.id} height="100%" title="Knowledge and social graph"
               defaultHidden={cur >= 3 ? [] : []}
-              onSelect={(n) => { setSelected(n); if (n?.kind === "agent") setAgentRef(n.id.slice(6)); }} />
-            {selected && selected.kind !== "agent" && (
+              onSelect={(n) => { setSelected(n); setSelectedEdge(null); if (n?.kind === "agent") setAgentRef(n.id.slice(6)); }} />
+            {selected && (selected.kind !== "agent" || selectedEdge) && (
               <div className="absolute right-6 top-[60px] z-10 w-80 rounded-md border border-line bg-panel p-3.5 shadow-pop animate-fade-in">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="text-[13px] font-semibold">{selected.label}</div>
                     <div className="mt-0.5 flex gap-1"><Badge>{selected.kind}</Badge><Badge tone="outline">{selected.type}</Badge></div>
                   </div>
-                  <button className="text-xs text-muted hover:text-fg" onClick={() => setSelected(null)}>Close</button>
+                  <button className="text-xs text-muted hover:text-fg" onClick={() => { setSelected(null); setSelectedEdge(null); }}>Close</button>
                 </div>
                 {selected.summary && <p className="mt-2 text-xs leading-relaxed text-muted">{selected.summary}</p>}
+                {selectedEdge && <div className="mt-2 rounded border border-brand/40 bg-brand/10 p-2 text-xs" aria-label="Cited graph fact">
+                  <div className="font-semibold">{selectedEdge.relation.replace(/_/g, " ")}</div>
+                  <p className="mt-1">{selectedEdge.fact}</p>
+                  <p className="mt-1 text-muted">Round {selectedEdge.valid_from_round ?? selectedEdge.round}{selectedEdge.valid_until_round != null ? ` – superseded in round ${selectedEdge.valid_until_round}` : " – current fact"}</p>
+                </div>}
                 <div className="mt-3 max-h-56 space-y-1.5 overflow-y-auto">
                   {stream.edges.filter((e) => (typeof e.source === "string" ? e.source : e.source.id) === selected.id || (typeof e.target === "string" ? e.target : e.target.id) === selected.id)
                     .slice(0, 30).map((e, i) => {

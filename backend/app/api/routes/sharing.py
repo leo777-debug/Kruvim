@@ -23,6 +23,7 @@ from app.db.session import get_session
 from app.models import Organization, Report, ResultShare, Simulation
 from app.services import audit
 from app.services.monitoring import fetch
+from app.services.report.citations import present_report
 from app.services.report.exports import export_report
 
 router = APIRouter(tags=["report downloads and sharing"])
@@ -66,7 +67,8 @@ async def download(sim_id: str, format: Literal["pdf", "docx", "md"] = "pdf", p:
         except Exception:
             # A broken remote logo must not prevent a branded report download.
             logo = None
-    data = await asyncio.to_thread(export_report, report.markdown, sim.results or {}, branding, format, logo)
+    readable = await present_report(s, report, p.org_id, private=False)
+    data = await asyncio.to_thread(export_report, readable["rendered_markdown"], sim.results or {}, branding, format, logo)
     media = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "md": "text/markdown; charset=utf-8"}[format]
     return Response(data, media_type=media, headers={**PRIVATE_HEADERS, "Content-Disposition": f'attachment; filename="report-{sim.id}.{format}"'})
 
@@ -125,8 +127,10 @@ async def public_results(token: str, request: Request, response: Response, s: As
         raise NotFound("This share link is unavailable or expired.")
     await s.commit()
     response.headers.update(PRIVATE_HEADERS)
+    readable = await present_report(s, report, row.org_id, private=False)
     allowed = ("score", "heatmap", "groups", "winners", "losers", "audience", "viral", "ab", "psychology", "provider")
     return {"name": sim.name, "finished_at": sim.finished_at, "expires_at": row.expires_at,
             "branding": (org.settings or {}).get("branding") or {},
             "results": {k: sim.results[k] for k in allowed if k in (sim.results or {})},
-            "report": {"title": report.title, "summary": report.summary, "markdown": report.markdown}}
+            "report": {"title": report.title, "summary": readable["rendered_summary"], "markdown": readable["rendered_markdown"],
+                       "sources": readable["summary_sources"], "sections": readable["rendered_sections"]}}

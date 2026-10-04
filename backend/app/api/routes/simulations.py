@@ -320,7 +320,9 @@ async def get_report(sim_id: str, p: Principal = Depends(principal), s: AsyncSes
     if not r:
         return None
     logs = (await s.execute(select(SimEvent).where(and_(SimEvent.simulation_id == sim_id, SimEvent.type == "report.log")).order_by(SimEvent.seq))).scalars().all()
-    return {"id": r.id, "status": r.status, "title": r.title, "summary": r.summary, "outline": r.outline, "sections": r.sections,
+    from app.services.report.citations import present_report
+    readable = await present_report(s, r, p.org_id)
+    return {**readable, "id": r.id, "status": r.status, "title": r.title, "summary": r.summary, "outline": r.outline, "sections": r.sections,
             "markdown": r.markdown, "model": r.model, "error": r.error, "created_at": r.created_at, "log": [x.payload for x in logs]}
 
 
@@ -496,5 +498,8 @@ async def export(sim_id: str, p: Principal = Depends(principal), s: AsyncSession
     sim = await get_sim(s, p, sim_id)
     rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id).order_by(desc(Report.created_at)))).scalars().first()
     body = {"exported_at": utcnow().isoformat(), "simulation": full(sim), "report_markdown": rep.markdown if rep else None}
+    if rep:
+        from app.services.report.citations import present_report
+        body["report_citations"] = await present_report(s, rep, p.org_id)
     return StreamingResponse(iter([json.dumps(body, default=str, ensure_ascii=False, indent=1)]), media_type="application/json",
                              headers={"Content-Disposition": f'attachment; filename="kruvim-{sim_id}.json"'})

@@ -26,6 +26,7 @@ interface Props {
   opinions?: Record<string, number>;
   onSelect?: (n: GNode | null) => void;
   selectedId?: string | null;
+  selectedEdgeId?: number;
   height?: number | string;
   className?: string;
   defaultHidden?: string[];
@@ -35,13 +36,16 @@ interface Props {
 const nid = (x: string | GNode) => (typeof x === "string" ? x : x.id);
 
 export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
-  { nodes, edges, version, live, opinions, onSelect, selectedId, height = 560, className, defaultHidden = [], title }, ref,
+  { nodes, edges, version, live, opinions, onSelect, selectedId, selectedEdgeId, height = 560, className, defaultHidden = [], title }, ref,
 ) {
   const fg = useRef<ForceGraphMethods<any, any>>();
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [hidden, setHidden] = useState<Set<string>>(new Set(defaultHidden));
   const [history, setHistory] = useState(false);
+  useEffect(() => {
+    if (selectedEdgeId != null && edges.some((edge) => edge.id === selectedEdgeId && edge.valid_until_round != null)) setHistory(true);
+  }, [selectedEdgeId, edges]);
   const [labels, setLabels] = useState(false);
   const [mode, setMode] = useState<ColorMode>("kind");
   const [paused, setPaused] = useState(false);
@@ -215,6 +219,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
   }, [color, radius, match, neighbours, selectedId, degree, theme]);
 
   const linkColor = useCallback((l: GEdge) => {
+    if (selectedEdgeId != null && l.id === selectedEdgeId) return "#f59e0b";
     if (l.valid_until_round != null) return theme.edgeDim;
     const s = l.source as GNode, t = l.target as GNode;
     const dim = neighbours && !(neighbours.has(s.id) && neighbours.has(t.id));
@@ -225,7 +230,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
     if (rel === "liked" || rel === "upvoted" || rel === "engaged") return "rgba(225,87,89,0.3)";
     if (rel === "follows") return "rgba(201,154,46,0.4)";
     return theme.edge;
-  }, [neighbours, theme]);
+  }, [neighbours, theme, selectedEdgeId]);
 
   const postFrame = useCallback((ctx: CanvasRenderingContext2D, scale: number) => {
     const now = performance.now();
@@ -342,7 +347,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
           nodePointerAreaPaint={(n: any, c: string, ctx: CanvasRenderingContext2D) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3, 0, Math.PI * 2); ctx.fill(); }}
           linkColor={linkColor as any}
           linkLineDash={(l: any) => l.valid_until_round != null ? [4, 3] : []}
-          linkWidth={(l: any) => Math.min(3, 0.5 + Math.log10((l.weight || 1) + 1))}
+          linkWidth={(l: any) => selectedEdgeId != null && l.id === selectedEdgeId ? 4 : Math.min(3, 0.5 + Math.log10((l.weight || 1) + 1))}
           linkCurvature={(l: any) => (l.relation === "replied_to" || l.relation === "follows" ? 0.25 : 0)}
           linkDirectionalParticles={(l: any) => (live && (l.relation === "commented_on" || l.relation === "reposted" || l.relation === "replied_to" || l.relation === "engaged") ? 1 : 0)}
           linkDirectionalParticleSpeed={0.006}

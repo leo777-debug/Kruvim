@@ -40,7 +40,7 @@ export interface StreamState {
   reactionProgress: [number, number] | null;
   status: string | null;
   lastError: string | null;
-  report: { outline?: any; sections: Record<number, { title: string; content: string }>; log: any[]; status?: string };
+  report: { outline?: any; sections: Record<number, { title: string; content: string; rendered_content?: string; sources?: any[] }>; log: any[]; status?: string };
   surveyAnswers: Record<string, any[]>;
   connected: "open" | "closed" | "error" | "connecting";
   lastSeq: number;
@@ -180,7 +180,7 @@ export function useSimulationStream(simId: string | undefined, graphRef: React.R
         case "report.started": s().report = { sections: {}, log: [], status: "running" }; break;
         case "report.outline": s().report.outline = p; break;
         case "report.log": s().report.log.push(p); break;
-        case "report.section": s().report.sections[p.index] = { title: p.title, content: p.content }; break;
+        case "report.section": s().report.sections[p.index] = { title: p.title, content: p.content, rendered_content: p.rendered_content, sources: p.sources }; break;
         case "report.completed": s().report.status = "done"; term.current?.(ev.type); break;
         case "report.failed": s().report.status = "failed"; s().lastError = p.message; term.current?.(ev.type); break;
         case "survey.answer": (s().surveyAnswers[p.survey_id] ||= []).push(p); break;

@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { BarList } from "@/components/charts";
 import { Card, Empty, Skeleton, Stat } from "@/components/ui/primitives";
 import { API } from "@/lib/api";
+import { ReportFootnotes } from "./results/ReportFootnotes";
 import { fmt } from "@/lib/utils";
 
 export default function PublicResultsPage() {
@@ -25,7 +24,7 @@ export default function PublicResultsPage() {
     <div className="grid gap-4 sm:grid-cols-2"><Stat label="Audience score" value={`${fmt.s1(r.score?.mean)}/10`} /><Stat label="Completion" value={fmt.pct(r.heatmap?.completion)} /></div>
     <Card className="p-5"><h2 className="mb-3 font-medium">Attention heatmap</h2><BarList max={1} valueFmt={fmt.pct} colorFor={() => accent} rows={(r.heatmap?.segments || []).map((s:any) => ({label:s.label,value:s.retention || 0}))} /></Card>
     <Card className="p-5"><h2 className="mb-3 font-medium">Audience segments</h2><BarList colorFor={() => accent} rows={(r.groups?.region || []).map((s:any) => ({label:s.label,value:s.score}))} /></Card>
-    <article className="card prose-report min-w-0 break-words p-5 sm:p-8"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{a:({children,href}) => <a href={href} rel="noreferrer noopener">{children}</a>}}>{report.markdown}</ReactMarkdown></article>
+    <article className="card prose-report min-w-0 break-words p-5 sm:p-8"><ReportFootnotes content={report.markdown} /></article>
     {branding.report_footer && <footer className="text-xs text-muted">{branding.report_footer}</footer>}
   </main>;
 }

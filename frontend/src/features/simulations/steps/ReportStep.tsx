@@ -1,14 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout, Empty, UnderlineTabs } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import type { Simulation } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ReportFootnotes, type ReportSource } from "../results/ReportFootnotes";
 import { ReportSharing } from "../results/ReportSharing";
 import { OverviewPanel } from "../results/OverviewPanel";
 import { ResultsPanels } from "../results/ResultsPanels";
@@ -16,14 +15,14 @@ import { ActionHistory } from "../results/ActionHistory";
 import { TranscriptPanel } from "../results/TranscriptPanel";
 import type { StreamState } from "../useSimulationStream";
 
-export function ReportStep({ sim, stream, onAgent, onComment }: { sim: Simulation; stream: StreamState; onAgent: (r: string) => void; onComment?: (anchor: string) => void }) {
+export function ReportStep({ sim, stream, onAgent, onComment, onSource }: { sim: Simulation; stream: StreamState; onAgent: (r: string) => void; onComment?: (anchor: string) => void; onSource: (source: ReportSource) => void }) {
   const [tab, setTab] = useState("overview");
   const rep = useQuery({ queryKey: ["report", sim.id, sim.report_status, stream.report.status], queryFn: () => api(`/simulations/${sim.id}/report`),
     enabled: sim.status === "completed" });
   const r = rep.data;
   const running = r?.status !== "done" && (sim.report_status === "running" || sim.report_status === "queued" || stream.report.status === "running");
-  const sections = r?.status === "done" ? r.sections : Object.entries(stream.report.sections).sort((a, b) => +a[0] - +b[0]).map(([, v]) => v);
-  const outline = r?.status === "done" ? { title: r.title, summary: r.summary } : stream.report.outline;
+  const sections = r?.status === "done" ? (r.rendered_sections || []) : Object.entries(stream.report.sections).sort((a, b) => +a[0] - +b[0]).map(([, v]) => v);
+  const outline = r?.status === "done" ? { title: r.title, rendered_summary: r.rendered_summary, summary_sources: r.summary_sources } : stream.report.outline;
   const log = r?.status === "done" && r.log?.length ? r.log : stream.report.log;
 
   async function regenerate() {
@@ -53,11 +52,11 @@ export function ReportStep({ sim, stream, onAgent, onComment }: { sim: Simulatio
               <div className="prose-report">
                 <div className="mb-2 text-xs text-muted">Analyst report{r?.model ? ` · ${r.model}` : ""}{r?.created_at ? ` · ${new Date(r.created_at).toLocaleString()}` : ""}</div>
                 <h1>{outline.title}</h1>
-                <p className="text-muted">{outline.summary}</p>
+                <ReportFootnotes content={outline.rendered_summary || ""} sources={outline.summary_sources} onSource={onSource} />
                 {(sections || []).map((s: any, i: number) => (
                   <section key={i} className="animate-fade-in">
                     <h2>{s.title}</h2>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.content}</ReactMarkdown>
+                    <ReportFootnotes content={s.rendered_content || ""} sources={s.sources} onSource={onSource} />
                   </section>
                 ))}
                 {running && <div className="mt-6 flex items-center gap-2 text-xs text-muted"><Loader2 className="h-3.5 w-3.5 animate-spin" />Writing the next section…</div>}

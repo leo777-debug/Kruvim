@@ -60,7 +60,7 @@ def chart_png(title, rows, accent="#2155cd"):
 
 def plain_markdown(line):
     line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", line)
-    line = re.sub(r"\[([^\]]+)\]\(https?://[^)]*\)", r"\1", line)
+    line = re.sub(r"\[([^\]]+)\]\((?:https?://|#source-)[^)]*\)", lambda m: "[" + m[1] + "]" if m[1].isdigit() else m[1], line)
     return line.replace("**", "").replace("`", "").lstrip("> ")
 
 
@@ -69,6 +69,7 @@ def export_report(markdown: str, results: dict, branding: dict, format_: str, lo
     footer = str(branding.get("report_footer") or "")[:300]
     charts = [(t, rows, chart_png(t, rows, branding.get("accent"))) for t, rows in chart_sets(results)]
     if format_ == "md":
+        markdown = re.sub(r"\[(\d+)\]\(#source-\d+\)", r"<sup>[\1]</sup>", markdown)
         text = brand + "\n\n" + markdown + "\n\n## Key charts\n"
         if branding.get("logo_url"):
             text = f"![{brand}]({branding['logo_url']})\n\n" + text
@@ -101,7 +102,11 @@ def export_report(markdown: str, results: dict, branding: dict, format_: str, lo
             elif line.startswith("### "):
                 doc.add_heading(plain_markdown(line[4:]), 2)
             elif line.strip():
-                doc.add_paragraph(plain_markdown(line.lstrip("- ")), "List Bullet" if line.startswith("- ") else None)
+                paragraph = doc.add_paragraph(style="List Bullet" if line.startswith("- ") else None)
+                for part in re.split(r"(\[\d+\])", plain_markdown(line.lstrip("- "))):
+                    run = paragraph.add_run(part)
+                    if re.fullmatch(r"\[\d+\]", part):
+                        run.font.superscript = True
         doc.add_heading("Key charts", 1)
         for title, _, png in charts:
             paragraph = doc.add_paragraph(title)
@@ -138,7 +143,7 @@ def export_report(markdown: str, results: dict, branding: dict, format_: str, lo
                 continue
             style = "Title" if line.startswith("# ") else "Heading1" if line.startswith("## ") else "Heading2" if line.startswith("### ") else "Normal"
             text = plain_markdown(re.sub(r"^#{1,3}\s+", "", line))
-            story.append(Paragraph(escape(text), styles[style]))
+            story.append(Paragraph(re.sub(r"\[(\d+)\]", r"<super>[\1]</super>", escape(text)), styles[style]))
         story.append(Paragraph("Key charts", styles["Heading1"]))
         for _, _, png in charts:
             with Image.open(io.BytesIO(png)) as im:

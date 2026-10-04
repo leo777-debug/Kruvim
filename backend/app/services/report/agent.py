@@ -15,6 +15,7 @@ from app.models import Report, Simulation
 from app.services.events import bus
 from app.services.llm import BaseLLM, LLMAuthError, Usage
 
+from .citations import render_section, source_labels
 from .tools import TOOL_SPECS, Toolbox
 
 OUTLINE_SYSTEM = """You are the lead analyst at Kruvim, a synthetic-audience testing platform. A simulation just finished.
@@ -133,7 +134,11 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
             outline = _dry_outline(sim)
     outline["summary"] = tb.cite(str(outline.get("summary") or ""))
     sections_plan = [x for x in outline.get("sections", []) if isinstance(x, dict) and x.get("title")][:5] or _dry_outline(sim)["sections"]
+    async with session_scope() as s:
+        labels = await source_labels(s, sim_id, sim.org_id, [outline["summary"]])
+    readable_summary = render_section(outline["summary"], labels)
     await bus.publish(sim_id, "report.outline", {"title": outline.get("title"), "summary": outline.get("summary"),
+                                                 "rendered_summary": readable_summary["rendered_content"], "summary_sources": readable_summary["sources"],
                                                  "sections": [x["title"] for x in sections_plan]})
     sections = []
     system = REACT_SYSTEM.format(tools=_tools_text(), min_calls=2, max_calls=5)
@@ -150,7 +155,9 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
             content, used = await _react(llm, usage, tb, system, task, emit, 2, 5)
         content = tb.cite(content)
         sections.append({"title": sec["title"], "content": content, "tools": used})
-        await bus.publish(sim_id, "report.section", {"index": i, "title": sec["title"], "content": content})
+        async with session_scope() as s:
+            labels = await source_labels(s, sim_id, sim.org_id, [content])
+        await bus.publish(sim_id, "report.section", {"index": i, "title": sec["title"], "content": content, **render_section(content, labels)})
         async with session_scope() as s:
             r = await s.get(Report, rep_id)
             r.sections = list(sections)

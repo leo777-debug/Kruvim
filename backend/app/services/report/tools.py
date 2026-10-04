@@ -57,7 +57,7 @@ class Toolbox:
                 key = "analysis:" + hashlib.sha256((name + raw).encode()).hexdigest()[:24]
                 writer = knowledge.GraphWriter(self.sim.id, (self.sim.progress or {}).get("round", -1))
                 await writer.load_existing()
-                writer.node(key, "analysis", name.replace("_", " "), "Observation", raw[:2000], tool=name, observation=value)
+                writer.node(key, "analysis", name.replace("_", " "), "Observation", raw[:2000], tool=name, input=inp, observation=value)
                 await writer.flush("analyst evidence")
                 self.node_ids.add(key)
                 value = {"data": value, "source_node_ids": [key], "source_edge_ids": []}
