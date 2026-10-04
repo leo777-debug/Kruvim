@@ -3,6 +3,14 @@
 Everything left between today and a paying beta, grouped by phase. Tick items off as they are done.
 Last updated: 2026-10-04.
 
+## Saved for later (do these at the end)
+Deliberately postponed. Each one also appears in its own section below.
+- [ ] **Payment wall:** plans, checkout, invoices, credit top-ups (see section 6)
+- [ ] **Comments feature:** creators' real reel comments into a data pool per creator (see section 5)
+- [ ] **AI twins of real, consenting people:** fan panels, the People's Panel, rewards and member revenue share, Twin Charter. The ready-to-send Codex prompt is in [docs/deferred/ai-twins-codex-prompt.md](docs/deferred/ai-twins-codex-prompt.md). Needs legal review first; cash payouts depend on the payment wall.
+- [ ] **Manual data imports** for the UAE sources (see section 3)
+- [ ] **Licence checks** for Dubai Pulse and every other portal before charging clients (see section 3)
+
 ## 1. Verify Codex's latest work (next)
 Codex has pushed all three latest prompts. None of it has been tested yet.
 - [ ] Fixes: readable report footnotes, Interviews auto-selects an agent, news-tone fallback, flaky test fixed, grouped sidebar
