@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Copy, Download, History, Info, Loader2, MessageSquare, MoreHorizontal, PencilLine, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { LiveGraph, type GraphHandle } from "@/components/graph/LiveGraph";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,7 @@ export default function SimulationPage() {
   const { simId } = useParams();
   const qc = useQueryClient();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const orgId = useAuth((s) => s.orgId);
   const graphRef = useRef<GraphHandle>(null);
   const [step, setStep] = useState<number | null>(null);
@@ -71,7 +72,7 @@ export default function SimulationPage() {
     refetch();
     if (t === "graph.completed") toast.success("Knowledge graph ready");
     if (t === "env.completed") toast.success("Environment ready");
-    if (t === "simulation.completed") { toast.success("Simulation complete. The analyst is writing the report."); setStep(4); }
+    if (t === "simulation.completed") { toast.success("Simulation complete. The analyst is writing the report."); setStep((current) => current === 3 ? 4 : current); }
     if (t === "report.completed") toast.success("Report ready");
     if (t.endsWith(".failed")) toast.error("A step failed. See the details on the page.");
   });
@@ -87,9 +88,9 @@ export default function SimulationPage() {
   useEffect(() => {
     if (sim && step === null) {
       const r = reachable(sim);
-      setStep(sim.status === "running" || sim.status === "paused" || sim.status === "queued" ? 3 : Math.min(r, sim.status === "completed" ? 4 : r));
+      setStep(searchParams.has("agent") && r === 5 ? 5 : sim.status === "running" || sim.status === "paused" || sim.status === "queued" ? 3 : Math.min(r, sim.status === "completed" ? 4 : r));
     }
-  }, [sim, step]);
+  }, [sim, step, searchParams]);
 
   if (q.isLoading || !sim) return <div className="flex h-full items-center justify-center text-muted"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   const reach = reachable(sim);

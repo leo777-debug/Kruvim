@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
+import { selectedAgent } from "../agentSelection";
 import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
 import { Badge, Callout, Empty, Field, Input, Segmented, Status, Textarea, UnderlineTabs } from "@/components/ui/primitives";
@@ -33,26 +35,45 @@ function Agents({ sim }: { sim: Simulation }) {
   const agents = useQuery({ queryKey: ["agents", sim.id, "all"], queryFn: () => api<any[]>(`/simulations/${sim.id}/agents`) });
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("all");
-  const [sel, setSel] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("agent");
+  const [externalRef, setExternalRef] = useState<string | null>(null);
+  function setSel(ref: string | null) {
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      if (ref) next.set("agent", ref); else next.delete("agent");
+      return next;
+    }, { replace: true });
+  }
   const [popId, setPopId] = useState("");
   const list = useMemo(() => (agents.data || []).filter((a) => (kind === "all" || a.kind === kind) &&
     (!q || `${a.name} ${a.handle} ${a.persona.city} ${a.persona.stance} ${a.persona.profession}`.toLowerCase().includes(q.toLowerCase()))), [agents.data, q, kind]);
-  useEffect(() => { if (!sel && agents.data?.length) setSel(agents.data[0].ref); }, [agents.data, sel]);
+  const sel = externalRef || selectedAgent(list.map((agent) => agent.ref), requested);
+  useEffect(() => {
+    if (!agents.isSuccess || externalRef) return;
+    if (requested !== sel) setParams((current) => {
+      const next = new URLSearchParams(current);
+      if (sel) next.set("agent", sel); else next.delete("agent");
+      return next;
+    }, { replace: true });
+  }, [agents.isSuccess, externalRef, requested, sel, setParams]);
   return (
     <div className="grid h-[calc(100vh-260px)] min-h-[520px] gap-4 lg:grid-cols-[340px_1fr]">
       <div className="card flex min-h-0 flex-col">
         <div className="space-y-2 border-b border-line p-3">
           <div className="relative"><Search className="absolute left-2.5 top-2 h-4 w-4 text-faint" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, city, stance" className="pl-8" /></div>
-          <Segmented value={kind} onChange={setKind} options={[{ value: "all", label: "All" }, { value: "voice", label: "Voice" }, { value: "stakeholder", label: "Stakeholder" }]} />
+            <Input value={q} onChange={(e) => { setExternalRef(null); setQ(e.target.value); }} placeholder="Search name, city, stance" className="pl-8" /></div>
+          <Segmented value={kind} onChange={(value) => { setExternalRef(null); setKind(value); }} options={[{ value: "all", label: "All" }, { value: "voice", label: "Voice" }, { value: "stakeholder", label: "Stakeholder" }]} />
           <div className="flex items-center gap-1.5">
             <Input value={popId} onChange={(e) => setPopId(e.target.value.replace(/\D/g, ""))} placeholder="Population agent ID (0–999,999)" className="h-7 text-xs" />
-            <Button size="sm" disabled={!popId} onClick={() => setSel(`p:${popId}`)}>Open</Button>
+            <Button size="sm" disabled={!popId} onClick={() => { setExternalRef(`p:${popId}`); setSel(`p:${popId}`); }}>Open</Button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {agents.isLoading && <div className="p-4 text-sm text-muted">Loading agents…</div>}
+          {agents.isSuccess && !list.length && <Empty title="No agents match this filter" />}
           {list.map((a) => (
-            <button key={a.ref} onClick={() => setSel(a.ref)} className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left", sel === a.ref ? "bg-raised" : "hover:bg-raised/60")}>
+            <button key={a.ref} onClick={() => { setExternalRef(null); setSel(a.ref); }} className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left", sel === a.ref ? "bg-raised" : "hover:bg-raised/60")}>
               <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-raised text-[11px] font-semibold text-muted">
                 {initials(a.name)}<span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-panel" style={{ background: REGION_COLORS[a.region] }} />
               </div>
@@ -65,7 +86,7 @@ function Agents({ sim }: { sim: Simulation }) {
           ))}
         </div>
       </div>
-      {sel ? <Chat sim={sim} target={sel} key={sel} /> : <div className="card"><Empty title="Select an agent to interview" /></div>}
+      {sel ? <Chat sim={sim} target={sel} key={sel} /> : <div className="card"><Empty title={agents.isLoading ? "Loading agents…" : "No agents match this filter"} /></div>}
     </div>
   );
 }
@@ -84,7 +105,9 @@ function Chat({ sim, target }: { sim: Simulation; target: string }) {
     onSuccess: (r) => { setMsgs(r.chat); qc.invalidateQueries({ queryKey: ["agent", sim.id, target] }); },
     onError: (e) => { setMsgs((x) => x.slice(0, -1)); toast.error(e instanceof ApiError ? e.message : "Failed"); },
   });
-  const p = d.data?.persona || {};
+  if (d.isLoading) return <div className="card flex items-center justify-center gap-2 p-6 text-muted"><Loader2 className="h-4 w-4 animate-spin" />Loading agent…</div>;
+  if (d.error || !d.data) return <div className="card"><Empty title="This agent is unavailable">Choose another agent from the list.</Empty></div>;
+  const p = d.data.persona || {};
   const op = d.data?.state?.opinion ?? d.data?.reaction?.score ?? d.data?.projected?.score;
   const suggestions = ["What made you score it that way?", "At what point did you lose interest?", "What would make you share this?", "How would your friends react?"];
   return (
