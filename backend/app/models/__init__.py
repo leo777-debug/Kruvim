@@ -1,5 +1,7 @@
 from app.db.base import Base  # noqa: F401
 
+from .agent_memory import AgentCreatorAffinity, AgentMemory  # noqa: F401
+
 from .collab import Annotation, AudienceTemplate  # noqa: F401
 from .cultural import CulturalMoment  # noqa: F401
 from .datapool import Connector, Dataset, PopulationVersion, RegionSnapshot, Signal, SignalEmbedding  # noqa: F401
