@@ -123,4 +123,6 @@ async def agent_detail(sim: Simulation, ref: str) -> dict | None:
     out["actions"] = [{"round": a.round, "platform": a.platform, "action": a.action, "actor": a.actor_name, "actor_ref": a.actor_ref,
                        "content": a.content, "target_post": a.target_post_id, "target_ref": a.target_ref} for a in acts]
     out["chat"] = [{"role": c.role, "content": c.content, "at": c.created_at.isoformat()} for c in chat]
+    from app.services.agent_memory import detail_memory
+    out["long_term_memory"] = await detail_memory(sim, ref, out["persona"])
     return out

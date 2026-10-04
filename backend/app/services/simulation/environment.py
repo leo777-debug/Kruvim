@@ -140,6 +140,11 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         if entity:
             grounded.append(enrich_stakeholder(st, entity, neighbours.get(entity["key"], {})))
     stakes = grounded
+    from app.services.agent_memory import attach_snapshot
+    memory_snapshot = await attach_snapshot(org_id, sim_id, card,
+        [(f"p:{int(i)}", p) for i, p in zip(voice_idx, personas, strict=True)] +
+        [(f"s:{''.join(ch for ch in str(st.get('handle') or st['name']).lower() if ch.isalnum() or ch == '_')[:20] or f'acct{k}'}", st)
+         for k, st in enumerate(stakes)], fresh=bool((sim.config or {}).get("overrides", {}).get("fresh_audience")))
     await progress(f"{len(stakes)} stakeholder accounts from the knowledge graph", 0.45)
 
     # model-generated configuration
@@ -199,6 +204,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         for i, p, evidence in zip(voice_idx, personas, retrieved):
             cfg = agent_config(p, pop, int(i))
             cfg["personal_signals"] = evidence
+            p["what_you_remember"] = memory_snapshot["snapshots"].get(f"p:{int(i)}", [])
             acts.append(cfg["activity"])
             s.add(SimAgent(simulation_id=sim_id, ref=f"p:{int(i)}", kind="voice", name=p["name"], handle=p["handle"], region=p["region"],
                            persona=p, config=cfg, followers=p["followers"]))
@@ -210,6 +216,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
                        **{key: st.get(key) for key in ("voice", "interests", "likely_stance", "posting_style", "graph_context")}}
             cfg = {"activity": clamp(st.get("activity"), 0.05, 0.9, 0.4), "platform_weights": {"feed": 1.0, "forum": 0.4},
                    "tz_offset": region(reg)["tz_offset"], "stance": persona["stance"], "sentiment_bias": 0.0}
+            persona["what_you_remember"] = memory_snapshot["snapshots"].get(f"s:{handle}", [])
             acts.append(cfg["activity"])
             s.add(SimAgent(simulation_id=sim_id, ref=f"s:{handle}", kind="stakeholder", name=st["name"], handle=handle, region=reg,
                            persona=persona, config=cfg, followers=int(5000 + 20000 * cfg["activity"])))
@@ -227,6 +234,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             "context": context, "overrides": (sim.config or {}).get("overrides", {}),
             "audience_twin": twin, "creator_memory": creator_memory, "accuracy_live_model": not llm.is_dry,
             "retrieval_usage": retrieval_usage,
+            "agent_memory": memory_snapshot,
         }
         for k in ("autopilot", "watch_id", "rerun_of"):        # lifecycle markers survive regeneration
             if k in (sim.config or {}):

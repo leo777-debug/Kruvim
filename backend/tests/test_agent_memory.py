@@ -100,3 +100,45 @@ async def test_batched_writer_is_idempotent_private_and_deterministic(auth):
         agent = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim, SimAgent.ref == "p:0"))).scalar_one()
         run = await s.get(Simulation, sim)
         assert rule_memories(agent, run, [], [], 0) == rule_memories(agent, run, [], [], 0)
+
+
+async def test_later_recall_workspace_isolation_fresh_and_budget(auth):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from app.db.base import utcnow
+    from app.db.session import session_scope
+    from app.models import AgentMemory, Organization
+    from app.services.agent_memory import attach_snapshot, ranked_memories, recall_many, token_cost, write_run
+    from app.services.datapool.retrieval import embed
+    from app.services.llm import Usage
+    org_id, sim = await memory_run(auth)
+    dry = SimpleNamespace(is_dry=True)
+    await write_run(org_id, sim, dry, Usage())
+    now = utcnow()
+    async with session_scope() as s:
+        org = await s.get(Organization, org_id)
+        recalled = await recall_many(s, org, ["p:0"], {"title": "fitness"})
+        assert recalled["p:0"] and sum(token_cost(m["text"]) for m in recalled["p:0"]) <= 150
+        other = Organization(name="Other", slug="memory-other")
+        s.add(other)
+        await s.flush()
+        assert await recall_many(s, other, ["p:0"], {"title": "fitness"}) == {"p:0": []}
+        assert await recall_many(s, org, ["p:0"], {}, fresh=True) == {"p:0": []}
+    snapshot = await attach_snapshot(org_id, sim, {"title": "fitness"}, [("p:0", {})])
+    assert snapshot["snapshots"]["p:0"] and snapshot["recalled"] > 0
+    # A/B both read the same immutable JSON, independent of later writes.
+    before = [m["id"] for m in snapshot["snapshots"]["p:0"]]
+    await write_run(org_id, sim, dry, Usage())
+    assert before == [m["id"] for m in snapshot["snapshots"]["p:0"]]
+    def memory(identifier, vector, days, importance, text="I remember fitness."):
+        return AgentMemory(id=identifier, population_ref="p:0", kind="episodic", subject="topic:fitness", text=text,
+            embedding=vector, importance=importance, sentiment=0, created_at=now - timedelta(days=days))
+    vec = embed("fitness")
+    rows = [(memory("old", vec, 90, .1), None), (memory("recent", vec, 0, .9), None),
+            (memory("unrelated", -vec, 0, .9), None), (memory("too-long", vec, 0, 1, "I " + "word " * 500), None)]
+    ranked = ranked_memories(rows, np.asarray(vec), now)
+    assert [m["id"] for m in ranked] == ["recent", "old", "unrelated"]
+    assert ranked_memories(rows, vec, now, budget=1) == []

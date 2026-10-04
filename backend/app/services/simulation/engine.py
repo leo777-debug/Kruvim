@@ -340,7 +340,9 @@ class Engine:
                 on_t = self.platform_key not in PLATFORMS or bool((int(self.pop.platforms[idx]) >> PLATFORMS.index(self.platform_key)) & 1)
                 reaction = dry.reaction(a.persona, tm, on_t, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
                 return a, v, short_video_metrics(reaction)
+            from app.services.agent_memory import remember_block
             personal = "\nWhat's on your mind today:\n" + "\n".join(x.get("title", "") for x in a.cfg.get("personal_signals", []))
+            personal += remember_block(self.cfg.get("agent_memory", {}).get("snapshots", {}).get(a.ref, []))
             d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
                                              max_tokens=700, usage=self.usage)
             normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
@@ -573,6 +575,9 @@ class Engine:
             ptxt = persona_text(a.persona, platform_label(self.platform_key)) if a.kind == "voice" else (
                 f"{a.name} (@{a.handle}), a {a.persona.get('role', 'account')} account based in {region(a.region)['city']}.\n"
                 f"{a.persona.get('description', '')}\nPublic stance toward the content: {a.persona.get('stance', 'neutral')}.")
+            from app.services.agent_memory import remember_block
+            remembered = self.cfg.get("agent_memory", {}).get("snapshots", {}).get(a.ref, [])
+            ptxt += remember_block(remembered)
             out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
                                                user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking))
         return a, pl, views, out

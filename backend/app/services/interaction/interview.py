@@ -27,6 +27,8 @@ def context_for(detail: dict, card: dict, platform: str | None) -> str:
     else:
         who = persona_text(p, platform_label(platform)) if p.get("ocean") else json.dumps(p)[:800]
     parts = [who, "", "=== THE CONTENT ===", card_block(card)[:3500], ""]
+    from app.services.agent_memory import remember_block
+    parts.append(remember_block((detail.get("long_term_memory") or {}).get("recalled", [])))
     r = detail.get("reaction") or {}
     st = detail.get("state") or {}
     if r.get("score") is not None:
@@ -48,8 +50,10 @@ def dry_answer(detail: dict, question: str) -> str:
     r = detail.get("reaction") or detail.get("projected") or {}
     st = detail.get("state") or {}
     op = st.get("opinion", r.get("score", "?"))
+    memories = (detail.get("long_term_memory") or {}).get("recalled", [])
+    remembered = " My simulated memory: " + memories[0]["text"] if memories else ""
     return (f"[dry run] I'm {detail.get('name', 'this agent')} ({(detail.get('persona') or {}).get('city', '')}). "
-            f"My take on the content is {op}/10. Connect a model in Settings to get real in-character answers.")
+            f"My take on the content is {op}/10.{remembered} Connect a model in Settings to get real in-character answers.")
 
 
 async def ask(detail: dict, card: dict, platform: str | None, history: list[dict], question: str, llm: BaseLLM, usage: Usage) -> str:

@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 
 import numpy as np
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.db.base import utcnow
 from app.db.session import session_scope
@@ -191,3 +191,88 @@ async def enforce_limits(s, org, now):
             remove.append(identifier)
     for offset in range(0, len(remove), 400):
         await s.execute(delete(AgentMemory).where(AgentMemory.org_id == org.id, AgentMemory.id.in_(remove[offset:offset + 400])))
+
+
+def token_cost(text):
+    # Conservative native estimate; no tokenizer or remote service is required.
+    return max(1, math.ceil(len(text.encode("utf-8")) / 4), math.ceil(len(text.split()) * 1.4))
+
+
+def ranked_memories(rows, query_vector, now, k=6, budget=150):
+    scored = []
+    for row, similarity in rows:
+        relevance = float(np.asarray(row.embedding) @ query_vector) if similarity is None else float(similarity)
+        days = max(0, (now - row.created_at).total_seconds() / 86400)
+        scored.append((relevance + math.exp(-days / 30) + row.importance, row))
+    scored.sort(key=lambda x: (-x[0], x[1].id))
+    selected, used = [], 0
+    for score, row in scored:
+        cost = token_cost(row.text)
+        if used + cost <= budget:
+            selected.append({"id": row.id, "text": row.text, "kind": row.kind, "subject": row.subject,
+                "importance": row.importance, "sentiment": row.sentiment, "source_simulation_id": row.source_simulation_id,
+                "created_at": row.created_at.isoformat(), "rank_score": round(score, 4)})
+            used += cost
+        if len(selected) >= k:
+            break
+    return selected
+
+
+async def recall_many(s, org, refs, card, now=None, fresh=False, record=True):
+    """Batch candidate reads, pgvector cosine on Postgres, native embeddings on SQLite."""
+    now = now or utcnow()
+    out = {ref: [] for ref in refs}
+    if fresh or not refs:
+        return out
+    query_vector = embed(query_text(card))
+    for offset in range(0, len(refs), 200):
+        query = select(AgentMemory).where(AgentMemory.org_id == org.id,
+            AgentMemory.population_ref.in_(refs[offset:offset + 200]), AgentMemory.superseded_by.is_(None),
+            AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)), AgentMemory.created_at <= now)
+        pg = s.bind.dialect.name == "postgresql"
+        if pg:
+            query = query.add_columns(1 - AgentMemory.embedding.cosine_distance(query_vector.tolist()))
+        result = (await s.execute(query)).all()
+        grouped = defaultdict(list)
+        for row in result:
+            memory = row[0]
+            grouped[memory.population_ref].append((memory, row[1] if pg else None))
+        for ref, candidates in grouped.items():
+            out[ref] = ranked_memories(candidates, query_vector, now)
+    if record:
+        ids = [m["id"] for rows in out.values() for m in rows]
+        for offset in range(0, len(ids), 400):
+            await s.execute(update(AgentMemory).where(AgentMemory.org_id == org.id, AgentMemory.id.in_(ids[offset:offset + 400]))
+                            .values(recall_count=AgentMemory.recall_count + 1, last_recalled_at=now))
+    return out
+
+
+def remember_block(memories):
+    return "\nWhat you remember (simulated experiences):\n" + "\n".join("- " + m["text"] for m in memories) if memories else ""
+
+
+async def attach_snapshot(org_id, sim_id, card, agents, fresh=False):
+    now = utcnow()
+    async with session_scope() as s:
+        org = (await s.execute(select(Organization).where(Organization.id == org_id).with_for_update())).scalar_one()
+        keys = [person_key(ref, persona) for ref, persona in agents]
+        recalled = await recall_many(s, org, keys, card, now, fresh=fresh)
+        snapshot = {ref: recalled.get(key, []) for (ref, _), key in zip(agents, keys, strict=True)}
+        return {"snapshot_at": now.isoformat(), "generation": (org.settings or {}).get("agent_memory_generation", 0),
+            "fresh": fresh, "snapshots": snapshot, "recalled": sum(len(rows) for rows in snapshot.values()), "label": LABEL}
+
+
+async def detail_memory(sim, ref, persona):
+    key, now = person_key(ref, persona), utcnow()
+    async with session_scope() as s:
+        org = (await s.execute(select(Organization).where(Organization.id == sim.org_id))).scalar_one()
+        rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == sim.org_id, AgentMemory.population_ref == key,
+            AgentMemory.superseded_by.is_(None), AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)))
+            .order_by(AgentMemory.created_at.desc(), AgentMemory.id).limit(plan(org).get("memory_cap_per_agent", 60)))).scalars().all()
+        affinity = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == sim.org_id,
+            AgentCreatorAffinity.population_ref == key, AgentCreatorAffinity.subject == creator_subject(sim)))).scalar_one_or_none()
+        fresh = (sim.config or {}).get("agent_memory", {}).get("fresh", False)
+        recalled = (await recall_many(s, org, [key], sim.card or {}, fresh=fresh, record=False))[key]
+        return {"label": LABEL, "fresh": fresh, "recalled": recalled, "affinity": decayed(affinity, now) if affinity else None,
+            "memories": [{"id": m.id, "kind": m.kind, "text": m.text, "subject": m.subject, "importance": m.importance,
+                "created_at": m.created_at.isoformat(), "source_simulation_id": m.source_simulation_id} for m in rows]}
