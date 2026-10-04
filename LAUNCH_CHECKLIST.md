@@ -77,6 +77,12 @@ The long-term moat. Full write-up: [docs/ideas/cultural-weather-forecast.md](doc
 - [ ] "Drop it into tomorrow" for paid creators
 - [ ] The living, always-running simulated UAE, then "fork the world" for companies
 
+## Idea: Check before you post
+Write-up: [docs/ideas/check-before-you-post.md](docs/ideas/check-before-you-post.md)
+- [ ] Free "Check before you post" page: how a caption or headline lands with 6-8 groups, plus one fix that keeps your voice
+- [ ] Browser extension with a "Check with Kruvim" button on X and LinkedIn
+- [ ] Paid deeper tests for creators and journalists (existing product)
+
 ## 9. Go-to-market
 - [ ] Twin study with a research partner (YouGov MENA / Ipsos / local), published
 - [ ] Data partnerships list and outreach (e&, du, Majid Al Futtaim, Network International, panel firms)
