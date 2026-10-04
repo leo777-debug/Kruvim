@@ -39,6 +39,14 @@ pause, resume, change pacing, stop early or inject a breaking-news event.
 
 ## Architecture
 
+* **Public source registry**: `data_sources` records publisher, native geography/cadence, access, licence,
+  attribution and platform-admin reliability/approval. `source_observations` preserves native cells and original
+  periods; no missing values are interpolated. Public figures are global; uploaded files and mappings stay
+  workspace-scoped. An active source with recorded commercial reuse approval is required for production weighting.
+  Data pool → Sources shows the import/licence checklist; Survey data accepts registered CSV/XLSX imports with
+  mapping and preview. [Import instructions, adapters and download locations](docs/source-registry.md) describe
+  outstanding publisher permissions and the FCSC endpoint's access restriction. No remembered figures are seeded.
+
 ```
             ┌────────────┐   /api (REST + SSE)   ┌──────────────┐   jobs (arq)   ┌──────────────┐
  Browser ──►│ web: nginx │──────────────────────►│ api: FastAPI │──────────────►│ worker(s)    │

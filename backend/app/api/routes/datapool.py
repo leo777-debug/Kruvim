@@ -10,10 +10,11 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, current_user, principal, role
+from app.api.routes.sources import router as sources_router
 from app.core.config import settings
 from app.core.errors import AppError, Forbidden, NotFound
 from app.db.session import get_session
-from app.models import Connector, Dataset, PopulationVersion, RegionSnapshot, Signal, User
+from app.models import Connector, Dataset, DataSource, PopulationVersion, RegionSnapshot, Signal, User
 from app.schemas.simulation import AudienceIn
 from app.services import audit, jobs, storage
 from app.services.datapool import REGISTRY, ensure_platform_connectors, listen, snapshots_at
@@ -23,6 +24,8 @@ from app.services.population.calibrate import priors_from_summaries, sniff, summ
 from app.services.population.regions import REGION_CODES
 
 router = APIRouter(prefix="/datapool", tags=["data pool"])
+
+router.include_router(sources_router)
 
 
 def _spec(key: str) -> dict:
@@ -170,28 +173,41 @@ async def listen_route(body: dict, p: Principal = Depends(role("member"))):
 async def datasets(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(Dataset).where((Dataset.org_id == p.org_id) | (Dataset.org_id.is_(None))).order_by(desc(Dataset.created_at)))).scalars().all()
     return [{"id": d.id, "name": d.name, "source": d.source, "filename": d.filename, "rows": d.rows, "columns": d.columns, "preview": d.preview[:5],
+             "registered_source_id": d.registered_source_id,
              "mapping": d.mapping, "summary": d.summary, "status": d.status, "error": d.error, "created_at": d.created_at, "scope": "platform" if d.org_id is None else "org"}
             for d in rows]
 
 
 @router.post("/datasets")
 async def upload_dataset(file: UploadFile = File(...), name: str = Form(""), source: str = Form("custom"),
+                         registered_source_id: str = Form(""),
                          p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     data = await file.read()
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise AppError("File too large.", status=413)
+    registered = None
+    if registered_source_id:
+        registered = await s.get(DataSource, registered_source_id)
+        if not registered or registered.status in ("deprecated", "placeholder"):
+            raise AppError("Choose a registered statistical source awaiting import or already active.")
     try:
-        meta = sniff(data)
+        if registered:
+            from app.services.sources.adapters import table
+            columns, rows = table(data, file.filename or "data.csv")
+            meta = {"columns": columns, "preview": [[r[c] for c in columns] for r in rows[:5]], "rows": len(rows)}
+        else:
+            meta = sniff(data)
     except Exception as exc:
-        raise AppError(f"Could not read the CSV: {exc}", status=422)
-    key = f"{p.org_id}/datasets/{uuid.uuid4().hex}.csv"
+        raise AppError(f"Could not read the table: {exc}", status=422)
+    suffix = ".xlsx" if (file.filename or "").lower().endswith(".xlsx") else ".csv"
+    key = f"{p.org_id}/datasets/{uuid.uuid4().hex}{suffix}"
     await storage.put(key, data)
     d = Dataset(org_id=p.org_id, name=name or file.filename or "dataset", source=source, filename=file.filename or "data.csv", storage_key=key,
-                columns=meta["columns"], preview=meta["preview"], rows=meta["rows"])
+                columns=meta["columns"], preview=meta["preview"], rows=meta["rows"], registered_source_id=registered_source_id or None)
     s.add(d)
     audit.record(s, "dataset.upload", org_id=p.org_id, user_id=p.user_id, target=d.name)
     await s.commit()
-    return {"id": d.id, "columns": d.columns, "preview": d.preview, "rows": d.rows}
+    return {"id": d.id, "columns": d.columns, "preview": d.preview, "rows": d.rows, "registered_source_id": d.registered_source_id}
 
 
 @router.put("/datasets/{dataset_id}/mapping")
@@ -199,10 +215,18 @@ async def map_dataset(dataset_id: str, mapping: dict, p: Principal = Depends(rol
     d = (await s.execute(select(Dataset).where(and_(Dataset.id == dataset_id, Dataset.org_id == p.org_id)))).scalar_one_or_none()
     if not d:
         raise NotFound("Dataset not found.")
-    if not mapping.get("country_col"):
+    if not d.registered_source_id and not mapping.get("country_col"):
         raise AppError("Choose the column that holds the country.")
     try:
-        summary = summarize(await storage.get(d.storage_key), mapping)
+        if d.registered_source_id:
+            from app.services.sources.adapters import parse_table
+            observations, missing = parse_table(await storage.get(d.storage_key), mapping, d.filename)
+            summary = {"observations": len(observations), "missing_cells": missing, "preview": observations[:20],
+                       "geographies": sorted({x["geography"] for x in observations}), "native_grain": True}
+            # Dates must be JSON-safe in the stored preview.
+            summary = json.loads(json.dumps(summary, default=str))
+        else:
+            summary = summarize(await storage.get(d.storage_key), mapping)
     except Exception as exc:
         d.status, d.error = "error", str(exc)[:500]
         await s.commit()
@@ -216,10 +240,25 @@ async def map_dataset(dataset_id: str, mapping: dict, p: Principal = Depends(rol
 async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     if not user.is_superuser:
         raise Forbidden("Recalibrating the shared population requires a platform administrator.")
-    d = (await s.execute(select(Dataset).where(Dataset.id == dataset_id))).scalar_one_or_none()
+    d = (await s.execute(select(Dataset).where(Dataset.id == dataset_id,
+         (Dataset.org_id == p.org_id) | Dataset.org_id.is_(None)))).scalar_one_or_none()
     if not d or d.status not in ("mapped", "applied"):
         raise AppError("Map the dataset's columns first.")
-    applied = (await s.execute(select(Dataset).where(Dataset.status == "applied"))).scalars().all()
+    if d.registered_source_id:
+        from app.services.sources import eligible, store_observations
+        from app.services.sources.adapters import parse_table
+        registered = await s.get(DataSource, d.registered_source_id)
+        if registered.status in ("deprecated", "placeholder"):
+            raise AppError("This registered source is not available for publication.")
+        observations, missing = parse_table(await storage.get(d.storage_key), d.mapping, d.filename)
+        count = await store_observations(s, registered, observations, "asset:" + d.id)
+        d.status = "applied"
+        audit.record(s, "source.import", org_id=p.org_id, user_id=p.user_id, target=registered.id,
+                     meta={"dataset_id": d.id, "observations": count, "missing_cells": missing})
+        await s.commit()
+        return {"observations": count, "missing_cells": missing, "production_eligible": eligible(registered)}
+    applied = (await s.execute(select(Dataset).where(Dataset.status == "applied", Dataset.registered_source_id.is_(None),
+               (Dataset.org_id == p.org_id) | Dataset.org_id.is_(None)))).scalars().all()
     priors = priors_from_summaries([x.summary for x in applied if x.id != d.id] + [d.summary])
     if not priors:
         raise AppError("No region in this dataset has at least 100 respondents.")

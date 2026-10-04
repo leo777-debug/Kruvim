@@ -32,6 +32,7 @@ class Signal(Base):
     __table_args__ = (Index("ix_signals_region_time", "region", "observed_at"), Index("ix_signals_source_time", "source", "fetched_at"))
     id: Mapped[int] = mapped_column(BigID, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(48))
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("data_sources.id", ondelete="RESTRICT"), index=True)
     kind: Mapped[str] = mapped_column(String(24))            # weather | headline | tone | trend | event | social | economy
     region: Mapped[str] = mapped_column(String(8), default="*")
     title: Mapped[str] = mapped_column(Text, default="")
@@ -76,6 +77,7 @@ class Dataset(IdMixin, TimestampMixin, Base):
     org_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     source: Mapped[str] = mapped_column(String(40), default="custom")   # arab_barometer | pew | wvs | census | custom
+    registered_source_id: Mapped[str | None] = mapped_column(ForeignKey("data_sources.id", ondelete="RESTRICT"), index=True)
     filename: Mapped[str] = mapped_column(String(300))
     storage_key: Mapped[str] = mapped_column(String(500))
     columns: Mapped[list] = mapped_column(default=list)
@@ -98,3 +100,8 @@ class PopulationVersion(IdMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     stats: Mapped[dict] = mapped_column(default=dict)
     error: Mapped[str | None] = mapped_column(Text)
+    source_ids: Mapped[list] = mapped_column(default=list)
+    observation_ids: Mapped[list] = mapped_column(default=list)
+    attribute_confidence: Mapped[dict] = mapped_column(default=dict)
+    conflicts: Mapped[list] = mapped_column(default=list)
+    coverage_gaps: Mapped[list] = mapped_column(default=list)

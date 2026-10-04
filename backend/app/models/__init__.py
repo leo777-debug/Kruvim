@@ -22,5 +22,6 @@ from .simulation import (  # noqa: F401
     Survey,
 )
 from .social import SocialConnection, SocialPost  # noqa: F401
+from .sources import DataSource, SourceObservation  # noqa: F401
 from .tenancy import ApiKey, Invite, Membership, Organization, RefreshToken, User  # noqa: F401
 from .usage import AuditLog, CreditLedger, UsageEvent  # noqa: F401

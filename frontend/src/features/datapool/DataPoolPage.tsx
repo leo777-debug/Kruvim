@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { REGION_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import { fmt, platformName } from "@/lib/utils";
+import { ObservationMappingDialog, SourcesPanel } from "./SourcesPanel";
 
 export default function DataPoolPage() {
   const [tab, setTab] = useState("world");
@@ -18,13 +19,14 @@ export default function DataPoolPage() {
     <Page wide title="Data pool" subtitle="Live inputs every simulation is conditioned on: weather, news, news tone, attention, holidays, economy and social platforms. Fetched on a schedule and archived hourly so any past moment can be replayed. Survey data calibrates the population itself.">
       <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[
         { key: "world", label: "Regions" }, { key: "signals", label: "Signals" }, { key: "connectors", label: "Connectors" },
-        { key: "listen", label: "Social listening" }, { key: "barometers", label: "Survey data" },
+        { key: "listen", label: "Social listening" }, { key: "barometers", label: "Survey data" }, { key: "sources", label: "Sources" },
       ]} />
       {tab === "world" && <World />}
       {tab === "signals" && <Signals />}
       {tab === "connectors" && <Connectors />}
       {tab === "listen" && <Listen />}
       {tab === "barometers" && <Barometers />}
+      {tab === "sources" && <SourcesPanel />}
     </Page>
   );
 }
@@ -212,11 +214,14 @@ function Barometers() {
   const pop = useQuery({ queryKey: ["population"], queryFn: () => api("/datapool/population"), refetchInterval: 8000 });
   const input = useRef<HTMLInputElement>(null);
   const [mapFor, setMapFor] = useState<any>(null);
+  const sources = useQuery({ queryKey: ["sources"], queryFn: () => api<any[]>("/datapool/sources") });
+  const [registered, setRegistered] = useState("");
   async function upload(file: File) {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("name", file.name.replace(/\.csv$/i, ""));
     fd.append("source", /arab/i.test(file.name) ? "arab_barometer" : /wvs|values/i.test(file.name) ? "wvs" : /pew/i.test(file.name) ? "pew" : "custom");
+    if (registered) fd.append("registered_source_id", registered);
     try {
       const d = await api("/datapool/datasets", { method: "POST", body: fd });
       await list.refetch();
@@ -226,7 +231,7 @@ function Barometers() {
   async function apply(id: string) {
     try {
       const r = await api(`/datapool/datasets/${id}/apply`, { method: "POST" });
-      toast.success(`Rebuilding the population with priors for ${r.regions.join(", ")}`);
+      toast.success(r.observations != null ? `${r.observations} native observations stored${r.production_eligible ? "" : "; awaiting licence approval"}` : `Rebuilding the population with priors for ${r.regions.join(", ")}`);
       list.refetch(); pop.refetch();
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
   }
@@ -235,12 +240,13 @@ function Barometers() {
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-4">
         <Callout tone="info" title="Calibrate the population with survey microdata">
-          Upload respondent-level CSV files from Arab Barometer, Pew Global Attitudes, the World Values Survey or census microdata. Map the columns once;
-          Kruvim computes weighted age, sex, education and attitude marginals per country and rebuilds the 1,000,000-agent population from them.
+          Choose a registered source to import native figures from a CSV or XLSX. Map metric, dimensions and period, preview, then apply.
+          Respondent-level surveys use the existing country marginal mapper. Check the resource's commercial reuse licence first.
         </Callout>
+        <Field label="Registered source" help="Choose the publisher of this table. Licence approval and population activation are separate admin actions."><Select value={registered || "-"} onChange={(v) => setRegistered(v === "-" ? "" : v)} options={[{ value: "-", label: "Respondent-level survey (legacy mapper)" }, ...(sources.data || []).filter((s) => !["deprecated", "placeholder"].includes(s.status)).map((s) => ({ value: s.id, label: s.name }))]} /></Field>
         <Card className="overflow-hidden">
-          <CardHeader title="Datasets" divider actions={<Button size="sm" variant="primary" onClick={() => input.current?.click()}><Upload className="h-3.5 w-3.5" />Upload CSV</Button>} />
-          <input ref={input} type="file" accept=".csv,.tsv,.txt" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          <CardHeader title="Datasets" divider actions={<Button size="sm" variant="primary" onClick={() => input.current?.click()}><Upload className="h-3.5 w-3.5" />Upload table</Button>} />
+          <input ref={input} type="file" accept={registered ? ".csv,.tsv,.xlsx" : ".csv,.tsv,.txt"} className="hidden" onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0]); e.target.value = ""; }} />
           {(list.data || []).length === 0 ? <Empty title="No datasets yet">Upload a CSV to start.</Empty> : (
             <div className="overflow-x-auto">
               <table className="dt min-w-[720px]">
@@ -275,7 +281,7 @@ function Barometers() {
           ))}</tbody>
         </table>
       </Card>
-      {mapFor && <MappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} />}
+      {mapFor && (mapFor.registered_source_id ? <ObservationMappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} /> : <MappingDialog d={mapFor} onClose={() => { setMapFor(null); list.refetch(); }} />)}
     </div>
   );
 }
