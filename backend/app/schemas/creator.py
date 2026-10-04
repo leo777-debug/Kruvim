@@ -43,3 +43,8 @@ class PostLinkIn(BaseModel):
 
 class ConsentIn(BaseModel):
     share_accuracy: bool
+
+
+class MemoryResetIn(BaseModel):
+    confirmed: Literal[True]
+    subject: str | None = Field(default=None, max_length=160)

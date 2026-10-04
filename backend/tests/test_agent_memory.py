@@ -234,3 +234,33 @@ async def test_consolidation_retention_cap_and_decay(auth, monkeypatch):
     async with session_scope() as s:
         state = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org))).scalar_one()
         assert before == (state.familiarity, state.fatigue)
+
+
+async def test_reset_requires_admin_confirmation_is_audited_and_tenant_scoped(client, auth):
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from app.db.session import session_scope
+    from app.models import AgentMemory, AuditLog, Membership
+    from app.services.agent_memory import write_run
+    from app.services.llm import Usage
+    org, sim = await memory_run(auth)
+    await write_run(org, sim, SimpleNamespace(is_dry=True), Usage())
+    h = auth[0]
+    summary = (await client.get("/my-audience/agent-memory", headers=h)).json()
+    assert summary["agents"] == 2 and summary["default_returning_share"] == .6
+    assert (await client.post("/my-audience/agent-memory/reset", headers=h, json={})).status_code == 422
+    async with session_scope() as s:
+        member = (await s.execute(select(Membership).where(Membership.org_id == org))).scalar_one()
+        member.role = "member"
+    assert (await client.post("/my-audience/agent-memory/reset", headers=h, json={"confirmed": True})).status_code == 403
+    async with session_scope() as s:
+        member = (await s.execute(select(Membership).where(Membership.org_id == org))).scalar_one()
+        member.role = "owner"
+    result = await client.post("/my-audience/agent-memory/reset", headers=h, json={"confirmed": True, "subject": "creator:gym"})
+    assert result.status_code == 200 and result.json()["memories_deleted"] > 0
+    assert (await client.get("/my-audience/agent-memory", headers=h)).json()["agents"] == 0
+    async with session_scope() as s:
+        assert not (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org))).scalars().all()
+        assert (await s.execute(select(AuditLog).where(AuditLog.org_id == org, AuditLog.action == "audience_memory.reset"))).scalars().all()

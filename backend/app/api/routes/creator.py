@@ -18,7 +18,7 @@ from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import utcnow
 from app.db.session import get_session
 from app.models import Organization, SocialConnection, SocialPost
-from app.schemas.creator import AudienceProfileIn, ConsentIn, PostLinkIn
+from app.schemas.creator import AudienceProfileIn, ConsentIn, MemoryResetIn, PostLinkIn
 from app.services import accuracy, audit, social
 from app.services.creator import PRESETS
 from app.services.social_sync import sync_connection
@@ -216,6 +216,15 @@ async def agent_memory_summary(subject: str | None = Query(None, max_length=160)
                                s: AsyncSession = Depends(get_session)):
     from app.services.agent_memory import audience_summary
     return await audience_summary(s, p.org, subject)
+
+
+@router.post("/my-audience/agent-memory/reset")
+async def reset_agent_memory(body: MemoryResetIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
+    from app.services.agent_memory import reset
+    result = await reset(s, p.org_id, body.subject)
+    audit.record(s, "audience_memory.reset", org_id=p.org_id, user_id=p.user_id, target=body.subject or "all", meta=result)
+    await s.commit()
+    return result
 
 
 @router.put("/my-audience")

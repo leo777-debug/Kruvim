@@ -468,6 +468,9 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
         <Card className="space-y-2 p-4 text-muted leading-relaxed">
           <div className="eyebrow mb-1">Method</div>
           <p>{r.score.method}</p>
+          {r.agent_memory && <p>Simulated audience memory: {r.agent_memory.returning ?? 0} of {r.agent_memory.voice ?? 0} voice agents were returning; {r.agent_memory.recalled ?? 0} memories recalled.
+            {r.agent_memory.fresh ? " Fresh audience was on; history was ignored." : " Fresh audience was off."}
+            {!!r.agent_memory.shortfall && ` ${r.agent_memory.shortfall} requested returning places could not be filled within the audience segments.`}</p>}
           {Object.entries(sim.config?.context || {}).map(([code, context]: any) => context.tone && <p key={code}>{context.city || code} news tone: {context.tone.source_label || "GDELT"} · source weight {context.tone.source_weight ?? 1}{context.tone.warning ? `. ${context.tone.warning}.` : ""}</p>)}
           <p>Reaction surface: ridge regression on {r.model.features} persona features (λ={r.model.lambda}) fitted on {r.model.voice_n} interviewed agents, applied to {fmt.n(r.audience.population)} agents.</p>
         </Card>

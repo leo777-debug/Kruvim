@@ -349,6 +349,24 @@ async def audience_summary(s, org, subject=None):
         "retention_days": plan(org).get("memory_retention_days", 90), "cap_per_agent": plan(org).get("memory_cap_per_agent", 60)}
 
 
+async def reset(s, org_id, subject=None):
+    org = (await s.execute(select(Organization).where(Organization.id == org_id).with_for_update())).scalar_one()
+    memory = delete(AgentMemory).where(AgentMemory.org_id == org_id)
+    affinity = delete(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org_id)
+    if subject:
+        subject = "creator:" + slug(subject.removeprefix("creator:"))[:120]
+        runs = select(Simulation.id).where(Simulation.org_id == org_id,
+            Simulation.content["creator_subject"].as_string() == subject[8:])
+        from sqlalchemy import or_
+        memory = memory.where(or_(AgentMemory.subject == subject, AgentMemory.source_simulation_id.in_(runs)))
+        affinity = affinity.where(AgentCreatorAffinity.subject == subject)
+    removed = await s.execute(memory)
+    states = await s.execute(affinity)
+    org.settings = {**(org.settings or {}), "agent_memory_generation": (org.settings or {}).get("agent_memory_generation", 0) + 1,
+                    **({"creator_memory": {}} if not subject else {})}
+    return {"memories_deleted": removed.rowcount, "affinities_deleted": states.rowcount, "subject": subject}
+
+
 async def consolidate(now=None, org_id=None):
     """Nightly native consolidation and retention; injectable time makes decay idempotent."""
     now = now or utcnow()

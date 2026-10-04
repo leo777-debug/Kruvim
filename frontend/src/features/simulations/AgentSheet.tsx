@@ -7,6 +7,7 @@ import { Badge, Bar, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { ACTION_COLORS, engColor, scoreColor, STANCE_COLORS } from "@/lib/colors";
 import { fmt, initials, platformName } from "@/lib/utils";
+import { AgentMemories } from "./AgentMemories";
 
 export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string; agentRef: string | null; onClose: () => void; onChat?: (ref: string) => void }) {
   const q = useQuery({ queryKey: ["agent", simId, agentRef], queryFn: () => api(`/simulations/${simId}/agents/${agentRef}`), enabled: !!agentRef });
@@ -39,6 +40,7 @@ export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-[13px]">
         {d && (
           <>
+            <AgentMemories data={d.long_term_memory} />
             <section>
               <div className="eyebrow mb-2">Who they are</div>
               {d.kind === "stakeholder" ? <div className="space-y-3"><p className="text-muted leading-relaxed whitespace-pre-line">{p.description}</p>

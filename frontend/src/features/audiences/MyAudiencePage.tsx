@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, Field, Input, Switch, Textarea } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { AudienceMemory } from "./AudienceMemory";
 
 type Split = { countries: Record<string, number>; ages: Record<string, number>; genders: Record<string, number> };
 type Connection = { id: string; platform: string; account_name: string; connected: boolean; share_accuracy: boolean;
@@ -91,9 +92,10 @@ export default function MyAudiencePage() {
         <p className="text-sm leading-relaxed">{profile.data?.memory.real_summary}</p>
         <table className="dt"><thead><tr><th>Test</th><th>Opinion</th><th>Mode</th></tr></thead><tbody>{profile.data?.memory.observations?.map((x) =>
           <tr key={x.simulation_id}><td><Link className="text-brand" to={`/simulations/${x.simulation_id}`}>{x.title}</Link></td><td>{x.score}/10</td><td>{x.dry ? "Dry run" : "Model"}</td></tr>)}</tbody></table>
-        <Button disabled={busy !== null || !profile.data?.memory.observations?.length} onClick={() => action("reset", "/my-audience/memory", "DELETE")}>Reset memory</Button>
+        <p className="text-xs text-muted">Workspace observations complement each agent's individual simulated memory.</p>
         <p className="text-xs text-muted">When creating a test, choose “Match my audience.” Completed tests can be linked to published post IDs from their Overview.</p>
       </Card>
     </div>
+    <AudienceMemory />
   </Page>;
 }

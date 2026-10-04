@@ -25,7 +25,7 @@ from sqlalchemy import select, update
 
 from app.core.metrics import SIM_ACTIONS
 from app.db.session import session_scope
-from app.models import Action, Post, SimAgent, Simulation
+from app.models import Action, Organization, Post, SimAgent, Simulation
 from app.services import jobs
 from app.services.content import card_block, topic_vector
 from app.services.creator import short_video_metrics, weighted_sample
@@ -181,6 +181,12 @@ class Engine:
         async with session_scope() as s:
             sim = await s.get(Simulation, self.sim_id)
             self.cfg = dict(sim.config)
+            org = await s.get(Organization, sim.org_id)
+            if self.cfg.get("agent_memory", {}).get("generation", 0) != (org.settings or {}).get("agent_memory_generation", 0):
+                self.cfg["agent_memory"] = {**self.cfg.get("agent_memory", {}), "fresh": True, "snapshots": {},
+                    "opinion_snapshots": {}, "affinity": {"people": {}, "segments": {}}, "recalled": 0,
+                    "reset_since_preparation": True}
+                self.cfg["creator_memory"] = ""
             self.card = dict(sim.card)
             self.card_b = (sim.content or {}).get("card_b")
             self.b_kind = (sim.content or {}).get("b_kind") or "version"

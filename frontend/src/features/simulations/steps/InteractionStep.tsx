@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 import { selectedAgent } from "../agentSelection";
+import { AgentMemories } from "../AgentMemories";
 import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
 import { Badge, Callout, Empty, Field, Input, Segmented, Status, Textarea, UnderlineTabs } from "@/components/ui/primitives";
@@ -123,6 +124,7 @@ function Chat({ sim, target }: { sim: Simulation; target: string }) {
         {op != null && <span className="num text-lg font-semibold" style={{ color: scoreColor(op) }}>{fmt.s1(op)}</span>}
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <AgentMemories data={d.data.long_term_memory} />
         {d.data?.reaction?.quote && <div className="border-l-2 border-line-strong pl-3 text-[13px] text-muted"><span className="font-medium text-fg">First reaction: </span>“{d.data.reaction.quote}”</div>}
         {msgs.length === 0 && <Suggestions items={suggestions} onPick={(s) => send.mutate(s)} />}
         {msgs.map((m, i) => (
