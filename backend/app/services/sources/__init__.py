@@ -3,12 +3,12 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db.base import utcnow
-from app.models import DataSource, SourceObservation
+from app.models import DataSource, Signal, SourceObservation
 
 from .catalog import CATALOG
 
@@ -23,6 +23,16 @@ async def ensure_sources(s):
     if values:
         insert = sqlite_insert if s.bind.dialect.name == "sqlite" else pg_insert
         await s.execute(insert(DataSource).values(values).on_conflict_do_nothing(index_elements=["key"]))
+    # Existing observations retain original URLs/times. Unknown legacy sources are explicitly placeholders.
+    mapping = dict((await s.execute(select(DataSource.key, DataSource.id))).all())
+    await s.execute(update(Signal).where(Signal.source_id.is_(None)).values(
+        source_id=case(mapping, value=Signal.source, else_=mapping["placeholder_priors"])))
+
+
+def signal_source(source):
+    return {"source_id": source.id, "source_name": source.name, "source_url": source.url, "licence": source.licence,
+            "status": source.status, "label": "estimate, source pending" if source.status == "placeholder" else source.name,
+            "production_eligible": eligible(source), "source_weight": source.reliability if eligible(source) else 0}
 
 
 def eligible(source):

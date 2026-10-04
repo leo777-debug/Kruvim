@@ -11,7 +11,7 @@ from datetime import timedelta
 from sqlalchemy import or_, select
 
 from app.core.config import settings
-from app.models import Signal, SignalEmbedding
+from app.models import DataSource, Signal, SignalEmbedding
 from app.services.llm import Usage
 
 from .safety import safe_title
@@ -64,25 +64,39 @@ def public_value(signal, at, *, stale=False):
 
 
 async def select_tone(s, code, at, org_id=None, llm=None, usage=None):
+    from app.services.sources import eligible, ensure_sources, signal_source
+    await ensure_sources(s)
+    sources = {row.key: row for row in (await s.execute(select(DataSource))).scalars()}
+    def allowed(row):
+        return settings.env != "production" or row.source in sources and eligible(sources[row.source]) and all(
+            key in sources and eligible(sources[key]) for key in (row.payload or {}).get("upstream_sources", []))
+    def traced_value(row, stale=False):
+        registered = sources.get(row.source, sources["placeholder_priors"])
+        metadata = signal_source(registered)
+        if any(key not in sources or not eligible(sources[key]) for key in (row.payload or {}).get("upstream_sources", [])):
+            metadata = {**metadata, "production_eligible": False, "source_weight": 0, "label": "Upstream headline reuse approval pending"}
+        return {**public_value(row, at, stale=stale), "source_id": registered.id, "provenance": metadata}
     visible = or_(Signal.org_id.is_(None), Signal.org_id == org_id) if org_id else Signal.org_id.is_(None)
     base = [visible, Signal.region == code, Signal.observed_at <= at, Signal.fetched_at <= at]
     rows = (await s.execute(select(Signal).where(*base, Signal.kind == "tone", Signal.value.is_not(None))
                             .order_by(Signal.observed_at.desc(), Signal.id.desc()).limit(100))).scalars().all()
-    rows = [row for row in rows if safe_title(row.title) and math.isfinite(row.value)]
+    rows = [row for row in rows if safe_title(row.title) and math.isfinite(row.value) and allowed(row)]
     fresh = next((row for row in rows if row.source == "gdelt" and row.observed_at >= at - timedelta(
         hours=settings.signal_max_age_hours.get("tone", 3))), None)
     if fresh:
-        return public_value(fresh, at)
+        return traced_value(fresh)
     headlines = (await s.execute(select(Signal).where(*base, Signal.kind == "headline",
                 Signal.observed_at >= at - timedelta(hours=24)).order_by(Signal.observed_at.desc(), Signal.id.desc()).limit(30))).scalars().all()
-    headlines = [h for h in headlines if safe_title(h.title)]
+    headlines = [h for h in headlines if safe_title(h.title) and allowed(h) and (h.payload or {}).get("date_status") != "undated"]
+    if settings.env == "production" and not eligible(sources["headline_tone"]):
+        headlines = []
     if headlines:
         fingerprint = hashlib.sha256(json.dumps([(h.id, h.title) for h in headlines], ensure_ascii=False).encode()).hexdigest()
         model = llm.model_for("extract") if org_id and llm and not llm.is_dry else None
         cached = next((row for row in rows if row.org_id == org_id and (row.payload or {}).get("fingerprint") == fingerprint
                        and (not model or row.payload.get("requested_model", row.payload.get("model")) == model)), None)
         if cached:
-            return public_value(cached, at)
+            return traced_value(cached)
         avg, method = lexicon_score([h.title for h in headlines]), "lexicon"
         if model:
             try:
@@ -97,10 +111,11 @@ async def select_tone(s, code, at, org_id=None, llm=None, usage=None):
                 log.warning("Headline model unavailable for %s: %s; using lexicon", code, type(exc).__name__)
         observed = max(h.observed_at for h in headlines)
         from .connectors.news import _gdelt_state
-        signal = Signal(org_id=org_id, source="headline_tone", kind="tone", region=code,
+        signal = Signal(org_id=org_id, source="headline_tone", source_id=sources["headline_tone"].id, kind="tone", region=code,
             title=f"News tone estimated from headlines {avg:+.1f}", value=avg, observed_at=observed, fetched_at=at,
             payload={"tone_source": "headline_tone", "method": method, "source_label": f"Headlines ({method})",
                      "source_weight": .7 if method == "model" else .5, "headline_ids": [h.id for h in headlines],
+                     "upstream_sources": sorted({h.source for h in headlines}), "provenance": signal_source(sources["headline_tone"]),
                      "fingerprint": fingerprint, "model": model if method == "model" else None, "requested_model": model,
                      "gdelt_reason": _gdelt_state.get("reasons", {}).get(code, "No fresh GDELT measurement")})
         s.add(signal)
@@ -108,7 +123,7 @@ async def select_tone(s, code, at, org_id=None, llm=None, usage=None):
         from .retrieval import embed
         s.add(SignalEmbedding(id=f"local:{signal.id}", org_id=org_id, signal_id=signal.id, model="local-hash-v1",
                               vector=embed(signal.title).tolist()))
-        return public_value(signal, at)
+        return traced_value(signal)
     if rows:
-        return public_value(rows[0], at, stale=True)
+        return traced_value(rows[0], stale=True)
     return None

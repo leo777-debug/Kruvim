@@ -15,6 +15,9 @@ export function SourcesPanel() {
   const [pending, setPending] = useState(false);
   const [edit, setEdit] = useState<any>(null);
   const [draft, setDraft] = useState<any>({});
+  const [configText, setConfigText] = useState("{}");
+  let configValid = false;
+  try { const config = JSON.parse(configText); configValid = !!config && !Array.isArray(config) && typeof config === "object"; } catch { /* Inline validation. */ }
   const save = useMutation({ mutationFn: () => api(`/datapool/sources/${edit.id}`, { method: "PATCH", json: draft }),
     onSuccess: () => { setEdit(null); q.refetch(); toast.success("Source updated"); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not update source") });
@@ -38,14 +41,15 @@ export function SourcesPanel() {
       <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted">{r.notes}</p>
       <p className="text-xs text-muted">Attribution: {r.attribution}</p>
       <div className="flex flex-wrap gap-2">{r.terms_url && <a className="text-xs text-brand hover:underline" href={r.terms_url} target="_blank" rel="noreferrer">Publisher terms</a>}
-        {admin && <Button size="sm" onClick={() => { setEdit(r); setDraft({ reliability: r.reliability, status: r.status, licence: r.licence, notes: r.notes, licence_approved: r.licence_approved, approval_note: "" }); }}>Edit source</Button>}
+        {admin && <Button size="sm" onClick={() => { setEdit(r); setConfigText(JSON.stringify(r.config || {}, null, 2)); setDraft({ reliability: r.reliability, status: r.status, licence: r.licence, notes: r.notes, config: r.config || {}, licence_approved: r.licence_approved, approval_note: "" }); }}>Edit source</Button>}
         {admin && r.config?.endpoint && ["table", "sdmx", "world_bank"].includes(r.config?.adapter) && <Button size="sm" loading={fetch.isPending && fetch.variables === r.id} onClick={() => fetch.mutate(r.id)}>Import public feed</Button>}
       </div>
     </Card>)}</div>}
-    <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)} title={`Edit ${edit?.name || "source"}`} footer={<><Button onClick={() => setEdit(null)}>Cancel</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Save source</Button></>}>
+    <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)} title={`Edit ${edit?.name || "source"}`} footer={<><Button onClick={() => setEdit(null)}>Cancel</Button><Button variant="primary" disabled={!configValid} loading={save.isPending} onClick={() => save.mutate()}>Save source</Button></>}>
       <div className="space-y-3"><Field label="Reliability weight (0–1)"><Input type="number" min="0" max="1" step="0.05" value={draft.reliability ?? 0} onChange={(e) => setDraft({ ...draft, reliability: Number(e.target.value) })} /></Field>
         <Field label="Licence"><Input value={draft.licence || ""} onChange={(e) => setDraft({ ...draft, licence: e.target.value })} /></Field>
-        <Field label="Notes and import instructions"><textarea className="min-h-28 w-full rounded border border-line bg-canvas p-2 text-sm" value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field>
+        <Field label="Notes and import instructions"><textarea aria-label="Notes and import instructions" className="min-h-28 w-full rounded border border-line bg-canvas p-2 text-sm" value={draft.notes || ""} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field>
+        <Field label="Adapter and native-code mapping" help="Platform admin JSON: public feed URL, language and population_dimension_map. Changing configuration requires renewed reuse approval."><textarea aria-label="Adapter and native-code mapping" aria-invalid={!configValid} className="mono min-h-24 w-full rounded border border-line bg-canvas p-2 text-xs" value={configText} onChange={(e) => { setConfigText(e.target.value); try { setDraft({ ...draft, config: JSON.parse(e.target.value) }); } catch { /* Saving is disabled until valid. */ } }} /></Field>
         <label className="flex items-center gap-2 text-sm"><Switch checked={draft.status === "active"} onChange={(v) => setDraft({ ...draft, status: v ? "active" : "pending_import" })} />Activate source</label>
         <label className="flex items-center gap-2 text-sm"><Switch checked={!!draft.licence_approved} onChange={(v) => setDraft({ ...draft, licence_approved: v })} />Commercial reuse approved</label>
         {draft.licence_approved && <Field label="Approval evidence" help="Required: cite the resource licence or publisher permission that permits commercial reuse."><Input value={draft.approval_note || ""} onChange={(e) => setDraft({ ...draft, approval_note: e.target.value })} /></Field>}

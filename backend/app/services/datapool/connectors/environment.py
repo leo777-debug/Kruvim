@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import datetime as dt
+
+from sqlalchemy import select
+
+from app.core.config import settings
+from app.db.session import session_scope
+from app.models import DataSource, SourceObservation
+from app.services.sources import eligible, ensure_sources
 
 from ..base import BaseConnector, ConnectorSpec, SignalItem
 
@@ -23,12 +31,18 @@ ISLAMIC_REGIONS = {"AE", "SA", "EG", "JO", "MA"}
 
 class WeatherConnector(BaseConnector):
     spec = ConnectorSpec("open_meteo", "Open-Meteo weather", "weather", "Current temperature, feels-like, conditions per city.",
-                         interval_minutes=60, license_note="Free tier is non-commercial; buy an API plan for SaaS use.",
+                         interval_minutes=60, secrets=["open_meteo_api_key"], license_note="Free tier is non-commercial; buy an API plan for SaaS use.",
                          docs_url="https://open-meteo.com/")
 
     async def fetch(self, client, regions, secrets, config):
+        endpoint = config.get("endpoint", "https://api.open-meteo.com/v1/forecast")
+        if endpoint not in ("https://api.open-meteo.com/v1/forecast", "https://customer-api.open-meteo.com/v1/forecast"):
+            raise ValueError("Unsupported weather endpoint")
+        if settings.env == "production" and ("customer-api" not in endpoint or not secrets.get("open_meteo_api_key")):
+            raise ValueError("Commercial weather requires the customer endpoint and a paid API key")
         async def one(reg):
-            r = await client.get("https://api.open-meteo.com/v1/forecast", params={
+            r = await client.get(endpoint, params={
+                **({"apikey": secrets["open_meteo_api_key"]} if "customer-api" in endpoint else {}),
                 "latitude": reg["lat"], "longitude": reg["lon"], "timezone": "auto",
                 "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day"})
             r.raise_for_status()
@@ -38,7 +52,9 @@ class WeatherConnector(BaseConnector):
                               value=c.get("apparent_temperature"),
                               payload={"temp_c": c.get("temperature_2m"), "feels_c": c.get("apparent_temperature"),
                                        "humidity": c.get("relative_humidity_2m"), "wind_kmh": c.get("wind_speed_10m"),
-                                       "text": text, "local_time": c.get("time"), "is_day": bool(c.get("is_day"))})
+                                       "text": text, "local_time": c.get("time"), "is_day": bool(c.get("is_day")),
+                                       "coordinate_source": reg.get("coordinate_source"), "coordinate_raw_ref": reg.get("coordinate_raw_ref"),
+                                       "weather_proxy": reg["code"] == "AE-NE"})
         res = await asyncio.gather(*[one(r) for r in regions], return_exceptions=True)
         return [x for x in res if isinstance(x, SignalItem)]
 
@@ -50,36 +66,68 @@ class CalendarConnector(BaseConnector):
 
     async def fetch(self, client, regions, secrets, config):
         out: list[SignalItem] = []
-        today = dt.date.today()
+        today = dt.date.fromisoformat(config["as_of"]) if config.get("as_of") else dt.datetime.now(dt.UTC).date()
         horizon = today + dt.timedelta(days=60)
+        async with session_scope() as s:
+            await ensure_sources(s)
+            sources = {r.id: r for r in (await s.execute(select(DataSource))).scalars()}
+            observations = (await s.execute(select(SourceObservation).where(SourceObservation.metric.in_(
+                ["calendar_event", "school_term", "regional_event"]), SourceObservation.period_start >= dt.datetime.combine(today, dt.time(), dt.UTC),
+                SourceObservation.period_start <= dt.datetime.combine(horizon, dt.time.max, dt.UTC)))).scalars().all()
         for reg in regions:
+            country = reg.get("country", reg["code"])
             events = []
             try:
                 r = await client.get(f"https://date.nager.at/api/v3/NextPublicHolidays/{reg['holiday_cc']}")
                 if r.status_code == 200 and r.content:
                     for h in r.json():
                         d = dt.date.fromisoformat(h["date"])
-                        if d <= horizon:
+                        if today <= d <= horizon:
                             events.append((h["date"], h["name"], "Nager.Date"))
             except Exception:
                 pass
-            if reg["code"] in ISLAMIC_REGIONS:
+            if country in ISLAMIC_REGIONS:
                 for ds, name in ISLAMIC:
                     d = dt.date.fromisoformat(ds)
                     if today <= d <= horizon and not any(name.split(" (")[0] in e[1] for e in events):
                         events.append((ds, name, "lunar estimate"))
-            for md, name in NATIONAL.get(reg["code"], []):
+            for md, name in NATIONAL.get(country, []):
                 for y in (today.year, today.year + 1):
                     d = dt.date.fromisoformat(f"{y}-{md}")
                     if today <= d <= horizon and not any(e[0] == d.isoformat() for e in events):
                         events.append((d.isoformat(), name, "built-in"))
             for ds, name, src in sorted(events)[:6]:
                 days = (dt.date.fromisoformat(ds) - today).days
-                out.append(SignalItem("event", reg["code"], name, value=float(days),
-                                      payload={"date": ds, "days_away": days, "source": src}))
+                placeholder = src != "Nager.Date"
+                label = " · estimate, source pending" if placeholder else ""
+                out.append(SignalItem("event", reg["code"], name + label, value=float(days),
+                                      payload={"date": ds, "days_away": days, "source": src,
+                                               "source_key": "placeholder_priors" if placeholder else "calendar",
+                                               "status": "placeholder" if placeholder else "active"}))
+            for obs in observations:
+                source = sources[obs.source_id]
+                if obs.geography not in (country, reg["code"]) or not eligible(source) or not obs.dimensions.get("name"):
+                    continue
+                days = (obs.period_start.date() - today).days
+                out.append(SignalItem("event", reg["code"], obs.dimensions["name"], value=float(days),
+                    lang=obs.dimensions.get("language"), payload={"date": obs.period_start.date().isoformat(), "days_away": days,
+                        "source_key": source.key, "source": source.name, "observation_id": obs.id, "raw_ref": obs.raw_ref,
+                        "calendar_membership": obs.dimensions.get("calendar_membership"),
+                        "nationality_groups": obs.dimensions.get("nationality_groups", [])}))
+            if country == "AE":
+                salary = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+                out.append(SignalItem("event", reg["code"], "Month-end spending cycle · estimate, source pending", value=float((salary - today).days),
+                    payload={"date": salary.isoformat(), "days_away": (salary - today).days, "source_key": "placeholder_priors",
+                             "status": "placeholder", "source": "Calendar rule; employer salary dates unknown"}))
+                for membership in ("Diwali", "Onam", "Christmas"):
+                    if not any(obs.dimensions.get("calendar_membership") == membership and eligible(sources[obs.source_id])
+                               and obs.geography in (country, reg["code"]) for obs in observations):
+                        out.append(SignalItem("event", reg["code"], membership + " · date source pending", payload={
+                            "date": None, "days_away": None, "calendar_membership": membership, "status": "placeholder",
+                            "source_key": "placeholder_priors", "source": "estimate, source pending", "availability": "pending_import"}))
             if not events:
-                out.append(SignalItem("event", reg["code"], "No upcoming dates in the next 60 days",
-                    payload={"availability": "no_upcoming_dates", "source": "built-in calendar", "days_away": None}))
+                out.append(SignalItem("event", reg["code"], "Calendar source unavailable; import regional dates",
+                    payload={"availability": "source_unavailable", "source_key": "placeholder_priors", "source": "estimate, source pending", "days_away": None}))
         return out
 
 
@@ -94,7 +142,7 @@ class FxConnector(BaseConnector):
         rates = r.json().get("rates", {})
         out = []
         for reg in regions:
-            cur = self.CUR.get(reg["code"])
+            cur = self.CUR.get(reg.get("country", reg["code"]))
             if cur and cur in rates:
                 out.append(SignalItem("economy", reg["code"], f"USD/{cur} {rates[cur]:.3f}", value=float(rates[cur]),
                                       payload={"currency": cur}))

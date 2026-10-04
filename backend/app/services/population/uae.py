@@ -117,7 +117,7 @@ def reconcile(observations, sources, now, tolerance=.03):
     from app.services.sources import eligible
     groups = defaultdict(list)
     provenance = placeholder_provenance()
-    totals = {(o.source_id, o.geography, o.period_end): o for o in observations
+    totals = {(o.source_id, o.geography, getattr(o, "period_start", None), o.period_end): o for o in observations
               if o.metric == "population_total" and o.unit in ("persons", "count") and o.value > 0 and not o.dimensions}
     denominators = {}
     for o in observations:
@@ -126,9 +126,11 @@ def reconcile(observations, sources, now, tolerance=.03):
             continue
         if o.metric == "population_total":
             continue
-        denominator = totals.get((o.source_id, o.geography, o.period_end))
+        denominator = totals.get((o.source_id, o.geography, getattr(o, "period_start", None), o.period_end))
         is_count = o.metric == "population_count" and o.unit in ("persons", "count") and denominator is not None
-        if not is_count and (o.metric != "population_share" or o.unit not in ("percent", "fraction")):
+        scalar = o.metric in ("remittance_share", "platform_share", "salary_day") and (
+            o.unit in ("percent", "fraction") if o.metric != "salary_day" else o.unit == "day")
+        if not scalar and not is_count and (o.metric != "population_share" or o.unit not in ("percent", "fraction")):
             provenance["coverage_gaps"].append({"attribute": o.metric, "observation_id": o.id,
                 "reason": "Native figure retained; no explicit population-share denominator/mapping"})
             continue
@@ -137,7 +139,10 @@ def reconcile(observations, sources, now, tolerance=.03):
         for native_key, native_value in o.dimensions.items():
             rule = mapping.get(native_key, {})
             dimensions[rule.get("dimension", native_key)] = rule.get("values", {}).get(str(native_value), native_value)
-        if not dimensions or any(k not in DOMAINS or v not in DOMAINS[k] for k, v in dimensions.items()):
+        platform = dimensions.pop("platform", None) if o.metric == "platform_share" else None
+        from .regions import PLATFORMS
+        valid_platform = o.metric != "platform_share" or platform in [*PLATFORMS, "whatsapp"]
+        if (not dimensions and not scalar) or not valid_platform or any(k not in DOMAINS or v not in DOMAINS[k] for k, v in dimensions.items()):
             provenance["coverage_gaps"].append({"attribute": o.metric, "observation_id": o.id,
                 "reason": "Unmapped publisher dimension code; explicit mapping required"})
             continue
@@ -146,19 +151,23 @@ def reconcile(observations, sources, now, tolerance=.03):
         value = o.value / (denominator.value if is_count else 100 if o.unit == "percent" else 1)
         if is_count:
             denominators[o.id] = denominator.id
-        if not 0 <= value <= 1:
+        if not (1 <= value <= 31 and value == int(value) if o.metric == "salary_day" else 0 <= value <= 1):
             provenance["coverage_gaps"].append({"attribute": o.metric, "observation_id": o.id, "reason": "Invalid share"})
             continue
         age = max(0, (now - o.period_end).total_seconds() / 86400)
         quality = source.reliability * math.exp(-age / (365 * 5))
         quality *= 1 if (source.geography_level == "emirate") == (o.geography != "AE") else .7
-        groups[(o.geography, tuple(sorted(dimensions.items())))].append((o, value, quality))
+        if platform:
+            dimensions["platform"] = platform
+        groups[(o.metric if scalar else "population_share", o.geography, tuple(sorted(dimensions.items())))].append((o, value, quality))
     targets, covered = [], set()
-    for (geography, dimension_items), candidates in sorted(groups.items()):
+    for (metric, geography, dimension_items), candidates in sorted(groups.items()):
         # Retain latest period per source; old periods remain in the registry, never interpolated.
         latest = {}
         for candidate in candidates:
-            if candidate[0].source_id not in latest or candidate[0].period_end > latest[candidate[0].source_id][0].period_end:
+            previous = latest.get(candidate[0].source_id)
+            if previous is None or (candidate[0].period_end, str(getattr(candidate[0], "retrieved_at", "")), candidate[0].id) > (
+                previous[0].period_end, str(getattr(previous[0], "retrieved_at", "")), previous[0].id):
                 latest[candidate[0].source_id] = candidate
         candidates = sorted(latest.values(), key=lambda x: (-x[2], x[0].source_id, x[0].id))
         winner, value, quality = candidates[0]
@@ -168,13 +177,15 @@ def reconcile(observations, sources, now, tolerance=.03):
         ids += [denominators[x[0].id] for x in candidates if x[0].id in denominators]
         source_ids = [x[0].source_id for x in candidates]
         if conflict:
-            provenance["conflicts"].append({"geography": geography, "dimensions": dict(dimension_items),
+            provenance["conflicts"].append({"geography": geography, "dimensions": dict(dimension_items), "metric": metric,
                 "values": [{"observation_id": o.id, "source_id": o.source_id, "fraction": v,
                             "period_end": o.period_end.isoformat()} for o, v, _ in candidates],
                 "selected_observation_id": winner.id, "reason": "Highest reliability/recency/geography score; disagreement not averaged",
                 "uncertainty_widening": spread})
         confidence = min(1., quality + (.1 * (len(candidates) - 1) if not conflict else 0)) * (1 - spread if conflict else 1)
-        for attribute, _ in dimension_items:
+        attributes = [key for key, _ in dimension_items if key != "platform"] if metric == "population_share" else [
+            {"platform_share": "platform_habits", "salary_day": "salary_cycle"}.get(metric, metric)]
+        for attribute in attributes:
             covered.add(attribute)
             prior = provenance["attribute_confidence"].get(attribute, {})
             provenance["attribute_confidence"][attribute] = {"status": "partial", "label": "Partially sourced; missing cells remain estimates",
@@ -183,7 +194,7 @@ def reconcile(observations, sources, now, tolerance=.03):
                 "observation_ids": sorted(set(prior.get("observation_ids", []) + ids)), "conflict": conflict or prior.get("conflict", False)}
         provenance["source_ids"] += source_ids
         provenance["observation_ids"] += ids
-        targets.append({"geography": geography, "dimensions": dict(dimension_items), "fraction": value,
+        targets.append({"geography": geography, "dimensions": dict(dimension_items), "fraction": value, "metric": metric,
                         "observation_id": winner.id})
     # Coverage is not declared complete merely because one cell exists.
     for attribute in covered:
@@ -213,9 +224,22 @@ def fit(pop, targets):
     idx = np.flatnonzero(pop.region == 0)
     if not idx.size or not targets:
         return pop
+    original = None
+    # Add visitor candidate support only when an approved native status marginal exists.
+    # Tourism arrival flows never trigger this: reconciliation accepts stock shares/counts only.
+    if any(t["dimensions"].get("status") == "visitor" and t["fraction"] > 0 for t in targets):
+        original = (idx, pop.citizen[idx].copy(), {k: pop.uae[k][idx].copy() for k in ("status", "visa_type", "nationality_group")})
+        rng = np.random.default_rng(pop.seed ^ 0x56495349)
+        visitor = idx[rng.random(idx.size) < .5]  # Placeholder support, replaced by the native fitted marginal.
+        pop.uae["status"][visitor] = 1
+        pop.uae["visa_type"][visitor] = VISA_TYPES.index("visitor")
+        pop.uae["nationality_group"][visitor] = rng.integers(1, len(NATIONALITIES), len(visitor))
+        pop.citizen[visitor] = False
     data = columns(pop, idx)
     constraints = []
     for target in targets:
+        if target.get("metric", "population_share") != "population_share":
+            continue
         scope = np.ones(idx.size, bool) if target["geography"] == "AE" else data["residence_emirate"] == list(EMIRATES).index(target["geography"])
         mask = np.ones(idx.size, bool)
         for key, value in target["dimensions"].items():
@@ -225,10 +249,12 @@ def fit(pop, targets):
         weights, residual = rake(data, constraints)
     except ValueError as exc:
         pop.provenance["coverage_gaps"].append({"attribute": "reconciliation", "reason": str(exc)})
+        _failed_fit(pop, original)
         return pop
     if residual > .01:
         pop.provenance["coverage_gaps"].append({"attribute": "reconciliation", "reason": "Joint constraints did not converge",
                                                 "residual": float(residual)})
+        _failed_fit(pop, original)
         return pop  # Keep explicit placeholder seed instead of pretending an invalid fit is sourced.
     rng = np.random.default_rng(pop.seed ^ 0x52414B45)
     points = (np.arange(idx.size) + rng.random()) / idx.size
@@ -238,8 +264,44 @@ def fit(pop, targets):
     for key in ("age", "age_band", "male", "citizen", "origin", "education", "income", "profession", "lang", "platforms", "attitudes"):
         getattr(pop, key)[idx] = getattr(pop, key)[selected].copy()
     pop.citizen[idx] = pop.uae["nationality_group"][idx] == 0
+    # Explicit native scalar cells only. Missing remittance/payday/adoption cells remain unknown or placeholders.
+    rng = np.random.default_rng(pop.seed ^ 0x5343414C)
+    from .regions import PLATFORMS
+    data = columns(pop, idx)
+    for target in targets:
+        metric = target.get("metric", "population_share")
+        if metric == "population_share":
+            continue
+        mask = np.ones(idx.size, bool) if target["geography"] == "AE" else data["residence_emirate"] == list(EMIRATES).index(target["geography"])
+        for key, value in target["dimensions"].items():
+            if key != "platform":
+                mask &= data[key] == DOMAINS[key].index(value)
+        members = idx[mask]
+        if metric == "remittance_share":
+            pop.uae["remittance_share"][members] = target["fraction"]
+        elif metric == "salary_day":
+            pop.uae["salary_day"][members] = int(target["fraction"])
+        elif metric == "platform_share":
+            platform = target["dimensions"]["platform"]
+            adoption = rng.random(len(members)) < target["fraction"]
+            if platform == "whatsapp":
+                pop.uae["whatsapp"][members] = adoption
+            else:
+                bit = 1 << PLATFORMS.index(platform)
+                pop.platforms[members] = (pop.platforms[members] & np.uint8(255 ^ bit)) | (adoption.astype(np.uint8) * bit)
     pop.provenance["raking_residual"] = float(residual)
     return pop
+
+
+def _failed_fit(pop, original=None):
+    for attribute in pop.provenance["attribute_confidence"].values():
+        attribute.update(status="placeholder", label=LABEL + "; joint fit failed", confidence=0)
+    pop.provenance.update(status="placeholder", label=LABEL + "; joint fit failed")
+    if original:
+        idx, citizens, fields = original
+        pop.citizen[idx] = citizens
+        for key, values in fields.items():
+            pop.uae[key][idx] = values
 
 
 def persona(pop, i):
@@ -247,7 +309,7 @@ def persona(pop, i):
         return {}
     result = {key: domain[int(pop.uae[key][i])] for key, domain in DOMAINS.items() if key in pop.uae}
     share = float(pop.uae["remittance_share"][i])
-    result.update(remittance_share=share if math.isfinite(share) else None, salary_day=None,
+    result.update(remittance_share=share if math.isfinite(share) else None, salary_day=int(pop.uae["salary_day"][i]) or None,
                   languages=[result["language"], "English"] if result["language"] != "English" else ["English"],
                   media_languages=[result["language"]], calendar_memberships=[result["calendar_membership"]],
                   occupation_band=result["income_band"],

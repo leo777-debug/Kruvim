@@ -150,7 +150,8 @@ async def test_creator_dry_workflow(client, auth, monkeypatch):
     from app.services import datapool
     h, _ = auth
     snapshot = {"SA": {"name": "Saudi Arabia", "city": "Riyadh", "brief": "Gaming is topical.", "signals": [
-        {"id": 1, "source": "news", "title": "Gaming competition", "at": utcnow().isoformat()}],
+            {"id": 1, "source": "news", "title": "Gaming competition", "at": utcnow().isoformat(), "source_weight": 1,
+             "provenance": {"production_eligible": True, "source_weight": 1, "source_id": "fixture", "source_name": "Approved test fixture"}}],
         "stale_sources": [{"region": "SA", "source": "news", "age_hours": 9, "stale": True}]}}
     monkeypatch.setattr(datapool, "snapshots_at", AsyncMock(return_value=snapshot))
     assert (await client.put("/my-audience", headers=h, json={"split": {"countries": {"SA": 100}, "genders": {"female": 75, "male": 25}}})).status_code == 200

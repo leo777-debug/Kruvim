@@ -8,9 +8,10 @@ import logging
 import httpx
 from sqlalchemy import or_, select
 
+from app.core.config import settings
 from app.db.session import session_scope
-from app.models import Connector
-from app.services.population.regions import REGIONS
+from app.models import Connector, DataSource
+from app.services.population.regions import CONTEXT_REGIONS
 
 from .base import UA, SignalItem
 from .connectors import REGISTRY
@@ -23,8 +24,11 @@ async def listen(terms: list[str], region_codes: list[str], org_id: str | None, 
     query = " ".join(t for t in terms[:3] if t).strip()
     if not query:
         return []
-    regs = [r for r in REGIONS if r["code"] in region_codes] or REGIONS[:1]
+    regs = [r for r in CONTEXT_REGIONS if r["code"] in region_codes] or CONTEXT_REGIONS[:1]
     async with session_scope() as s:
+        from app.services.sources import eligible, ensure_sources
+        await ensure_sources(s)
+        approved = {r.key for r in (await s.execute(select(DataSource))).scalars() if eligible(r)}
         rows = (await s.execute(select(Connector).where(or_(Connector.org_id.is_(None), Connector.org_id == org_id),
             Connector.key.in_([k for k, c in REGISTRY.items() if c.spec.supports_search])))).scalars().all()
     by_key: dict[str, Connector] = {}
@@ -33,6 +37,8 @@ async def listen(terms: list[str], region_codes: list[str], org_id: str | None, 
             by_key[r.key] = r
 
     async def one(key: str):
+        if settings.env == "production" and key not in approved:
+            return key, []
         row = by_key.get(key)
         if row is not None and not row.enabled:
             return key, []
@@ -63,7 +69,9 @@ async def listen(terms: list[str], region_codes: list[str], org_id: str | None, 
     out = []
     for key, items in results:
         if items:
-            await store_signals(f"{key}_listen", items, org_id, simulation_id)
+            for item in items:
+                item.payload.setdefault("source_key", key)
+            await store_signals(key, items, org_id, simulation_id)
         for i in items:
             out.append(_as_post(key, i))
     out.sort(key=lambda p: -(p.get("engagement") or 0))

@@ -21,7 +21,7 @@ from app.services.datapool import REGISTRY, ensure_platform_connectors, listen, 
 from app.services.datapool.runner import env_secrets, secrets_of, set_secrets
 from app.services.population import get_population
 from app.services.population.calibrate import priors_from_summaries, sniff, summarize
-from app.services.population.regions import REGION_CODES
+from app.services.population.regions import CONTEXT_CODES, REGION_CODES
 
 router = APIRouter(prefix="/datapool", tags=["data pool"])
 
@@ -105,13 +105,17 @@ async def signals(p: Principal = Depends(principal), s: AsyncSession = Depends(g
     visible = (Signal.org_id.is_(None)) | (Signal.org_id == p.org_id)
     q = select(Signal).where(visible, Signal.fetched_at >= since)
     if region:
-        q = q.where(Signal.region.in_([region, "*"]))
+        q = q.where(Signal.region.in_([region, "*", *([c for c in CONTEXT_CODES if c.startswith("AE-")] if region == "AE" else [])]))
     if kind:
         q = q.where(Signal.kind == kind)
     if source:
         q = q.where(Signal.source == source)
     rows = (await s.execute(q.order_by(desc(Signal.fetched_at)).limit(min(limit, 1000)))).scalars().all()
+    from app.services.sources import ensure_sources, signal_source
+    await ensure_sources(s)
+    registered = {r.key: signal_source(r) for r in (await s.execute(select(DataSource))).scalars()}
     return [{"id": x.id, "source": x.source, "kind": x.kind, "region": x.region, "title": x.title, "value": x.value, "url": x.url,
+             "provenance": registered.get(x.source, registered["placeholder_priors"]),
              "lang": x.lang, "observed_at": x.observed_at, "fetched_at": x.fetched_at, "payload": x.payload} for x in rows]
 
 
@@ -130,7 +134,7 @@ async def pool_stats(p: Principal = Depends(principal), s: AsyncSession = Depend
 @router.get("/world")
 async def world(p: Principal = Depends(principal), regions: str = "", at: datetime | None = None,
                 s: AsyncSession = Depends(get_session)):
-    codes = [c for c in regions.split(",") if c in REGION_CODES] or REGION_CODES
+    codes = [c for c in regions.split(",") if c in CONTEXT_CODES] or CONTEXT_CODES
     from app.services.llm import Usage, make_llm
     from app.services.providers import resolve
     from app.services.quotas import ensure_monthly_grant, ledger, reserve
@@ -141,7 +145,7 @@ async def world(p: Principal = Depends(principal), regions: str = "", at: dateti
     try:
         if resolved.metered and not llm.is_dry:
             await ensure_monthly_grant(s, p.org)
-            maximum = 2 * len(codes)
+            maximum = 2 * len(set(codes) | ({c for c in CONTEXT_CODES if c.startswith("AE-")} if "AE" in codes else set()))
             if p.org.credits_balance >= maximum:
                 await reserve(s, p.org_id, maximum, "headline_tone_reserve", reference)
                 held = maximum
@@ -164,7 +168,7 @@ async def listen_route(body: dict, p: Principal = Depends(role("member"))):
     q = str(body.get("query") or "").strip()
     if len(q) < 2:
         raise AppError("Enter a topic to listen for.")
-    regs = [c for c in body.get("regions") or [] if c in REGION_CODES] or ["AE"]
+    regs = [c for c in body.get("regions") or [] if c in CONTEXT_CODES] or ["AE"]
     return await listen(q.split()[:3], regs, p.org_id, per_source=8)
 
 

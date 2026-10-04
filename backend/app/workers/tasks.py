@@ -129,6 +129,7 @@ async def build_graph(ctx, sim_id: str):
         if not sim.publish_at or sim.publish_at >= _now() - timedelta(hours=2):
             from app.services.datapool.targeted import prepare as prepare_targeted
             await prepare_targeted(sim_id, org_id, cards["A"], regions, snaps)
+        snaps, source_checks = datapool.context.weighted_context(snaps)
         for c in cards.values():
             c["trend"] = datapool.trend_alignment(c, snaps)
         content = dict(sim.content)
@@ -136,6 +137,7 @@ async def build_graph(ctx, sim_id: str):
             content["card_b"] = cards["B"]
         cfg = dict(sim.config or {})
         cfg["context"] = snaps
+        cfg["context_source_checks"] = source_checks
         await _set(sim_id, card=cards["A"], content=content, config=cfg)
         await bus.publish(sim_id, "graph.context", {"regions": {k: {kk: v.get(kk) for kk in ("name", "city", "local_time", "weather", "brief", "brief_by")}
                                                                  for k, v in snaps.items()}})

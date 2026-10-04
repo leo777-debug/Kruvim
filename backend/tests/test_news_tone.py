@@ -70,7 +70,8 @@ async def test_each_fallback_step_and_plain_warnings(client):
         assert "estimated from headlines; GDELT unavailable" in fallback["warning"]
         data = {"region": "TN1", "signals": [], "freshness": []}
         apply_tone(data, fallback)
-        assert data["source_weights"]["headline_tone"] == .5
+        assert data["source_weights"]["headline_tone"] == 0  # Pending commercial reuse approval.
+        assert fallback["source_weight"] == .5  # Scoring method confidence is retained separately.
         assert data["stale_sources"][0]["note"] == fallback["warning"]
         s.add(Signal(region="TN1", source="gdelt", kind="tone", value=2, title="News tone", observed_at=at - timedelta(minutes=1), fetched_at=at - timedelta(minutes=1)))
         await s.flush()

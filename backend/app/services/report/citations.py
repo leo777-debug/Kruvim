@@ -89,6 +89,12 @@ async def present_report(s, report, org_id, private=True):
     sim = (await s.execute(select(Simulation).where(Simulation.id == report.simulation_id, Simulation.org_id == org_id))).scalar_one_or_none()
     if sim:
         sections.append({"title": "Audience sources and limitations", "content": notice((sim.config or {}).get("population_provenance"))})
+        checks = (sim.config or {}).get("context_source_checks", [])
+        if checks:
+            sections.append({"title": "Regional data sources", "content": "\n\n".join(
+                f"{item.get('source_name', 'Source pending')} ({item.get('source_url', '')}): "
+                + ("approved reference source" if item.get("production_eligible") else "excluded from prediction weighting; " + item.get("label", "reuse approval pending"))
+                for item in checks)})
     labels = await source_labels(s, report.simulation_id, org_id, [summary, *[x.get("content", "") for x in sections]])
     intro = render_section(summary, labels, private)
     rendered = [{**({"title": clean(x["title"]), "content": x.get("content", "")} if private else {"title": clean(x["title"])}),

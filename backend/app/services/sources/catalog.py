@@ -120,11 +120,35 @@ NEWS = [
     ("khaleej_times", "Khaleej Times", "https://www.khaleejtimes.com/", "https://www.khaleejtimes.com/contact-us", "en", "", "No current publisher RSS endpoint or commercial reuse grant verified. Request an approved feed; do not scrape articles."),
     ("the_national", "The National", "https://www.thenationalnews.com/uae/rss-feeds-1.536712", "https://www.thenationalnews.com/uae/rss-feeds-1.536712", "en", "", "Publisher RSS page says personal use only and requires permission for commercial concerns. Confirm current feed with publisher."),
     ("wam", "Emirates News Agency WAM", "https://www.wam.ae/", "https://www.wam.ae/", "ar", "", "Current public RSS/API and commercial reuse grant not verified. Request permission or import licensed headline metadata manually."),
-    ("al_khaleej", "Al Khaleej", "https://www.alkhaleej.ae/rss", "https://www.alkhaleej.ae/rss", "ar", "", "Publisher RSS directory verified. Select a linked UAE feed after confirming commercial reuse; copyrighted content is not automatically reusable."),
+    ("al_khaleej", "Al Khaleej", "https://www.alkhaleej.ae/rss", "https://www.alkhaleej.ae/rss", "ar", "https://www.alkhaleej.ae/rssFeed/157", "Publisher-linked UAE RSS verified HTTP 200/XML on 2026-10-04. Commercial reuse requires confirmation; copyright is reserved."),
     ("al_bayan", "Al Bayan", "https://www.albayan.ae/", "https://www.albayan.ae/", "ar", "", "Public feed and current reuse terms need confirmation; no article scraping."),
-    ("emarat_al_youm", "Emarat Al Youm", "https://www.emaratalyoum.com/rss-7.951867", "https://www.emaratalyoum.com/rss-7.951867", "ar", "", "RSS landing page verified; exact local-news XML endpoint and commercial permission still need confirmation."),
-    ("gulf_today", "Gulf Today", "https://www.gulftoday.ae/rss", "https://www.gulftoday.ae/rss", "en", "https://www.gulftoday.ae/rssFeed/55/", "Publisher provides public News RSS; commercial reuse not expressly confirmed."),
+    ("emarat_al_youm", "Emarat Al Youm", "https://www.emaratalyoum.com/rss-7.951867", "https://www.emaratalyoum.com/terms-and-condition-1.2033", "ar", "", "RSS landing page links an Ajax layout rather than a verified XML feed. Permission/current feed must be requested; do not scrape the layout or articles."),
+    ("gulf_today", "Gulf Today", "https://www.gulftoday.ae/rss", "https://www.gulftoday.ae/rss", "en", "https://www.gulftoday.ae/rssFeed/55/", "Publisher-linked News RSS verified HTTP 200/XML on 2026-10-04; commercial reuse not expressly confirmed."),
+    ("siraj", "Siraj Gulf / Malayalam", "https://www.sirajlive.com/", "https://www.sirajlive.com/", "ml", "https://www.sirajlive.com/feed", "Public RSS verified HTTP 200/XML on 2026-10-04. Only locally matched UAE headlines are imported. Commercial licence not confirmed; request publisher permission."),
+    ("filipino_times", "The Filipino Times UAE", "https://filipinotimes.net/about/", "https://filipinotimes.net/", "en", "https://filipinotimes.net/feed/", "UAE Filipino publisher RSS verified HTTP 200/XML on 2026-10-04. Commercial permission pending; English headlines have explicit Filipino community targeting, not an invented Tagalog translation."),
 ]
 for key, name, url, terms, lang, feed, notes in NEWS:
     CATALOG.append(source(key, name, name, url, ["regional_headlines", "news_tone"], level="emirate", method="api" if feed else "manual",
         cadence="daily", terms=terms, notes=notes, config={"adapter": "rss", "feed_url": feed, "lang": lang} if feed else {}))
+
+CORE = [
+    ("open_meteo", "Open-Meteo weather", "https://open-meteo.com/en/terms", "Weather data CC BY 4.0; free API service is non-commercial. Commercial API subscription/permission required.", ["weather"]),
+    ("open_meteo_geocoding", "Open-Meteo / GeoNames coordinates", "https://open-meteo.com/en/docs/geocoding-api", "GeoNames data attribution and Open-Meteo service terms apply; confirm commercial service entitlement.", ["weather_coordinates"]),
+    ("google_news", "Google News RSS", "https://news.google.com/", CONFIRM + "; publisher rights still apply", ["regional_headlines"]),
+    ("gdelt", "GDELT DOC news tone", "https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/", CONFIRM, ["news_tone"]),
+    ("headline_tone", "Kruvim headline tone scorer", "https://github.com/leo777-debug/Kruvim/tree/kruvim/backend/app/services/datapool/tone.py", "Derived model estimate; use only licensed upstream headlines and retain their provenance.", ["news_tone"]),
+    ("wikipedia", "Wikimedia pageviews and discovery", "https://wikimediafoundation.org/our-work/open-data/", CONFIRM + "; check pageview data terms separately from article text", ["most_read"]),
+    ("calendar", "Nager.Date public holidays", "https://date.nager.at/", CONFIRM, ["public_holidays"]),
+    ("fx_rates", "ExchangeRate-API open rates", "https://www.exchangerate-api.com/docs/free", CONFIRM + "; attribution and redistribution restrictions need review", ["exchange_rates"]),
+    ("regional_trends", "Google Trends country RSS", "https://trends.google.com/trending", CONFIRM, ["search_trends"]),
+    ("mastodon", "Mastodon instance public posts", "https://docs.joinmastodon.org/", CONFIRM + "; instance and author terms vary", ["social_context"]),
+    ("bluesky", "Bluesky public social context", "https://bsky.social/about/support/tos", CONFIRM, ["social_context"]),
+    ("reddit", "Reddit API social context", "https://redditinc.com/policies/data-api-terms", "Commercial data API permission required; licence to confirm", ["social_context"]),
+    ("youtube", "YouTube Data API", "https://developers.google.com/youtube/terms/api-services-terms-of-service", CONFIRM, ["social_context"]),
+    ("x", "X API", "https://developer.x.com/en/developer-terms/agreement-and-policy", CONFIRM, ["social_context"]),
+    ("community_calendar", "Community festivals, schools and events", "https://u.ae/en/information-and-services/public-holidays-and-religious-affairs", CONFIRM, ["community_calendar", "school_calendar", "events"]),
+    ("publisher_rss", "Registered UAE publisher feed collector", "https://www.alkhaleej.ae/rss", "Individual publisher grants govern each item; collector registration does not license articles", ["regional_headlines"]),
+]
+for key, name, url, licence, attributes in CORE:
+    CATALOG.append(source(key, name, name, url, attributes, country="*", method="api", cadence="daily", licence=licence,
+        notes="Existing connector/public metadata registered for traceability. Confirm resource and service terms before production activation. No upstream statistics are seeded."))

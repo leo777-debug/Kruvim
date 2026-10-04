@@ -474,6 +474,7 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
           {!!r.population_provenance?.attribute_confidence && <p>Placeholder support: {Object.entries(r.population_provenance.attribute_confidence).filter(([, v]: any) => v.status !== "sourced").map(([k]) => k.replaceAll("_", " ")).join(", ")}</p>}
           {r.population_provenance?.conflicts?.map((c: any, i: number) => <p key={i}>Source conflict in {c.geography}: {Object.keys(c.dimensions).join(", ")}. Competing figures retained; uncertainty widened.</p>)}
           {r.population_provenance?.coverage_gaps?.map((g: any, i: number) => <p key={i}>Coverage gap: {g.attribute.replaceAll("_", " ")} — {g.reason}</p>)}
+          {sim.config?.context_source_checks?.map((s: any, i: number) => <p key={s.source_id || i}><a href={s.source_url} target="_blank" rel="noreferrer" className="text-brand hover:underline">{s.source_name || "Source pending"}</a> · {s.production_eligible ? "approved regional source" : "excluded from prediction weighting; " + (s.status === "placeholder" ? "estimate, source pending" : "reuse approval pending")}</p>)}
           {r.agent_memory && <p>Simulated audience memory: {r.agent_memory.returning ?? 0} of {r.agent_memory.voice ?? 0} voice agents were returning; {r.agent_memory.recalled ?? 0} memories recalled.
             {r.agent_memory.fresh ? " Fresh audience was on; history was ignored." : " Fresh audience was off."}
             {!!r.agent_memory.shortfall && ` ${r.agent_memory.shortfall} requested returning places could not be filled within the audience segments.`}</p>}

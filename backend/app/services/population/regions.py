@@ -119,10 +119,24 @@ for _region in REGIONS:
 
 REGION_CODES = [r["code"] for r in REGIONS]
 REGION_INDEX = {r["code"]: i for i, r in enumerate(REGIONS)}
+EMIRATE_CONTEXT = [
+    {**REGIONS[0], "code": "AE-DXB", "country": "AE", "name": "Dubai", "short": "Dubai", "city": "Dubai", "lat": 25.07725, "lon": 55.30927},
+    {**REGIONS[0], "code": "AE-AUH", "country": "AE", "name": "Abu Dhabi", "short": "Abu Dhabi", "city": "Abu Dhabi", "lat": 24.45118, "lon": 54.39696},
+    {**REGIONS[0], "code": "AE-SHJ", "country": "AE", "name": "Sharjah", "short": "Sharjah", "city": "Sharjah", "lat": 25.3342, "lon": 55.41221},
+    {**REGIONS[0], "code": "AE-NE", "country": "AE", "name": "Northern emirates", "short": "Northern emirates", "city": "Ras Al Khaimah (weather proxy)", "lat": 25.78953, "lon": 55.9432},
+]
+# Coordinates were returned by the registered Open-Meteo/GeoNames geocoder on 2026-10-04.
+for _context in EMIRATE_CONTEXT:
+    _context["coordinate_source"] = "open_meteo_geocoding"
+    _context["coordinate_raw_ref"] = "https://geocoding-api.open-meteo.com/v1/search?name=" + {"AE-DXB": "Dubai", "AE-AUH": "Abu%20Dhabi", "AE-SHJ": "Sharjah", "AE-NE": "Ras%20Al%20Khaimah"}[_context["code"]] + "&count=1&language=en&format=json"
+CONTEXT_REGIONS = REGIONS + EMIRATE_CONTEXT
+CONTEXT_CODES = [r["code"] for r in CONTEXT_REGIONS]
 MENA_CODES = ["AE", "SA", "EG", "JO", "MA"]
 
 
 def region(code: str) -> dict:
+    if code.startswith("AE-"):
+        return next(r for r in EMIRATE_CONTEXT if r["code"] == code)
     return REGIONS[REGION_INDEX[code]]
 
 

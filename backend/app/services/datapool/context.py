@@ -11,22 +11,29 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models import CulturalMoment, RegionSnapshot, Signal
+from app.models import CulturalMoment, DataSource, RegionSnapshot, Signal
 from app.services.llm import BaseLLM, Usage
-from app.services.population.regions import REGIONS, region
+from app.services.population.regions import CONTEXT_CODES, EMIRATE_CONTEXT, region
 
 from .runner import run_connector
 from .safety import clean_snapshot, safe_title
 from .tone import select_tone
 
 log = logging.getLogger("kruvim.datapool")
-ON_DEMAND = ["open_meteo", "google_news", "wikipedia", "calendar", "regional_trends"]
+ON_DEMAND = ["open_meteo", "google_news", "publisher_rss", "wikipedia", "calendar", "regional_trends"]
+
+
+def licensed(query):
+    if settings.env == "production":
+        query = query.join(DataSource, Signal.source_id == DataSource.id).where(
+            or_(and_(DataSource.status == "active", DataSource.licence_approved.is_(True), DataSource.reliability > 0), DataSource.status == "placeholder"))
+    return query
 
 
 def _aware(dt: datetime) -> datetime:
@@ -42,12 +49,15 @@ async def _latest(s, region_code: str, kinds: list[str], since: datetime, limit:
     regs = [region_code, "*"] if scope_global else [region_code]
     q = (select(Signal).where(and_(Signal.org_id.is_(None), Signal.region.in_(regs), Signal.kind.in_(kinds), Signal.fetched_at >= since, Signal.fetched_at <= utcnow()))
          .order_by(desc(Signal.fetched_at), desc(Signal.value)).limit(limit))
-    return [x for x in (await s.execute(q)).scalars().all() if safe_title(x.title)]
+    return [x for x in (await s.execute(licensed(q))).scalars().all() if safe_title(x.title)]
 
 
 async def build_snapshot_data(code: str, at: datetime) -> dict:
     from app.services.datapool.retrieval import embed
     async with session_scope() as s:
+        from app.services.sources import ensure_sources, signal_source
+        await ensure_sources(s)
+        registered = {row.id: signal_source(row) for row in (await s.execute(select(DataSource))).scalars()}
         w = await _latest(s, code, ["weather"], at - timedelta(hours=3), 1)
         tone = await select_tone(s, code, at)
         news = await _latest(s, code, ["headline"], at - timedelta(hours=24), 12)
@@ -55,14 +65,19 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         social = await _latest(s, code, ["social_trend"], at - timedelta(hours=24), 12)
         events = await _latest(s, code, ["event"], at - timedelta(hours=36), 5)
         econ = await _latest(s, code, ["economy"], at - timedelta(hours=36), 2)
-        prepared = (await s.execute(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]), Signal.fetched_at <= at,
-            Signal.observed_at <= at, Signal.fetched_at >= at - timedelta(days=2)).order_by(Signal.fetched_at.desc()).limit(200))).scalars().all()
+        prepared = (await s.execute(licensed(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]), Signal.fetched_at <= at,
+            Signal.observed_at <= at, Signal.fetched_at >= at - timedelta(days=2)).order_by(Signal.fetched_at.desc()).limit(200)))).scalars().all()
         prepared = [x for x in prepared if safe_title(x.title) and (x.kind != "social_trend" or x.region == code)]
         moment = (await s.execute(select(CulturalMoment).where(CulturalMoment.region == code,
             CulturalMoment.day == at.replace(hour=0, minute=0, second=0, microsecond=0)))).scalar_one_or_none()
-        series = (await s.execute(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]),
+        series = (await s.execute(licensed(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]),
             Signal.kind.in_(["trend", "social_trend"]), Signal.value.is_not(None), Signal.observed_at <= at,
-            Signal.observed_at >= at - timedelta(days=30)).order_by(Signal.observed_at.desc()).limit(500))).scalars().all()
+            Signal.observed_at >= at - timedelta(days=30)).order_by(Signal.observed_at.desc()).limit(500)))).scalars().all()
+    def metadata(item):
+        provenance = registered.get(item.source_id, {"status": "placeholder", "label": "estimate, source pending", "source_weight": 0})
+        return {"id": item.id, "source": item.source, "source_id": item.source_id, "region": item.region, "language": item.lang,
+                "nationality_groups": item.payload.get("nationality_groups", []), "calendar_membership": item.payload.get("calendar_membership"),
+                "provenance": provenance, "source_weight": provenance["source_weight"]}
     freshness = {}
     for item in prepared:
         if item.kind == "tone":
@@ -81,14 +96,15 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
     data = {
         "region": code, "name": reg["name"], "city": reg["city"], "at": at.isoformat(),
         "local_time": local.strftime("%a %H:%M"), "local_hour": local.hour,
-        "weather": w[0].payload if w else None,
+        "weather": {**w[0].payload, **metadata(w[0])} if w else None,
         "tone": tone,
-        "news": [{"title": x.title, "source": x.payload.get("source", ""), "url": x.url} for x in news],
-        "trending": [{"title": x.title, "views": x.value, "at": x.observed_at.isoformat()} for x in trends],
-        "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url, "at": x.observed_at.isoformat()} for x in social],
-        "events": sorted([{"name": x.title, **x.payload} for x in events], key=lambda e: e.get("days_away") if e.get("days_away") is not None else 999),
-        "economy": [{"title": x.title, "value": x.value} for x in econ],
-        "signals": [{"id": x.id, "source": x.source, "kind": x.kind, "title": x.title,
+        "news": [{"title": x.title, "url": x.url, **metadata(x)} for x in news],
+        "trending": [{"title": x.title, "views": x.value, "at": x.observed_at.isoformat(), **metadata(x)} for x in trends],
+        "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url, "at": x.observed_at.isoformat(), **metadata(x)} for x in social],
+        "events": sorted([{"name": x.title, **x.payload, **metadata(x)} for x in events], key=lambda e: e.get("days_away") if e.get("days_away") is not None else 999),
+        "economy": [{"title": x.title, "value": x.value, **metadata(x)} for x in econ],
+        "source_weights": {x.source: registered.get(x.source_id, {}).get("source_weight", 0) for x in prepared},
+        "signals": [{**metadata(x), "kind": x.kind, "title": x.title,
                      "value": x.value,
                      "embedding": embed(x.title + " " + str(x.payload.get("summary", ""))).tolist(),
                      "summary": str(x.payload.get("summary", ""))[:500], "at": x.observed_at.isoformat(), "url": x.url} for x in prepared],
@@ -108,10 +124,12 @@ def apply_tone(data, tone):
     freshness = [x for x in data.get("freshness", []) if x["source"] not in ("gdelt", "headline_tone")]
     if tone:
         source = tone["tone_source"]
-        data.setdefault("source_weights", {})[source] = tone["source_weight"]
+        weight = tone["source_weight"] * tone.get("provenance", {}).get("source_weight", 0)
+        data.setdefault("source_weights", {})[source] = weight
         title = f"News tone {tone['avg']:+.1f} · {tone['source_label']}"
         data["signals"].append({"id": tone["signal_id"], "source": source, "kind": "tone", "title": title,
-                                "value": tone["avg"], "source_weight": tone["source_weight"], "at": tone["observed_at"],
+                                "value": tone["avg"], "source_weight": weight, "at": tone["observed_at"], "region": data["region"],
+                                "provenance": tone.get("provenance"), "source_id": tone.get("source_id"),
                                 "summary": tone.get("warning") or "Regional article tone", "embedding": embed(title).tolist()})
         freshness.append({"source": "gdelt", "region": data["region"], "age_hours": tone["age_hours"],
                           "stale": bool(tone.get("warning")), "status": "fallback" if tone.get("warning") else "ok",
@@ -172,7 +190,106 @@ async def ensure_fresh(codes: list[str]) -> None:
                     task.cancel()
 
 
+def aggregate_uae(country: dict, emirates: dict[str, dict]) -> dict:
+    """A union of dated evidence, never an invented national average of emirate measurements."""
+    out = {**country, "city": "UAE · all emirates", "weather": None,
+           "weather_by_emirate": {code: data.get("weather") for code, data in emirates.items()},
+           "tone_by_emirate": {code: data.get("tone") for code, data in emirates.items()},
+           "emirates": list(emirates), "brief_by": "template"}
+    for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series", "freshness", "stale_sources"):
+        unique = {}
+        for data in [country, *emirates.values()]:
+            for item in data.get(key, []):
+                identity = (item.get("id"), item.get("region"), item.get("source"), item.get("title", item.get("name")), item.get("at"))
+                unique.setdefault(identity, item)
+        out[key] = list(unique.values())
+    out["source_weights"] = {key: weight for data in [country, *emirates.values()] for key, weight in data.get("source_weights", {}).items()}
+    out["brief"] = " ".join(f"{data['city']}: {data.get('brief', 'Source unavailable')}" for data in emirates.values())
+    return out
+
+
+def weighted_context(snapshots):
+    """The discovery UI may preview pending sources; prediction and graph prompts may not weight them."""
+    out, checks = {}, {}
+    for code, snapshot in snapshots.items():
+        data = dict(snapshot)
+        for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series"):
+            data[key] = []
+            for item in snapshot.get(key, []):
+                provenance = item.get("provenance") or {"status": "placeholder", "label": "estimate, source pending", "source_weight": 0}
+                checks[provenance.get("source_id", item.get("source", "pending"))] = provenance
+                if item.get("source_weight", 0) > 0 and provenance.get("production_eligible"):
+                    data[key].append(item)
+        weather = snapshot.get("weather")
+        if weather:
+            metadata = weather.get("provenance") or {}
+            checks[metadata.get("source_id", "open_meteo")] = metadata
+            if not metadata.get("production_eligible"):
+                data["weather"] = None
+        tone = snapshot.get("tone")
+        if tone and snapshot.get("source_weights", {}).get(tone["tone_source"], 0) <= 0:
+            data["tone"] = None
+        data["cultural_moment"] = "Topics in licensed regional headlines: " + "; ".join(item["title"] for item in data["news"][:3])
+        if "local_time" in data:
+            data["brief"], data["brief_by"] = template_brief(data), "template"
+        out[code] = data
+    if "AE" in out and all(code in out for code in EMIRATE_CONTEXT_CODES):
+        out["AE"] = aggregate_uae(out["AE"], {code: out[code] for code in EMIRATE_CONTEXT_CODES})
+    return out, list(checks.values())
+
+
+EMIRATE_CONTEXT_CODES = [r["code"] for r in EMIRATE_CONTEXT]
+
+
 async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,
+                       org_id: str | None = None, with_briefs: bool = True) -> dict[str, dict]:
+    expanded = list(dict.fromkeys([*codes, *([r["code"] for r in EMIRATE_CONTEXT] if "AE" in codes else [])]))
+    out = await _snapshots_at(expanded, at, llm, usage, org_id, with_briefs)
+    # Hourly caching and archive replay must never preserve a revoked production entitlement.
+    async with session_scope() as s:
+        from app.services.sources import ensure_sources, signal_source
+        await ensure_sources(s)
+        sources = {row.key: signal_source(row) for row in (await s.execute(select(DataSource))).scalars()}
+    for data in out.values():
+        weights = {}
+        for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series"):
+            items = []
+            for item in data.get(key, []):
+                source = item.get("source")
+                metadata = sources.get(source, sources["placeholder_priors"])
+                if item.get("kind") == "tone" and any(not sources.get(k, {}).get("production_eligible") for k in (data.get("tone") or {}).get("upstream_sources", [])):
+                    metadata = {**metadata, "production_eligible": False, "source_weight": 0, "label": "Upstream headline reuse approval pending"}
+                if settings.env == "production" and not metadata["production_eligible"] and metadata["status"] != "placeholder":
+                    continue
+                weight = metadata["source_weight"]
+                if item.get("kind") == "tone":
+                    weight *= (data.get("tone") or {}).get("source_weight", 0)
+                items.append({**item, "provenance": metadata, "source_id": metadata["source_id"], "source_weight": weight})
+                weights[source] = weight
+            data[key] = items
+        data["source_weights"] = weights
+        if data.get("weather"):
+            data["weather"] = {**data["weather"], "provenance": sources["open_meteo"], "source_weight": sources["open_meteo"]["source_weight"]}
+        if settings.env == "production":
+            if data.get("weather") and not sources["open_meteo"]["production_eligible"]:
+                data["weather"] = None
+            if data.get("tone") and (not sources.get(data["tone"]["tone_source"], {}).get("production_eligible") or
+                any(not sources.get(k, {}).get("production_eligible") for k in data["tone"].get("upstream_sources", []))):
+                data["tone"] = None
+                data["signals"] = [item for item in data["signals"] if item.get("kind") != "tone"]
+            if "local_time" in data:
+                data["brief"], data["brief_by"] = template_brief(data), "template"
+    if "AE" in codes:
+        out["AE"] = aggregate_uae(out["AE"], {r["code"]: out[r["code"]] for r in EMIRATE_CONTEXT})
+        if not out["AE"].get("archived") and not out["AE"].get("archive_missing") and org_id is None:
+            async with session_scope() as s:
+                row = (await s.execute(select(RegionSnapshot).where(RegionSnapshot.region == "AE", RegionSnapshot.hour == hour_bucket(utcnow())))).scalar_one_or_none()
+                if row:
+                    row.data, row.brief, row.brief_by = out["AE"], out["AE"]["brief"], "template"
+    return out
+
+
+async def _snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,
                        org_id: str | None = None, with_briefs: bool = True) -> dict[str, dict]:
     """Snapshot per region for the given moment (creates and archives it if needed)."""
     now = utcnow()
@@ -277,10 +394,14 @@ def trend_alignment(card: dict, snaps: dict) -> dict:
                     " ".join(card.get("keywords") or []), " ".join(s.get("text", "")[:400] for s in card.get("segments", []))])
     ct = tokens(bag)
     matches = []
+    seen = set()
     for code, s in snaps.items():
         items = [("news", n["title"]) for n in s.get("news", [])] + [("trending", t["title"]) for t in s.get("trending", [])] \
             + [("social", t["title"]) for t in s.get("social", [])]
         for kind, title in items:
+            if (kind, title) in seen:
+                continue
+            seen.add((kind, title))
             ov = ct & tokens(title)
             if ov:
                 matches.append({"region": code, "kind": kind, "title": title, "overlap": sorted(ov)[:6], "strength": len(ov)})
@@ -315,4 +436,4 @@ def trend_phase(history):
 
 
 def all_codes() -> list[str]:
-    return [r["code"] for r in REGIONS]
+    return list(CONTEXT_CODES)

@@ -14,15 +14,15 @@ from app.core.crypto import decrypt, encrypt
 from app.core.metrics import CONNECTOR_RUNS
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models import Connector, Signal, SignalEmbedding
-from app.services.population.regions import REGIONS
+from app.models import Connector, DataSource, Signal, SignalEmbedding
+from app.services.population.regions import CONTEXT_REGIONS
 
 from .base import UA, MissingCredentials, SignalItem
 from .connectors import REGISTRY
 
 log = logging.getLogger("kruvim.datapool")
 MEASUREMENT_KINDS = {"weather", "tone", "economy"}
-ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password"}
+ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key"}
 
 
 def env_secrets() -> dict:
@@ -58,6 +58,8 @@ def set_secrets(row: Connector, new: dict) -> None:
 
 async def ensure_platform_connectors() -> None:
     async with session_scope() as s:
+        from app.services.sources import ensure_sources
+        await ensure_sources(s)
         have = {c.key for c in (await s.execute(select(Connector).where(Connector.org_id.is_(None)))).scalars()}
         for key, c in REGISTRY.items():
             if key not in have:
@@ -71,20 +73,33 @@ async def store_signals(source: str, items: list[SignalItem], org_id=None, simul
         return 0
     now = utcnow()
     async with session_scope() as s:
+        from app.services.sources import ensure_sources, signal_source
+        await ensure_sources(s)
+        sources = {r.key: r for r in (await s.execute(select(DataSource))).scalars()}
         recent = set()
         texty = [i for i in items if i.kind not in MEASUREMENT_KINDS]
         if texty:
-            rows = (await s.execute(select(Signal.region, Signal.title).where(
-                and_(Signal.source == source, Signal.org_id == org_id, Signal.simulation_id == simulation_id,
+            keys = {i.payload.get("source_key", source) for i in items}
+            rows = (await s.execute(select(Signal.source, Signal.region, Signal.title).where(
+                and_(Signal.source.in_(keys), Signal.org_id == org_id, Signal.simulation_id == simulation_id,
                      Signal.fetched_at >= now - timedelta(hours=24))))).all()
-            recent = {(r, t) for r, t in rows}
+            recent = set(rows)
         n = 0
         for i in items:
-            if i.kind not in MEASUREMENT_KINDS and (i.region, i.title) in recent:
+            key = i.payload.get("source_key", source)
+            if i.kind not in MEASUREMENT_KINDS and (key, i.region, i.title) in recent:
                 continue
-            recent.add((i.region, i.title))
-            signal = Signal(source=source, kind=i.kind, region=i.region, title=i.title[:2000], value=i.value, url=(i.url or "")[:1000] or None,
-                            lang=i.lang, observed_at=i.observed_at or now, fetched_at=now, payload=i.payload, org_id=org_id, simulation_id=simulation_id)
+            recent.add((key, i.region, i.title))
+            registered = sources.get(i.payload.get("source_key", source), sources["placeholder_priors"])
+            metadata = signal_source(registered)
+            if source == "google_news" and registered.status == "placeholder":
+                continue  # An unregistered publisher is not licensed by approving an RSS aggregator.
+            if settings.env == "production" and not metadata["production_eligible"] and registered.status != "placeholder":
+                continue
+            signal = Signal(source=i.payload.get("source_key", source), source_id=registered.id, kind=i.kind, region=i.region,
+                            title=i.title[:2000], value=i.value, url=(i.url or "")[:1000] or None,
+                            lang=i.lang, observed_at=i.observed_at or now, fetched_at=now, payload={**i.payload, "provenance": metadata},
+                            org_id=org_id, simulation_id=simulation_id)
             s.add(signal)
             await s.flush()
             from .retrieval import embed
@@ -104,11 +119,20 @@ async def run_connector(key: str, regions: list[str] | None = None) -> dict:
 
 async def _run_connector(key: str, regions: list[str] | None = None) -> dict:
     conn = REGISTRY[key]
-    regs = [r for r in REGIONS if not regions or r["code"] in regions]
+    regs = [r for r in CONTEXT_REGIONS if not regions or r["code"] in regions]
+    if key == "open_meteo" and any(r["code"].startswith("AE-") for r in regs):
+        regs = [r for r in regs if r["code"] != "AE"]
     async with session_scope() as s:
         row = (await s.execute(select(Connector).where(Connector.org_id.is_(None), Connector.key == key))).scalar_one_or_none()
         cfg = dict(row.config) if row else {}
         secrets = secrets_of(row)
+        from app.services.sources import eligible, ensure_sources
+        await ensure_sources(s)
+        source = (await s.execute(select(DataSource).where(DataSource.key == key))).scalar_one_or_none()
+        if settings.env == "production" and key != "publisher_rss" and (not source or not eligible(source)):
+            if row:
+                row.last_run_at, row.last_status, row.last_error = utcnow(), "skipped", "Source awaits commercial reuse approval in Sources"
+            return {"key": key, "status": "skipped", "items": 0, "error": "Source awaits commercial reuse approval"}
     status, err, n = "ok", None, 0
     try:
         async with httpx.AsyncClient(headers=UA, timeout=15, follow_redirects=True) as client:

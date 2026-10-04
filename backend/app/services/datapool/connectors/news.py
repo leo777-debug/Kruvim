@@ -14,6 +14,9 @@ from email.utils import parsedate_to_datetime
 from ..base import BaseConnector, ConnectorSpec, SignalItem
 
 log = logging.getLogger("kruvim.datapool")
+PUBLISHERS = {"gulf news": "gulf_news", "khaleej times": "khaleej_times", "the national": "the_national",
+              "wam": "wam", "emirates news agency": "wam", "الخليج": "al_khaleej", "البيان": "al_bayan",
+              "الإمارات اليوم": "emarat_al_youm", "gulf today": "gulf_today", "siraj": "siraj", "the filipino times": "filipino_times"}
 
 
 class GoogleNewsConnector(BaseConnector):
@@ -37,13 +40,27 @@ class GoogleNewsConnector(BaseConnector):
             except Exception:
                 when = None
             out.append(SignalItem("headline", region, title, url=item.findtext("link"), observed_at=when,
-                                  payload={"source": source}))
+                                  payload={"source": source, "source_key": PUBLISHERS.get(source.casefold(), "placeholder_priors"),
+                                           "collector": "google_news", "publisher_url": src.get("url") if src is not None else None}))
             if len(out) >= limit:
                 break
         return out
 
     async def fetch(self, client, regions, secrets, config):
         async def one(reg):
+            if reg["code"].startswith("AE-"):
+                from .publisher_rss import MARKERS, geographies
+                out = []
+                for lang in ("en", "ar"):
+                    query = MARKERS[reg["code"]][0 if lang == "en" else next(i for i, text in enumerate(MARKERS[reg["code"]]) if any('\u0600' <= c <= '\u06ff' for c in text))]
+                    response = await client.get("https://news.google.com/rss/search", params={"q": query + " UAE", "hl": lang, "gl": "AE", "ceid": f"AE:{lang}"})
+                    response.raise_for_status()
+                    for item in self._parse(response.content, reg["code"]):
+                        if reg["code"] in geographies(item.title):
+                            item.lang = lang
+                            item.payload.update(geography_match="headline")
+                            out.append(item)
+                return out
             r = await client.get(reg["news_rss"])
             r.raise_for_status()
             items = self._parse(r.content, reg["code"])
@@ -59,7 +76,7 @@ class GoogleNewsConnector(BaseConnector):
     async def search(self, client, query, regions, secrets, config, limit=10):
         reg = regions[0] if regions else {"code": "*", "lang_code": "en"}
         lang = "ar" if reg.get("lang_code") == "ar" else "en"
-        country = reg.get("code", "US")
+        country = reg.get("country", reg.get("code", "US"))
         r = await client.get("https://news.google.com/rss/search", params={"q": query, "hl": lang, "gl": country, "ceid": f"{country}:{lang}"})
         r.raise_for_status()
         items = self._parse(r.content, reg["code"], limit)
@@ -74,17 +91,22 @@ class RegionalTrendsConnector(BaseConnector):
 
     async def fetch(self, client, regions, secrets, config):
         async def one(reg):
-            response = await client.get("https://trends.google.com/trending/rss", params={"geo": reg["code"]})
+            country = reg.get("country", reg["code"])
+            response = await client.get("https://trends.google.com/trending/rss", params={"geo": country})
             response.raise_for_status()
             out = []
             for item in ET.fromstring(response.content).iter("item"):
                 title = (item.findtext("title") or "").strip()
+                if reg["code"].startswith("AE-"):
+                    from .publisher_rss import geographies
+                    if reg["code"] not in geographies(title):
+                        continue
                 traffic = next((x.text or "" for x in item if x.tag.endswith("approx_traffic")), "")
                 match = re.search(r"([\d,.]+)\s*([KM]?)", traffic.upper())
                 value = float(match[1].replace(",", "")) * {"K": 1000, "M": 1000000, "": 1}[match[2]] if match else None
                 if title:
                     out.append(SignalItem("social_trend", reg["code"], title, value=value, url=item.findtext("link"),
-                        payload={"platform": "google_trends", "country": reg["code"], "measurement": "search traffic", "source": "country RSS"}))
+                        payload={"platform": "google_trends", "country": country, "measurement": "search traffic", "source": "country RSS"}))
             return out[:12]
         results = await asyncio.gather(*(one(r) for r in regions), return_exceptions=True)
         return [item for result in results if isinstance(result, list) for item in result]
@@ -103,6 +125,8 @@ class GdeltToneConnector(BaseConnector):
         out = []
         for reg in regions:
             code = reg["code"]
+            if code.startswith("AE-"):
+                continue  # Country tone is not an emirate measurement; local headlines provide the fallback.
             reason = None
             async with _gdelt_lock:
                 if time.time() < _gdelt_state["blocked_until"]:
@@ -195,6 +219,8 @@ class WikipediaConnector(BaseConnector):
     async def fetch(self, client, regions, secrets, config):
         by_lang: dict[str, list[dict]] = {}
         for reg in regions:
+            if reg["code"].startswith("AE-"):
+                continue  # Language-wide attention must not be presented as local emirate readership.
             by_lang.setdefault(reg["wiki_lang"], []).append(reg)
         out = []
         for lang, regs in by_lang.items():

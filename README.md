@@ -1,7 +1,7 @@
 # Kruvim
 
 Kruvim tests a piece of content against a synthetic audience before it is published. It builds a knowledge graph
-around the content, places it in front of a population of one million demographically grounded agents conditioned on
+around the content, places it in front of a population of one million synthetic agents with disclosed demographic assumptions conditioned on
 what is happening in each region right now (weather, news, news tone, holidays, economy, social trends), runs a
 two-platform social simulation, and has an analyst agent write a report you can interrogate.
 
@@ -16,8 +16,8 @@ Content + question ──► 1 Knowledge graph ──► 2 Environment ──►
 
 **Population.** One million agents are rows in NumPy arrays, not running models: age, sex, region, origin, language,
 education, income, OCEAN personality, attitudes, platform use, interests and a heavy-tailed, homophilous follow graph.
-Regional priors are built in and can be calibrated from survey microdata (Arab Barometer, Pew, WVS, census) under
-*Data pool → Survey data*.
+Unloaded regional priors are labelled **estimate, source pending**. Approved native official tables or licensed survey
+microdata can calibrate them under *Data pool → Survey data*. Synthetic counts are never presented as census figures.
 
 **Hybrid swarm.** Calling a language model a million times per test is neither affordable nor necessary.
 
@@ -29,9 +29,9 @@ Regional priors are built in and can be calibrated from survey microdata (Arab B
 | Population | 1,000,000 | A ridge "reaction surface" fitted on the voice agents projects a reaction onto every agent, with bootstrap confidence intervals; an independent-cascade model on the follow graph estimates reach. |
 
 **Live data pool.** Keyless connectors run on a schedule (Open-Meteo, Google News, GDELT tone, Wikipedia attention,
-public holidays, exchange rates, Mastodon and Bluesky trends); Reddit, YouTube, X and Bluesky search work when keys are
-added. Every hour each region's state is archived, so a simulation can be backtested at any past moment and agents see
-the news people actually saw.
+public holidays, exchange rates, Mastodon and Bluesky trends); Reddit, YouTube, X and Bluesky search can use configured keys.
+Commercial source approvals govern production collection and prediction weighting. Every hour each region's available
+state is archived; missing historical coverage is explicit. Agents see only approved evidence, matched to their location and language.
 
 **The five steps** mirror the MiroFish workflow and stream every change to the browser over server-sent events:
 graph deltas, agent reactions, posts and actions, round metrics and the analyst's tool calls. During a run you can
@@ -58,6 +58,20 @@ pause, resume, change pacing, stop early or inject a breaking-news event.
   Rebuild versions record source/observation ids, confidence, conflicts and gaps, and require platform-admin
   activation; previous ready versions can be reactivated. New runs freeze the population version. Method,
   reports and exports disclose assumptions; source uncertainty widening is explicitly a model heuristic.
+* **Emirate context**: `AE-DXB`, `AE-AUH`, `AE-SHJ` and `AE-NE` have separate weather, bilingual news,
+  briefs and hourly archives. Ras Al Khaimah is explicitly the northern-emirates weather proxy; coordinates cite
+  the registered geocoder. `AE` combines the four briefs/evidence sets, without inventing a national weather or
+  tone average. Native local RSS metadata is bounded and matched by emirate; articles are never scraped.
+  Malayalam and Filipino community feeds are registered alongside Arabic/English publishers. Retrieval filters
+  by residence/work emirate, languages, nationality targeting and calendar membership before embedding ranking.
+  Pending sources can be previewed in development but contribute no prediction weight, including through cached
+  snapshots, graph context or learned weights. Production collection also requires publisher/service permission;
+  Open-Meteo requires a paid customer endpoint/key. The source checklist records unresolved grants.
+  Festivals/school terms/major events use approved native `calendar_event`, `school_term` or `regional_event`
+  observations; unloaded dates stay pending. Month-end spending is a labelled model rule, never an asserted payroll date.
+  Explicit native `remittance_share`, `platform_share` and `salary_day` cells can populate those attributes;
+  missing cells remain unknown. An opt-in visitor stock layer is fitted only from an approved resident/visitor
+  stock marginal; tourism arrival flows cannot create it.
 
 ```
             ┌────────────┐   /api (REST + SSE)   ┌──────────────┐   jobs (arq)   ┌──────────────┐

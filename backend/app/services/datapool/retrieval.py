@@ -31,12 +31,43 @@ def rank(signals, query, weights=None, n=5):
     query_vector = embed(query)
     scored = []
     for signal in signals:
+        weight = signal.get("source_weight", (weights or {}).get(signal.get("source"), 1))
+        if weight <= 0:
+            continue
         vec = signal.get("embedding")
         vector = np.asarray(vec, dtype=np.float32) if vec is not None else embed(signal.get("title", "") + " " + signal.get("summary", ""))
-        score = float(vector @ query_vector) * (weights or {}).get(signal.get("source"), 1)
+        score = float(vector @ query_vector) * weight
         scored.append((score, str(signal.get("id", "")), signal))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [{k: v for k, v in x[2].items() if k != "embedding"} for x in scored[:n]]
+
+
+LANGUAGE_CODES = {"Arabic": {"ar"}, "English": {"en"}, "Hindi/Urdu": {"hi", "ur"}, "Malayalam": {"ml"},
+                  "Tagalog": {"tl", "fil"}, "Bengali": {"bn"}, "Other": set()}
+
+
+def personal_match(signal, persona):
+    """Keep local context local and community context with its intended simulated audience."""
+    residence = persona.get("residence_emirate", persona["region"])
+    work = persona.get("work_emirate", residence)
+    geography = signal.get("region", persona["region"])
+    if geography not in ("*", persona["region"], residence, work):
+        return 0.
+    groups = signal.get("nationality_groups") or []
+    if groups and persona.get("nationality_group") not in groups:
+        return 0.
+    membership = signal.get("calendar_membership")
+    if membership and membership not in persona.get("calendar_memberships", []):
+        return 0.
+    languages = persona.get("languages", [persona.get("language", "English")])
+    codes = set().union(*(LANGUAGE_CODES.get(language, {language}) for language in languages))
+    lang = signal.get("language") or signal.get("lang")
+    if lang and lang not in codes:
+        return 0.
+    if signal.get("provenance", {}).get("production_eligible") is False or signal.get("source_weight", 1) <= 0:
+        return 0.
+    primary = LANGUAGE_CODES.get(persona.get("language", "English"), set())
+    return (1.25 if geography == residence else 1.) * (1.2 if lang in primary else 1.)
 
 
 async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
@@ -44,7 +75,8 @@ async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
     signals = {str(x["id"]): x for snap in snapshots.values() for x in snap.get("signals", []) if safe_title(x.get("title", ""))}
     candidates = list(signals.values())[:min(300, 2048 - len(personas))]
     queries = [" ".join(x.get("label", "") for x in p.get("interests", [])) + " " + card.get("title", "") + " " +
-               " ".join(card.get("keywords") or []) + " " + " ".join(p.get("platforms", [])) + f" age {p['age']}" for p in personas]
+               " ".join(card.get("keywords") or []) + " " + " ".join(p.get("platforms", [])) + f" age {p['age']} " +
+               " ".join(str(p.get(k, "")) for k in ("residence_emirate", "nationality_group", "language")) for p in personas]
     texts = [(x.get("title", "") + " " + x.get("summary", ""))[:1500] for x in candidates] + queries
     vectors = [embed(text) for text in texts]
     model, cost = "local-hash-v1", 0.0
@@ -83,8 +115,9 @@ async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
     out = []
     region_ids = {code: {str(x["id"]) for x in snap.get("signals", [])} for code, snap in snapshots.items()}
     for persona, query in zip(personas, vectors[len(candidates):]):
-        candidates_here = [(i, x) for i, x in enumerate(candidates) if str(x["id"]) in region_ids.get(persona["region"], set())]
+        visible_ids = region_ids.get(persona["region"], set()) | region_ids.get(persona.get("residence_emirate"), set()) | region_ids.get(persona.get("work_emirate"), set())
+        candidates_here = [(i, x) for i, x in enumerate(candidates) if str(x["id"]) in visible_ids and personal_match(x, persona)]
         weights = snapshots.get(persona["region"], {}).get("source_weights", {})
-        ranked = sorted(candidates_here, key=lambda pair: (-float(vectors[pair[0]] @ query) * weights.get(pair[1].get("source"), 1), str(pair[1]["id"])))
+        ranked = sorted(candidates_here, key=lambda pair: (-float(vectors[pair[0]] @ query) * weights.get(pair[1].get("source"), pair[1].get("source_weight", 1)) * personal_match(pair[1], persona), str(pair[1]["id"])))
         out.append([{k: v for k, v in signal.items() if k != "embedding"} for _, signal in ranked[:5]])
     return out, {"model": model, "extra_cost_usd": cost, "provider_calls": int(model != "local-hash-v1")}

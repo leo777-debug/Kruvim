@@ -35,10 +35,16 @@ async def check():
                 raise RuntimeError(f"Migration to {revision} failed; no server credentials are printed")
         connection = await asyncpg.connect(scratch.set(drivername="postgresql").render_as_string(hide_password=False), timeout=10)
         try:
-            assert await connection.fetchval("SELECT version_num FROM alembic_version") == "0007"
+            from alembic.config import Config
+            from alembic.script import ScriptDirectory
+            cfg = Config(str(root / "alembic.ini"))
+            cfg.set_main_option("script_location", str(root / "migrations"))
+            assert await connection.fetchval("SELECT version_num FROM alembic_version") == ScriptDirectory.from_config(cfg).get_current_head()
             index = await connection.fetchval("SELECT indexdef FROM pg_indexes WHERE indexname='ix_agent_memories_cosine'")
             assert "hnsw" in index and "vector_cosine_ops" in index
             assert await connection.fetchval("SELECT to_regclass('agent_creator_affinity')")
+            assert await connection.fetchval("SELECT to_regclass('data_sources')")
+            assert await connection.fetchval("SELECT to_regclass('source_observations')")
         finally:
             await connection.close()
         test = '''

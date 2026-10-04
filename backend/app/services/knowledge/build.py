@@ -157,16 +157,20 @@ async def build(sim_id: str, requirement: str, cards: dict, seeds: list[tuple[st
         rk = g.node(f"region:{code}", "region", f"{snap['city']} · {snap['name']}", "Region", snap.get("brief", ""),
                     weather=snap.get("weather"), local_time=snap.get("local_time"), tone=snap.get("tone"))
         for n in snap.get("news", [])[:5]:
-            sk = g.node(f"sig:news:{slug(n['title'])[:80]}", "signal", n["title"], "Headline", n.get("source", ""), url=n.get("url"))
+            sk = g.node(f"sig:news:{slug(n['title'])[:80]}", "signal", n["title"], "Headline", n.get("source", ""), url=n.get("url"),
+                        source_id=n.get("source_id"), source_signal_id=n.get("id"), provenance=n.get("provenance"), language=n.get("language"))
             g.edge(rk, sk, "current_headline", n["title"])
         for t in snap.get("trending", [])[:3]:
-            sk = g.node(f"sig:trend:{slug(t['title'])[:80]}", "signal", t["title"], "Trending", "Most-read page")
+            sk = g.node(f"sig:trend:{slug(t['title'])[:80]}", "signal", t["title"], "Trending", "Most-read page",
+                        source_id=t.get("source_id"), source_signal_id=t.get("id"), provenance=t.get("provenance"))
             g.edge(rk, sk, "trending_in", f"{t['title']} is among the most read pages")
         for e in snap.get("events", [])[:2]:
-            sk = g.node(f"sig:event:{slug(e['name'])}:{code}", "signal", e["name"], "Event", f"in {e.get('days_away')} days")
+            sk = g.node(f"sig:event:{slug(e['name'])}:{code}", "signal", e["name"], "Event", f"in {e.get('days_away')} days",
+                        source_id=e.get("source_id"), source_signal_id=e.get("id"), provenance=e.get("provenance"), observation_id=e.get("observation_id"))
             g.edge(rk, sk, "upcoming", f"{e['name']} in {e.get('days_away')} days")
         for t in snap.get("social", [])[:4]:
-            sk = g.node(f"sig:social:{slug(t['title'])[:80]}", "signal", t["title"], "SocialTrend", t.get("platform") or "")
+            sk = g.node(f"sig:social:{slug(t['title'])[:80]}", "signal", t["title"], "SocialTrend", t.get("platform") or "",
+                        source_id=t.get("source_id"), source_signal_id=t.get("id"), provenance=t.get("provenance"))
             g.edge(rk, sk, "social_trend", f"Trending on {t.get('platform')}")
         for v in cards:
             g.edge(f"content:{v}", rk, "shown_in", f"Content distributed to {snap['name']}")

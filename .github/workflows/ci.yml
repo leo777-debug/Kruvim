@@ -64,6 +64,10 @@ jobs:
         run: alembic upgrade head && alembic downgrade base && alembic upgrade head
       - run: alembic check
       - run: python -m tools.verify_production
+      - name: Upgrade a disposable previous-head database and verify memory and source tables
+        env:
+          KRUVIM_MEMORY_TEST_PG_URL: postgresql://kruvim:kruvim@localhost:5432/kruvim
+        run: python -m tools.verify_memory_postgres
 
   frontend:
     runs-on: ubuntu-latest

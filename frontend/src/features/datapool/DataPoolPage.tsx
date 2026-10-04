@@ -49,22 +49,31 @@ function World() {
             <p dir="auto" className="text-[13px] leading-relaxed">{w.brief}</p>
             <div className="mt-1 text-[11px] text-faint">{w.brief_by === "template" ? "Automatic summary. Connect a model for written briefs." : `Summary by ${w.brief_by}`}</div>
             <KV className="mt-3" rows={[
-              ["News tone", w.tone?.avg != null ? `${w.tone.avg > 0 ? "+" : ""}${w.tone.avg.toFixed(1)}` : "Source unavailable"],
+              ["News tone", w.tone?.avg != null ? `${w.tone.avg > 0 ? "+" : ""}${w.tone.avg.toFixed(1)}` : w.emirates ? "See emirate cards" : "Source unavailable"],
               ["Upcoming", w.events?.length ? w.events.slice(0, 2).map((e: any) => e.days_away == null ? e.name : `${e.name} (${e.days_away} d)`).join(", ") : "Source unavailable"],
               ["Economy", w.economy?.[0]?.title || "–"],
             ]} />
             {w.tone && <p className="mt-1 text-[11px] text-muted">{w.tone.source_label || "GDELT"}</p>}
+            {w.weather && <p className="mt-1 text-[11px] text-muted">{signalLabel(w.weather)}{w.weather.weather_proxy ? " · Ras Al Khaimah weather proxy" : ""}</p>}
+            {w.events?.length > 0 && <div className="mt-2 space-y-1">{w.events.slice(0, 5).map((e: any, i: number) => <p key={i} className="text-[11px] text-muted">{e.name} · {signalLabel(e)}</p>)}</div>}
             <div className="mt-4 text-xs font-medium text-muted">Headlines</div>
-            <ul className="mt-1 space-y-1 text-[13px]">{(w.news || []).slice(0, 4).map((n: any, i: number) => <li key={i} dir="auto" className="line-clamp-1">{n.title} <span className="text-faint">· {n.source}</span></li>)}</ul>
+            <ul className="mt-1 space-y-2 text-[13px]">{(w.news || []).slice(0, 4).map((n: any, i: number) => <li key={i} dir="auto"><span className="line-clamp-2">{n.title}</span><span className="block text-[11px] text-faint">{signalLabel(n)}</span></li>)}</ul>
             {w.trending?.length > 0 && <><div className="mt-3 text-xs font-medium text-muted">Most read</div>
-              <div dir="auto" className="mt-1 text-[13px] text-muted">{w.trending.slice(0, 5).map((t: any) => t.title).join(" · ")}</div></>}
+              <div dir="auto" className="mt-1 space-y-1 text-[13px] text-muted">{w.trending.slice(0, 5).map((t: any, i: number) => <p key={i}>{t.title}<span className="block text-[11px] text-faint">{signalLabel(t)}</span></p>)}</div></>}
             {w.social?.length > 0 && <><div className="mt-3 text-xs font-medium text-muted">Social trends</div>
-              <div className="mt-1 text-[13px] text-muted">{w.social.slice(0, 6).map((t: any) => t.title).join(" · ")}</div></>}
+              <div className="mt-1 space-y-1 text-[13px] text-muted">{w.social.slice(0, 6).map((t: any, i: number) => <p key={i}>{t.title}<span className="block text-[11px] text-faint">{signalLabel(t)}</span></p>)}</div></>}
           </div>
         </Card>
       ))}
     </div>
   );
+}
+
+function signalLabel(signal: any): string {
+  const source = signal.provenance?.source_name || signal.source || "Source pending";
+  const status = signal.provenance?.status === "placeholder" || signal.status === "placeholder" ? " · estimate, source pending"
+    : signal.provenance?.production_eligible === false ? " · reuse approval pending" : "";
+  return `${source}${signal.language || signal.lang ? ` · ${signal.language || signal.lang}` : ""}${status}`;
 }
 
 function Signals() {
@@ -74,7 +83,7 @@ function Signals() {
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-end gap-3 border-b border-line p-3">
-        <Field label="Region" className="w-40"><Select value={f.region || "*"} onChange={(v) => setF({ ...f, region: v === "*" ? "" : v })} options={[{ value: "*", label: "All" }, ...(ref.data?.regions || []).map((r) => ({ value: r.code, label: r.name }))]} /></Field>
+        <Field label="Region" className="w-40"><Select value={f.region || "*"} onChange={(v) => setF({ ...f, region: v === "*" ? "" : v })} options={[{ value: "*", label: "All" }, ...(ref.data?.regions || []).map((r) => ({ value: r.code, label: r.name })), ...(ref.data?.emirates || []).map((r) => ({ value: r.code, label: r.name }))]} /></Field>
         <Field label="Type" className="w-40"><Select value={f.kind || "*"} onChange={(v) => setF({ ...f, kind: v === "*" ? "" : v })} options={["*", "weather", "headline", "tone", "trend", "event", "economy", "social_trend", "social_post"].map((k) => ({ value: k, label: k === "*" ? "All" : k.replace("_", " ") }))} /></Field>
         <Field label="Source" className="w-44"><Select value={f.source || "*"} onChange={(v) => setF({ ...f, source: v === "*" ? "" : v })} options={[{ value: "*", label: "All" }, ...(ref.data?.connectors || []).map((c) => ({ value: c.key, label: c.name }))]} /></Field>
         <Field label="Window" className="w-32"><Select value={String(f.hours)} onChange={(v) => setF({ ...f, hours: Number(v) })} options={[6, 24, 72, 168, 720].map((h) => ({ value: String(h), label: h < 48 ? `${h} hours` : `${h / 24} days` }))} /></Field>
@@ -85,7 +94,7 @@ function Signals() {
           <thead><tr><th>Fetched</th><th>Source</th><th>Type</th><th>Region</th><th>Signal</th><th className="!text-right">Value</th></tr></thead>
           <tbody>{(q.data || []).map((s) => (
             <tr key={s.id}>
-              <td className="num whitespace-nowrap text-muted">{fmt.ago(s.fetched_at)}</td><td className="whitespace-nowrap">{s.source.replace(/_/g, " ")}</td>
+              <td className="num whitespace-nowrap text-muted">{fmt.ago(s.fetched_at)}</td><td className="max-w-60"><span>{s.provenance?.source_name || s.source.replace(/_/g, " ")}</span><p className="text-[11px] text-muted">{s.lang || "Language not supplied"}{s.provenance?.status === "placeholder" ? " · estimate, source pending" : s.provenance?.production_eligible === false ? " · reuse approval pending" : ""}</p></td>
               <td className="whitespace-nowrap capitalize text-muted">{s.kind.replace("_", " ")}</td>
               <td className="whitespace-nowrap"><span className="mr-1.5 inline-block h-2 w-2 rounded-[2px]" style={{ background: REGION_COLORS[s.region] || "#9aa1ac" }} />{s.region}</td>
               <td dir="auto" className="max-w-0 w-full"><span className="block truncate">{s.title}</span></td>
@@ -133,7 +142,7 @@ function Connectors() {
                   </td>
                   <td className="text-muted">{CATEGORY_LABEL[c.category] || c.category}</td>
                   <td>{c.last_status === "ok" ? <Status tone="pos">Healthy</Status> : c.last_status === "error" ? <Status tone="neg">Error</Status>
-                    : c.last_status === "skipped" ? <Status tone="warn">Needs credentials</Status> : <Status>Not run</Status>}
+                    : c.last_status === "skipped" ? <Status tone="warn">Setup pending</Status> : <Status>Not run</Status>}
                     <div className="mt-0.5 text-xs text-muted">{needs ? (hasCreds ? "Credentials set" : "Credentials required") : "No key needed"}{c.supports_search ? " · listening" : ""}</div></td>
                   <td className="whitespace-nowrap text-muted">{c.interval_minutes > 0 ? `Every ${c.interval_minutes >= 60 ? `${c.interval_minutes / 60} h` : `${c.interval_minutes} min`}` : "On demand"}</td>
                   <td className="r whitespace-nowrap text-muted">{fmt.ago(c.last_run_at)}
