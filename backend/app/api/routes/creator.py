@@ -211,6 +211,13 @@ async def my_audience(p: Principal = Depends(principal)):
     return {"profile": (p.org.settings or {}).get("creator_audience"), "memory": (p.org.settings or {}).get("creator_memory", {})}
 
 
+@router.get("/my-audience/agent-memory")
+async def agent_memory_summary(subject: str | None = Query(None, max_length=160), p: Principal = Depends(principal),
+                               s: AsyncSession = Depends(get_session)):
+    from app.services.agent_memory import audience_summary
+    return await audience_summary(s, p.org, subject)
+
+
 @router.put("/my-audience")
 async def save_audience(body: AudienceProfileIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     row = (await s.execute(select(Organization).where(Organization.id == p.org_id).with_for_update())).scalar_one()

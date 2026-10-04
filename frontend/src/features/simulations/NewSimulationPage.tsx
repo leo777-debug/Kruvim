@@ -55,6 +55,7 @@ export default function NewSimulationPage() {
   const [platformTouched, setPlatformTouched] = useState(false);
   const [goal, setGoal] = useState("Grow followers");
   const [followers, setFollowers] = useState("");
+  const [creatorSubject, setCreatorSubject] = useState("workspace");
   const [A, setA] = useState<Variant>(blank());
   const [compare, setCompare] = useState<keyof typeof COMPARE>("none");
   const [B, setB] = useState<Variant>(blank());
@@ -77,6 +78,7 @@ export default function NewSimulationPage() {
     if (!s) return;
     const c = s.content || {};
     setFollowers(c.creator_followers == null ? "" : String(c.creator_followers));
+    setCreatorSubject(c.creator_subject || "workspace");
     setName(s.name); setReq(s.requirement); setFormat(c.format || "short_video"); setPlatform(c.platform || "tiktok"); setPlatformTouched(true); setGoal(c.goal || "");
     setA({ ...blank(), ...c, poll_options: c.poll_options?.length ? c.poll_options : ["", ""], file: null, files: [] });
     if (c.variant_b) { setCompare(c.b_kind === "competitor" ? "competitor" : "version"); setB({ ...blank(), ...c.variant_b, poll_options: c.variant_b.poll_options?.length ? c.variant_b.poll_options : ["", ""] }); }
@@ -88,6 +90,7 @@ export default function NewSimulationPage() {
   const project = useQuery({ queryKey: [orgId, "project", pid], queryFn: () => api(`/projects/${pid}`), enabled: !!pid });
   const templates = useQuery({ queryKey: [orgId, "templates"], queryFn: () => api<any[]>("/audience-templates") });
   const presets = useQuery({ queryKey: [orgId, "audience-presets"], queryFn: () => api<{ id: string; name: string; description: string; filters: Record<string, unknown> }[]>("/audience-presets") });
+  const memory = useQuery({ queryKey: [orgId, "audience-memory", creatorSubject], queryFn: () => api<any>(`/my-audience/agent-memory?subject=${encodeURIComponent("creator:" + creatorSubject)}`) });
   useEffect(() => {
     if (project.data && existing.data) setSeeds((project.data.assets || []).filter((a: Asset) => (existing.data!.content?.seed_asset_ids || []).includes(a.id)));
   }, [project.data, existing.data]);
@@ -145,7 +148,7 @@ export default function NewSimulationPage() {
       const b = compare !== "none" ? await payload(B, "content_b") : null;
       const body = {
         name: name || A.title || A.text.slice(0, 60) || "Untitled simulation", requirement: req,
-        content: { format, platform, goal, creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
+        content: { format, platform, goal, creator_subject: creatorSubject || "workspace", creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
           variant_b: b ? { ...b, title: b.title || `${A.title || "Untitled"} (${compare === "competitor" ? "competitor" : "B"})` } : null },
         audience: cleanAud(aud),
         publish_at: when === "now" || !at ? null : new Date(at).toISOString(),
@@ -255,6 +258,17 @@ export default function NewSimulationPage() {
               label="Match my audience" />
             <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
             <Field label="Audience regions"><RegionPicker value={aud.regions} onChange={(value) => setAud({ ...aud, regions: value })} /></Field>
+            <div className="space-y-3 rounded-md border border-line p-3">
+              <Field label="Creator or channel" hint="Use the same name in each test to retain this creator's simulated audience history.">
+                <Input maxLength={120} value={creatorSubject} onChange={(e) => setCreatorSubject(e.target.value)} placeholder="workspace" />
+              </Field>
+              <Switch checked={!!ov.fresh_audience} onChange={(v) => setOv({ ...ov, fresh_audience: v })} label="Fresh audience (ignore memory)" />
+              <Field label="Returning audience" hint="Share of voice agents who saw this creator before. Segment proportions stay the same; availability may limit the share.">
+                <Input type="number" min={0} max={100} step={5} disabled={!!ov.fresh_audience} value={Math.round((ov.returning_share ?? memory.data?.default_returning_share ?? 0) * 100)}
+                  onChange={(e) => setOv({ ...ov, returning_share: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })} />
+              </Field>
+              <p className="text-xs text-muted">Simulated memories, never real follower data. Both A/B variants use the same memory snapshot.</p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Age range"><div className="flex items-center gap-2"><Input type="number" min={16} max={70} value={aud.age_min} onChange={(e) => setAud({ ...aud, age_min: Number(e.target.value) })} />
                 <span className="text-[13px] text-muted">to</span><Input type="number" min={16} max={70} value={aud.age_max} onChange={(e) => setAud({ ...aud, age_max: Number(e.target.value) })} /></div></Field>

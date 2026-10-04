@@ -142,3 +142,24 @@ async def test_later_recall_workspace_isolation_fresh_and_budget(auth):
     ranked = ranked_memories(rows, np.asarray(vec), now)
     assert [m["id"] for m in ranked] == ["recent", "old", "unrelated"]
     assert ranked_memories(rows, vec, now, budget=1) == []
+
+
+def test_returning_panel_preserves_exact_segment_counts():
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from app.services.interaction.selection import returning_panel
+    pop = SimpleNamespace(n=200, region=np.repeat([0, 1], 100), male=np.tile(np.repeat([0, 1], 50), 2), age_band=np.zeros(200, dtype=int))
+    baseline = np.array([0, 1, 2, 3, 50, 51, 100, 101, 150, 151])
+    mask = np.ones(200, dtype=bool)
+    old = list(range(30)) + list(range(50, 80)) + list(range(100, 130)) + list(range(150, 180))
+    keys = lambda ids: (pop.region[ids] * 2 + pop.male[ids]) * 5 + pop.age_band[ids]  # noqa: E731
+    panel, report = returning_panel(pop, mask, baseline, old, .6, np.random.default_rng(7))
+    assert sorted(keys(panel)) == sorted(keys(baseline)) and len(set(panel)) == len(baseline)
+    assert report["returning"] == 6
+    fresh, report = returning_panel(pop, mask, baseline, old, 0, np.random.default_rng(7))
+    assert not set(fresh) & set(old) and report["returning"] == 0
+    scarce, report = returning_panel(pop, mask, baseline, [0], .6, np.random.default_rng(7))
+    assert report["returning"] == 1 and report["shortfall"] == 5
+    assert sorted(keys(scarce)) == sorted(keys(baseline))

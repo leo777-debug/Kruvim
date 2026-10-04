@@ -27,6 +27,7 @@ class ContentIn(VariantIn):
     platform: str = "tiktok"
     goal: str = Field(default="", max_length=300)
     creator_followers: int | None = Field(default=None, ge=0, le=2_000_000_000)   # only used to scale reach to real people
+    creator_subject: str = Field(default="workspace", min_length=1, max_length=120)
     seed_asset_ids: list[str] = Field(default_factory=list, max_length=20)
     variant_b: VariantIn | None = None
     b_kind: Literal["version", "competitor"] = "version"                      # A/B test or benchmark against a competitor's content
@@ -80,6 +81,8 @@ class OverridesIn(BaseModel):
     platforms: list[Literal["feed", "forum"]] = Field(default_factory=lambda: ["feed", "forum"])
     listening: bool = True
     seed: int | None = None
+    returning_share: float | None = Field(default=None, ge=0, le=1)
+    fresh_audience: bool = False
 
 
 class SimulationCreate(BaseModel):

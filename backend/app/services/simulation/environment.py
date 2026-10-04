@@ -107,6 +107,24 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         voice_idx, _ = weighted_sample(pop, mask, d["voice"], rng, audience["follower_split"])
     else:
         voice_idx = stratified_sample(pop, mask, d["voice"], rng)
+    from datetime import timedelta
+
+    from app.db.base import utcnow
+    from app.models import AgentCreatorAffinity
+    from app.services.agent_memory import creator_subject
+    from app.services.interaction.selection import returning_panel
+    from app.services.quotas import plan
+    fresh_audience = bool((sim.config or {}).get("overrides", {}).get("fresh_audience"))
+    async with session_scope() as s:
+        returning_refs = (await s.execute(select(AgentCreatorAffinity.population_ref).where(AgentCreatorAffinity.org_id == org_id,
+            AgentCreatorAffinity.subject == creator_subject(sim), AgentCreatorAffinity.familiarity > .1,
+            AgentCreatorAffinity.last_seen_at >= utcnow() - timedelta(days=plan(org).get("memory_retention_days", 90))))).scalars().all()
+    returning_ids = [int(ref[2:]) for ref in returning_refs if ref.startswith("p:") and ref[2:].isdigit()]
+    requested = (sim.config or {}).get("overrides", {}).get("returning_share")
+    share = 0 if fresh_audience else float(requested if requested is not None else .6 if returning_ids else 0)
+    voice_idx, panel = returning_panel(pop, mask, voice_idx, returning_ids, share, rng)
+    if fresh_audience:
+        creator_memory = ""
     personas = [pop.persona(int(i)) for i in voice_idx]
     from app.services.datapool.retrieval import prepare_retrieval
     retrieved, retrieval_usage = await prepare_retrieval(org_id, personas, card, context, llm, usage)
@@ -144,7 +162,8 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     memory_snapshot = await attach_snapshot(org_id, sim_id, card,
         [(f"p:{int(i)}", p) for i, p in zip(voice_idx, personas, strict=True)] +
         [(f"s:{''.join(ch for ch in str(st.get('handle') or st['name']).lower() if ch.isalnum() or ch == '_')[:20] or f'acct{k}'}", st)
-         for k, st in enumerate(stakes)], fresh=bool((sim.config or {}).get("overrides", {}).get("fresh_audience")))
+         for k, st in enumerate(stakes)], fresh=fresh_audience)
+    memory_snapshot.update(panel)
     await progress(f"{len(stakes)} stakeholder accounts from the knowledge graph", 0.45)
 
     # model-generated configuration

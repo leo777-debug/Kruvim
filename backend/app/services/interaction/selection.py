@@ -1,9 +1,43 @@
 import hashlib
 import math
 
+import numpy as np
 from sqlalchemy import select
 
 from app.models import SimAgent
+
+
+def returning_panel(pop, mask, baseline, returning_ids, share, rng):
+    """Retain the baseline's exact region/gender/age quotas; prefer returners inside each."""
+    baseline = np.asarray(baseline, dtype=np.int64)
+    pool = np.flatnonzero(mask)
+    returning = np.asarray(sorted(set(returning_ids)), dtype=np.int64)
+    returning = returning[(returning >= 0) & (returning < pop.n)]
+    returning = returning[mask[returning]]
+    keys = lambda idx: (pop.region[idx].astype(int) * 2 + pop.male[idx]) * 5 + pop.age_band[idx]  # noqa: E731
+    groups, quotas = np.unique(keys(baseline), return_counts=True)
+    desired = min(len(baseline), round(len(baseline) * share))
+    raw = quotas * share
+    allocation = np.floor(raw).astype(int)
+    for i in np.argsort(-(raw - allocation), kind="stable")[:desired - int(allocation.sum())]:
+        allocation[i] += 1
+    out, actual = [], 0
+    pool_keys = keys(pool)
+    for group, count, requested in zip(groups, quotas, allocation, strict=True):
+        members = pool[pool_keys == group]
+        old = members[np.isin(members, returning)]
+        fresh = members[~np.isin(members, returning)]
+        n_old = min(int(requested), len(old))
+        # Fill scarce fresh slots with returning people, documenting the achieved share.
+        n_old = max(n_old, int(count) - len(fresh))
+        n_new = int(count) - n_old
+        out.extend(rng.choice(old, n_old, replace=False).tolist())
+        out.extend(rng.choice(fresh, n_new, replace=False).tolist())
+        actual += n_old
+    result = np.asarray(out, dtype=np.int64)
+    rng.shuffle(result)
+    return result, {"requested_share": share, "returning": actual, "voice": len(baseline),
+        "achieved_share": actual / max(1, len(baseline)), "available_returning": len(returning), "shortfall": max(0, desired - actual)}
 
 
 def summary_calls(n):

@@ -276,3 +276,19 @@ async def detail_memory(sim, ref, persona):
         return {"label": LABEL, "fresh": fresh, "recalled": recalled, "affinity": decayed(affinity, now) if affinity else None,
             "memories": [{"id": m.id, "kind": m.kind, "text": m.text, "subject": m.subject, "importance": m.importance,
                 "created_at": m.created_at.isoformat(), "source_simulation_id": m.source_simulation_id} for m in rows]}
+
+
+async def audience_summary(s, org, subject=None):
+    now = utcnow()
+    query = select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == org.id,
+        AgentCreatorAffinity.last_seen_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)))
+    if subject:
+        subject = "creator:" + slug(subject.removeprefix("creator:"))[:120]
+        query = query.where(AgentCreatorAffinity.subject == subject)
+    rows = (await s.execute(query)).scalars().all()
+    states = [decayed(row, now) for row in rows]
+    mean = lambda key: round(float(np.mean([x[key] for x in states])), 3) if states else 0  # noqa: E731
+    return {"label": LABEL, "subject": subject, "agents": len({r.population_ref for r in rows}), "familiarity": mean("familiarity"),
+        "affinity": mean("affinity"), "fatigue": mean("fatigue"), "fatigue_warning": mean("fatigue") >= .5,
+        "default_returning_share": .6 if rows else 0, "subjects": sorted({r.subject for r in rows}),
+        "retention_days": plan(org).get("memory_retention_days", 90), "cap_per_agent": plan(org).get("memory_cap_per_agent", 60)}
