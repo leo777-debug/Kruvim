@@ -1,0 +1,219 @@
+{
+  "baseline": {
+    "runs": 20,
+    "passed": 1,
+    "target_failures": 13,
+    "seeds": [
+      {
+        "seed": 100,
+        "passed": false,
+        "seconds": 360.68
+      },
+      {
+        "seed": 101,
+        "passed": false,
+        "seconds": 151.38
+      },
+      {
+        "seed": 102,
+        "passed": false,
+        "seconds": 290.4
+      },
+      {
+        "seed": 103,
+        "passed": false,
+        "seconds": 290.75
+      },
+      {
+        "seed": 104,
+        "passed": false,
+        "seconds": 289.99
+      },
+      {
+        "seed": 105,
+        "passed": false,
+        "seconds": 290.47
+      },
+      {
+        "seed": 106,
+        "passed": false,
+        "seconds": 289.18
+      },
+      {
+        "seed": 107,
+        "passed": false,
+        "seconds": 291.32
+      },
+      {
+        "seed": 108,
+        "passed": false,
+        "seconds": 309.11
+      },
+      {
+        "seed": 109,
+        "passed": false,
+        "seconds": 94.13
+      },
+      {
+        "seed": 110,
+        "passed": false,
+        "seconds": 320.07
+      },
+      {
+        "seed": 111,
+        "passed": false,
+        "seconds": 295.25
+      },
+      {
+        "seed": 112,
+        "passed": false,
+        "seconds": 311.66
+      },
+      {
+        "seed": 113,
+        "passed": false,
+        "seconds": 62.95
+      },
+      {
+        "seed": 114,
+        "passed": false,
+        "seconds": 63.93
+      },
+      {
+        "seed": 115,
+        "passed": true,
+        "seconds": 95.34
+      },
+      {
+        "seed": 116,
+        "passed": false,
+        "seconds": 318.22
+      },
+      {
+        "seed": 117,
+        "passed": false,
+        "seconds": 297.17
+      },
+      {
+        "seed": 118,
+        "passed": false,
+        "seconds": 80.91
+      },
+      {
+        "seed": 119,
+        "passed": false,
+        "seconds": 67.56
+      }
+    ]
+  },
+  "after_fix": {
+    "runs": 20,
+    "passed": 20,
+    "consecutive_passes": 20,
+    "tests_per_run": 57,
+    "test_executions": 1140,
+    "parallel_processes": 3,
+    "seeds": [
+      {
+        "seed": 200,
+        "passed": true,
+        "seconds": 174.72
+      },
+      {
+        "seed": 201,
+        "passed": true,
+        "seconds": 174.45
+      },
+      {
+        "seed": 202,
+        "passed": true,
+        "seconds": 164.15
+      },
+      {
+        "seed": 203,
+        "passed": true,
+        "seconds": 203.25
+      },
+      {
+        "seed": 204,
+        "passed": true,
+        "seconds": 197.23
+      },
+      {
+        "seed": 205,
+        "passed": true,
+        "seconds": 201.56
+      },
+      {
+        "seed": 206,
+        "passed": true,
+        "seconds": 201.29
+      },
+      {
+        "seed": 207,
+        "passed": true,
+        "seconds": 200.85
+      },
+      {
+        "seed": 208,
+        "passed": true,
+        "seconds": 198.15
+      },
+      {
+        "seed": 209,
+        "passed": true,
+        "seconds": 178.4
+      },
+      {
+        "seed": 210,
+        "passed": true,
+        "seconds": 174.42
+      },
+      {
+        "seed": 211,
+        "passed": true,
+        "seconds": 180.68
+      },
+      {
+        "seed": 212,
+        "passed": true,
+        "seconds": 176.85
+      },
+      {
+        "seed": 213,
+        "passed": true,
+        "seconds": 176.73
+      },
+      {
+        "seed": 214,
+        "passed": true,
+        "seconds": 178.61
+      },
+      {
+        "seed": 215,
+        "passed": true,
+        "seconds": 178.57
+      },
+      {
+        "seed": 216,
+        "passed": true,
+        "seconds": 181.47
+      },
+      {
+        "seed": 217,
+        "passed": true,
+        "seconds": 184.62
+      },
+      {
+        "seed": 218,
+        "passed": true,
+        "seconds": 132.81
+      },
+      {
+        "seed": 219,
+        "passed": true,
+        "seconds": 131.14
+      }
+    ]
+  }
+}

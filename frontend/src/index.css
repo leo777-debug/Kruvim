@@ -1,0 +1,114 @@
+@import "tailwindcss";
+@media (max-width: 639px) {
+  .card { min-width: 0; max-width: 100%; overflow-x: auto; }
+  .account-table, .account-table tbody { display: block; width: 100%; }
+  .account-table thead { display: none; }
+  .account-table tr { display: block; padding: 12px; border-bottom: 1px solid rgb(var(--line)); }
+  .account-table td { display: block; white-space: normal; padding: 6px 0; max-width: 100%; overflow-wrap: anywhere; }
+  .account-table td::before { content: attr(data-label); display: block; font-size: 11px; color: rgb(var(--muted)); margin-bottom: 4px; }
+}
+@config "../tailwind.config.ts";
+
+@utility num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "cv11"; }
+@utility mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.92em; }
+
+@layer base {
+  /* Light is the default. Neutral greys, one blue accent, semantic colours reserved for data. */
+  :root {
+    --bg: 246 247 249;
+    --side: 250 250 251;
+    --panel: 255 255 255;
+    --raised: 243 244 246;
+    --line: 228 230 235;
+    --line-strong: 206 210 217;
+    --fg: 17 24 39;
+    --muted: 82 91 107;
+    --faint: 132 140 154;
+    --brand: 33 85 205;
+    --brand-fg: 255 255 255;
+    --brand-soft: 234 240 253;
+    --pos: 22 128 74;
+    --neg: 196 50 38;
+    --warn: 176 104 12;
+    --info: 33 85 205;
+    --graph-bg: #fbfbfc;
+    --graph-grid: rgba(17, 24, 39, 0.045);
+    --graph-label: #1f2937;
+    --graph-edge: rgba(75, 85, 99, 0.22);
+    color-scheme: light;
+  }
+  .dark {
+    --bg: 16 17 19;
+    --side: 20 21 24;
+    --panel: 24 25 28;
+    --raised: 32 34 38;
+    --line: 42 44 49;
+    --line-strong: 60 63 70;
+    --fg: 234 235 238;
+    --muted: 158 163 172;
+    --faint: 110 115 124;
+    --brand: 99 141 242;
+    --brand-fg: 255 255 255;
+    --brand-soft: 30 40 64;
+    --pos: 82 183 126;
+    --neg: 235 104 92;
+    --warn: 226 162 72;
+    --info: 99 141 242;
+    --graph-bg: #141518;
+    --graph-grid: rgba(255, 255, 255, 0.04);
+    --graph-label: #d6d8dd;
+    --graph-edge: rgba(156, 163, 175, 0.22);
+    color-scheme: dark;
+  }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss03";
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  h1, h2, h3 { letter-spacing: -0.011em; }
+  ::selection { background: rgb(var(--brand) / 0.18); }
+  *:focus-visible { outline: 2px solid rgb(var(--brand) / 0.55); outline-offset: 1px; border-radius: 4px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgb(var(--line-strong)); border-radius: 10px; border: 3px solid rgb(var(--bg)); }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  /* Numbers use the text face with tabular figures; monospace is only for identifiers and code. */
+  .eyebrow { @apply text-xs font-medium text-muted; }
+  .section-title { @apply text-[13px] font-semibold text-fg; }
+  .card { @apply rounded-lg border border-line bg-panel shadow-panel; }
+  .hairline { @apply border-line; }
+  .dot-grid {
+    background-image: linear-gradient(var(--graph-grid) 1px, transparent 1px), linear-gradient(90deg, var(--graph-grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, rgb(var(--raised)) 0%, rgb(var(--line)) 50%, rgb(var(--raised)) 100%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded;
+  }
+  /* data tables */
+  .dt { @apply w-full text-[13px]; }
+  .dt thead th { @apply sticky top-0 z-[1] border-b border-line bg-raised px-3 py-2 text-left text-xs font-medium text-muted; }
+  .dt tbody td { @apply border-b border-line px-3 py-2 align-middle; }
+  .dt tbody tr:last-child td { @apply border-b-0; }
+  .dt tbody tr.hoverable:hover td { @apply bg-raised/60 cursor-pointer; }
+  .dt .r { @apply text-right num; }
+
+  .prose-report { @apply text-[14.5px] leading-7 text-fg; }
+  .prose-report h1 { @apply text-xl font-semibold mb-3; }
+  .prose-report h2 { @apply text-base font-semibold mt-8 mb-2 pb-1.5 border-b border-line; }
+  .prose-report h3 { @apply text-sm font-semibold mt-5 mb-1.5; }
+  .prose-report p { @apply my-3; }
+  .prose-report ul { @apply list-disc pl-5 my-3 space-y-1; }
+  .prose-report ol { @apply list-decimal pl-5 my-3 space-y-1; }
+  .prose-report blockquote { @apply border-l-2 border-line-strong pl-4 my-4 text-muted; }
+  .prose-report strong { @apply font-semibold text-fg; }
+  .prose-report code { @apply mono bg-raised px-1 py-0.5 rounded; }
+  .prose-report table { @apply w-full text-[13px] my-4 border border-line; }
+  .prose-report th { @apply text-left text-muted font-medium bg-raised border-b border-line px-3 py-1.5; }
+  .prose-report td { @apply border-b border-line px-3 py-1.5; }
+}

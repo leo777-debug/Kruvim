@@ -1,0 +1,81 @@
+# Kruvim production-style stack.  cp .env.example .env  &&  docker compose up -d --build
+# Scale simulation throughput:      docker compose up -d --scale worker=4
+name: kruvim
+
+x-backend: &backend
+  build: ./backend
+  env_file: .env
+  environment:
+    KRUVIM_ENV: production
+    KRUVIM_DATABASE_URL: postgresql+asyncpg://kruvim:${POSTGRES_PASSWORD:-kruvim}@postgres:5432/kruvim
+    KRUVIM_REDIS_URL: redis://redis:6379/0
+    KRUVIM_DATA_DIR: /data
+  volumes:
+    - kruvim-data:/data
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: kruvim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kruvim}
+      POSTGRES_DB: kruvim
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kruvim -d kruvim"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+    command: ["api"]
+    expose: ["8000"]
+
+  worker:
+    <<: *backend
+    command: ["worker"]
+    healthcheck:
+      disable: true
+
+  connector-worker:
+    <<: *backend
+    entrypoint: ["arq", "app.workers.connectors.ConnectorWorkerSettings"]
+    healthcheck:
+      disable: true
+
+  web:
+    build: ./frontend
+    ports: ["${KRUVIM_HTTP_PORT:-8080}:80"]
+    depends_on: [api]
+    restart: unless-stopped
+
+  # Optional local model server:  docker compose --profile local-llm up -d
+  # then in Kruvim choose the "Ollama (local)" preset with base URL http://ollama:11434/v1
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    volumes: [ollama:/root/.ollama]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  kruvim-data:
+  ollama:
