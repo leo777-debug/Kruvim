@@ -197,6 +197,10 @@ deploying outside your computer; the supplied Compose secret is explicitly a loc
 
 ### Reliability and smoke checks
 
+Event streams release their authorization transaction before streaming. Browser
+disconnects close subscriptions and shield database cleanup from cancellation,
+so an abandoned stream cannot strand a connection needed by a background run.
+
 Every model request has bounded provider attempts/backoff, a concurrency limit and an overall deadline.
 Malformed JSON is repaired once; failed reaction/activity calls use deterministic simulated fallbacks,
 counted under Results → Method. A fallback is not a measured model answer. Workflow stages have a maximum

@@ -67,6 +67,67 @@ async def test_browser_seed_pool_does_not_cross_event_loops(tmp_path):
     await asyncio.to_thread(verify)
 
 
+async def test_disconnected_stream_finishes_database_cleanup(monkeypatch, tmp_path):
+    """AnyIO level cancellation must not strand a pooled transaction on SSE close."""
+    import anyio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import session as database
+    engine = create_async_engine('sqlite+aiosqlite:///' + (tmp_path / 'disconnect.db').as_posix(), pool_size=1, max_overflow=0)
+    async with engine.begin() as connection:
+        await connection.execute(text('CREATE TABLE cleanup (value INTEGER)'))
+    monkeypatch.setattr(database, 'SessionLocal', async_sessionmaker(engine, expire_on_commit=False))
+    try:
+        for scoped in (False, True):
+            with anyio.CancelScope() as disconnected:
+                if scoped:
+                    async with database.session_scope() as session:
+                        await session.execute(text('INSERT INTO cleanup VALUES (1)'))
+                        disconnected.cancel()
+                        await anyio.lowlevel.checkpoint()
+                else:
+                    dependency = database.get_session()
+                    session = await anext(dependency)
+                    await session.execute(text('INSERT INTO cleanup VALUES (1)'))
+                    disconnected.cancel()
+                    await dependency.aclose()
+            assert engine.pool.checkedout() == 0
+            with anyio.fail_after(2):
+                async with engine.begin() as connection:
+                    assert (await connection.execute(text('SELECT count(*) FROM cleanup'))).scalar() == 0
+                    await connection.execute(text('INSERT INTO cleanup VALUES (2)'))
+                    await connection.execute(text('DELETE FROM cleanup'))
+    finally:
+        await engine.dispose()
+
+
+async def test_event_stream_releases_authorisation_connection(client, auth):
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from app.api.routes.simulations import events
+    from app.db.session import SessionLocal, engine
+    from app.services.events import bus
+    h, account = auth
+    project = (await client.post('/projects', headers=h, json={'name': 'Streaming'})).json()
+    sim = (await client.post(f"/projects/{project['id']}/simulations", headers=h,
+        json={'content': {'type': 'text', 'text': 'Streaming fixture'}})).json()
+    request = Request({'type': 'http', 'headers': []})
+    await bus.publish(sim['id'], 'graph.progress', {'message': 'Fixture'})
+    before = engine.pool.checkedout()
+    async with SessionLocal() as session:
+        response = await events(sim['id'], request, SimpleNamespace(org_id=account['orgs'][0]['id']), session)
+        assert engine.pool.checkedout() == before
+        assert not session.in_transaction()
+        assert b'graph.progress' in (await anext(response.body_iterator)).encode()
+        assert len(bus._local[sim['id']]) == 1
+        await response.body_iterator.aclose()
+        assert not bus._local[sim['id']]
+        assert engine.pool.checkedout() == before
+
+
 async def test_api_watchdog_runs_without_workers_and_stops_on_shutdown(monkeypatch):
     import asyncio
     from unittest.mock import AsyncMock

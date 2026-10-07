@@ -288,18 +288,23 @@ async def control(sim_id: str, body: ControlIn, p: Principal = Depends(role("mem
 async def events(sim_id: str, request: Request, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session),
                  after: int = 0, follow: bool = True):
     await get_sim(s, p, sim_id)
+    # Authorise once, then release the request transaction before a long-lived
+    # stream. Replay uses short independent sessions, never this connection.
+    await s.close()
     last = request.headers.get("last-event-id")
     start_after = int(last) if last and last.isdigit() else after
 
     async def gen():
-        async for msg in bus.stream(sim_id, start_after, follow=follow):
-            if await request.is_disconnected():
-                return
-            if msg == "":
-                yield ": keep-alive\n\n"
-                continue
-            seq = json.loads(msg)["seq"]
-            yield f"id: {seq}\ndata: {msg}\n\n"
+        from contextlib import aclosing
+        # StreamingResponse already listens for disconnects. A second receive
+        # consumer can cancel middleware work while it is closing DB cursors.
+        async with aclosing(bus.stream(sim_id, start_after, follow=follow)) as stream:
+            async for msg in stream:
+                if msg == "":
+                    yield ": keep-alive\n\n"
+                    continue
+                seq = json.loads(msg)["seq"]
+                yield f"id: {seq}\ndata: {msg}\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

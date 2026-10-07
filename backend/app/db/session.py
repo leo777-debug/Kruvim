@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -26,13 +27,21 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    async with SessionLocal() as s:
+    s = SessionLocal()
+    try:
         yield s
+    finally:
+        # StreamingResponse cancels its AnyIO scope when a browser disconnects.
+        # Level cancellation can interrupt even asyncio.shield() in SQLAlchemy's
+        # context manager, stranding a SQLite transaction/connection.
+        with anyio.CancelScope(shield=True):
+            await s.close()
 
 
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
-    async with SessionLocal() as s:
+    s = SessionLocal()
+    try:
         try:
             yield s
             # A timed-out/replaced worker must never commit into a newer execution.
@@ -53,5 +62,9 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
                     raise asyncio.CancelledError("This workflow execution was replaced or expired")
             await s.commit()
         except BaseException:
-            await s.rollback()
+            with anyio.CancelScope(shield=True):
+                await s.rollback()
             raise
+    finally:
+        with anyio.CancelScope(shield=True):
+            await s.close()
