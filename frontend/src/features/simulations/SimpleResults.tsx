@@ -39,13 +39,17 @@ export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
       const hook = r.rewrites?.hook?.text;
       const first = sim.card?.segments?.[0]?.text;
       const original = String(sim.content[field] || "");
-      const changes = hook ? { [field]: first && original.includes(first) ? original.replace(first, hook) : `${hook} ${original}` } : {};
-      const next = await api<Simulation>(`/simulations/${sim.id}/clone`, { json: { mode: "edit", changes, build: !!hook } });
-      if (!hook && fix) {
-        await api(`/simulations/${next.id}`, { method: "PATCH", json: { requirement: `${sim.requirement || ""}\nCheck this improvement: ${fix.title}. ${fix.detail}`.slice(0, 4000) } });
-        toast.info("Your draft is ready. Apply the suggested fix, then press Test it.");
-      }
-      nav(hook ? `/simulations/${next.id}` : `/simulations/${next.id}/edit`);
+      const automatic = !!(hook && original && !sim.content.asset_id && !sim.content.asset_ids?.length);
+      const changes = automatic ? { [field]: first && original.includes(first) ? original.replace(first, hook) : `${hook} ${original}` } : {};
+      const next = await api<Simulation>(`/simulations/${sim.id}/clone`, { json: { mode: "rerun", build: false } });
+      await api(`/simulations/${next.id}`, {method: "PATCH", json: {
+        name: `${sim.name} · improved`.slice(0, 200),
+        content: {...sim.content, ...changes, variant_b: null},
+        requirement: fix ? `${sim.requirement || ""}\nCheck this improvement: ${fix.title}. ${fix.detail}`.slice(0, 4000) : sim.requirement,
+      }});
+      if (automatic) await api(`/simulations/${next.id}/autopilot`, {method: "POST"});
+      else toast.info("Your draft is ready. Apply the suggested fix to your content, then press Test it.");
+      nav(automatic ? `/simulations/${next.id}` : `/simulations/${next.id}/edit`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not create a re-test"); }
     finally { setBusy(false); }
   }

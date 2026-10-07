@@ -57,11 +57,11 @@ export default function AllRunsPage({ simple = false }: { simple?: boolean }) {
     <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-muted">{fmt.n(q.data?.total || 0)} runs</span><Segmented value={view} onChange={setView} options={[{value:"cards",label:"Cards"},{value:"table",label:"Table"}]} /></div>
     {q.error ? <Empty title="Could not load runs">{q.error instanceof Error ? q.error.message : "Please try again."}</Empty> : q.isLoading ? <Skeleton className="h-48" /> : !rows.length ? <Empty title="No runs match">Try widening your filters.</Empty> : view === "cards" ?
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{rows.map((r) => <Link to={`/simulations/${r.id}`} key={r.id} className="card min-w-0 p-4 transition-colors hover:bg-raised">
-        <div className="mb-2 flex flex-wrap gap-2"><Badge tone={r.status === "completed" ? "pos" : r.status === "failed" ? "neg" : "outline"}>{label(r.status)}</Badge>{r.dry && <Badge>Dry run</Badge>}</div>
+        <div className="mb-2 flex flex-wrap gap-2"><Badge tone={r.status === "completed" ? "pos" : r.status === "failed" ? "neg" : "outline"}>{simple && ["building_graph", "graph_ready", "preparing"].includes(r.status) ? "Preparing" : label(r.status)}</Badge>{r.dry && <Badge>Dry run</Badge>}</div>
         <h2 className="break-words font-semibold">{r.name}</h2><p className="mt-1 truncate text-xs text-muted">{r.project_name}</p>
         <p className="mt-3 text-xs text-muted">{r.format ? ref.data?.formats.find((f) => f.key === r.format)?.label || label(r.format) : r.content_type} · {platformName(r.platform)}</p>
         <div className="mt-3 flex items-center justify-between text-sm"><span className="num">{r.score != null ? `${fmt.s1(r.score)}/10` : "Unscored"}</span><span className="text-xs text-muted">{fmt.date(r.created_at)}</span></div>
-        <p className="mt-2 text-xs text-muted">Review: {label(r.review_status || "none")}</p>
+        {(!simple || filters) && <p className="mt-2 text-xs text-muted">Review: {label(r.review_status || "none")}</p>}
       </Link>)}</div> : <Card className="overflow-x-auto"><table className="dt min-w-[720px]"><thead><tr><th>Run</th><th>Project</th><th>Platform / format</th><th>Status</th><th>Score</th><th>Review</th><th>Created</th></tr></thead><tbody>{rows.map((r) => <tr key={r.id}>
         <td><Link className="font-medium text-brand" to={`/simulations/${r.id}`}>{r.name}</Link></td><td>{r.project_name}</td><td>{platformName(r.platform)} · {label(r.format || r.content_type)}</td><td>{label(r.status)}</td><td>{r.score != null ? fmt.s1(r.score) : "–"}</td><td>{label(r.review_status || "none")}</td><td>{fmt.date(r.created_at)}</td>
       </tr>)}</tbody></table></Card>}

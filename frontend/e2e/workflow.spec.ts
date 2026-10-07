@@ -45,6 +45,14 @@ test("short video completes, report opens and an interview is selected", async (
   await expect(page).toHaveURL(new RegExp(`simulations/${sid}.*agent=`));
   await expect(page.getByPlaceholder("Ask anything, in any language…")).toBeVisible();
   await noOverflow(page);
+  await page.getByRole("button", {name: "Back to simple view", exact: true}).click();
+  await page.getByRole("button", {name: "Results", exact: true}).click();
+  const copyRequest = page.waitForRequest((request) => request.url().endsWith("/clone") && request.method() === "POST");
+  await page.getByRole("button", {name: "Re-test with this fix", exact: true}).click();
+  expect((await copyRequest).postDataJSON()).toEqual({mode: "rerun", build: false});
+  await expect(page).toHaveURL(/simulations\/[a-f0-9]+\/edit/);
+  await expect(page.getByLabel(/Transcript, subtitles or script/)).toHaveValue(/Make breakfast in one minute/);
+  await noOverflow(page);
   for (const route of ["/", "/tests", "/my-audience", "/data-pool", "/projects", "/settings", "/help"]) {
     await page.goto(route);
     await expect(page.locator("h1").first()).toBeVisible();
