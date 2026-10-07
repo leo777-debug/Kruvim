@@ -152,3 +152,11 @@ CORE = [
 for key, name, url, licence, attributes in CORE:
     CATALOG.append(source(key, name, name, url, attributes, country="*", method="api", cadence="daily", licence=licence,
         notes="Existing connector/public metadata registered for traceability. Confirm resource and service terms before production activation. No upstream statistics are seeded."))
+
+# Only the aggregate pageview dataset is covered; no Wikipedia article text is collected.
+for entry in CATALOG:
+    if entry["key"] == "wikipedia":
+        entry.update(status="active", licence_approved=True,
+            licence="Wikimedia aggregate analytics/pageview data: CC0 1.0. Article text has separate terms and is not imported.",
+            terms_url="https://analytics.wikimedia.org/",
+            notes="Publisher analytics portal explicitly dedicates its data to CC0. Verified 2026-10-07. Titles and aggregate counts only; retain safety and geographic checks.")

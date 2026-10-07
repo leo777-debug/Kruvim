@@ -13,7 +13,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select
 
-from app.api.routes import auth, collab, creator, datapool, monitoring, platform, projects, runs, sharing, simulations, workspace
+from app.api.routes import (
+    analytics,
+    auth,
+    collab,
+    creator,
+    datapool,
+    monitoring,
+    platform,
+    projects,
+    runs,
+    sharing,
+    simulations,
+    workspace,
+)
 from app.core import errors
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -56,6 +69,20 @@ async def lifespan(app: FastAPI):
     setup_logging(json_logs=settings.env != "development")
     await _bootstrap()
     scheduler = None
+    watcher = None
+    if settings.env != 'test':
+        import asyncio
+
+        async def watch_loop():
+            from app.services.watchdog import check
+            while True:
+                try:
+                    await check()
+                except Exception:
+                    log.exception('run watchdog failed')
+                await asyncio.sleep(30)
+        # The API can recover runs even when every worker is unavailable.
+        watcher = asyncio.create_task(watch_loop())
     if not settings.redis_url and settings.env != "test":
         import asyncio
 
@@ -64,6 +91,11 @@ async def lifespan(app: FastAPI):
         async def loop():
             memory_day = None
             while True:
+                try:
+                    from app.services.watchdog import check
+                    await check()
+                except Exception:
+                    log.exception("run watchdog failed")
                 try:
                     await run_due()
                     from app.services.datapool.archive import compress_old
@@ -96,6 +128,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if watcher:
+            watcher.cancel()
+            from contextlib import suppress
+            with suppress(asyncio.CancelledError):
+                await watcher
         if scheduler:
             scheduler.cancel()
             from contextlib import suppress
@@ -112,7 +149,7 @@ def create_app() -> FastAPI:
                        allow_headers=["*"], expose_headers=["x-request-id"])
     app.add_middleware(RequestContextMiddleware)
     errors.install(app)
-    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router):
+    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router):
         app.include_router(r, prefix="/api/v1")
     app.add_api_route("/healthz", platform.healthz, include_in_schema=False)
     app.add_api_route("/readyz", platform.readyz, include_in_schema=False)

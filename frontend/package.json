@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test:navigation": "node tools/test-navigation.mjs",
+    "test:e2e": "playwright test",
     "lint": "eslint src"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",

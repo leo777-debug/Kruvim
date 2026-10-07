@@ -37,12 +37,47 @@ async def prepare():
     if os.environ.get("KRUVIM_VERIFY_MEMORY") == "1":
         from tools.memory_fixture import prepare as memory_fixture
         await memory_fixture()
+    # Seeding runs under asyncio.run(), before uvicorn creates its own event loop.
+    # Never transfer a live async connection pool between those loops: a busy
+    # browser can otherwise wait on the seed loop's closed queue.
+    from app.db.session import engine
+    await engine.dispose()
 
 
 if __name__ == "__main__":
+    from contextlib import asynccontextmanager, suppress
+
     import uvicorn
+
+    from app.main import app
+    from app.services import jobs
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def verification_lifespan(application):
+        async def diagnose():
+            while True:
+                await asyncio.sleep(30)
+                for job, task in list(jobs._local_tasks.items()):
+                    awaited, stack = task.get_coro(), []
+                    while awaited and len(stack) < 18:
+                        frame = getattr(awaited, 'cr_frame', None) or getattr(awaited, 'gi_frame', None)
+                        if frame:
+                            stack.append(f'{frame.f_code.co_name}:{frame.f_lineno}')
+                        awaited = getattr(awaited, 'cr_await', None) or getattr(awaited, 'gi_yieldfrom', None)
+                    print(f'Verification pending job {job}: {" > ".join(stack)}', flush=True)
+        async with original_lifespan(application):
+            diagnostic = asyncio.create_task(diagnose())
+            try:
+                yield
+            finally:
+                diagnostic.cancel()
+                with suppress(asyncio.CancelledError):
+                    await diagnostic
+    app.router.lifespan_context = verification_lifespan
     datapool.run_due = AsyncMock(return_value=[])
     context.ensure_fresh = AsyncMock()
     targeted.prepare = AsyncMock()
     asyncio.run(prepare())
-    uvicorn.run("app.main:app", host="127.0.0.1", port=int(os.environ.get("KRUVIM_VERIFY_PORT", "8000")), access_log=False)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("KRUVIM_VERIFY_PORT", "8000")), access_log=False)

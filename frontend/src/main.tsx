@@ -27,7 +27,7 @@ createRoot(document.getElementById("root")!).render(
         <BrowserRouter>
           <App />
         </BrowserRouter>
-        <Toaster position="bottom-right" toastOptions={{ className: "!bg-panel !border-line !text-fg !shadow-pop !rounded-md !text-[13px]" }} />
+        <Toaster position="top-right" closeButton toastOptions={{ className: "!bg-panel !border-line !text-fg !shadow-pop !rounded-md !text-[13px]" }} />
       </RTooltip.Provider>
     </QueryClientProvider>
   </StrictMode>,

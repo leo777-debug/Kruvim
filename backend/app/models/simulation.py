@@ -40,6 +40,8 @@ class Simulation(IdMixin, TimestampMixin, Base):
     credits_charged: Mapped[int] = mapped_column(Integer, default=0)
     report_status: Mapped[str] = mapped_column(String(24), default="none")   # none | queued | running | done | failed
     job_id: Mapped[str | None] = mapped_column(String(64))
+    job_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
+    execution_token: Mapped[str | None] = mapped_column(String(32))
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -203,6 +205,7 @@ class PerformanceReport(IdMixin, TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(32), default="")
     variant: Mapped[str] = mapped_column(String(1), default="A", server_default="A")
     social_post_id: Mapped[str | None] = mapped_column(ForeignKey("social_posts.id", ondelete="SET NULL"), unique=True)
+    analytics_post_id: Mapped[str | None] = mapped_column(ForeignKey('imported_analytics_posts.id', ondelete='SET NULL'), unique=True)
     views: Mapped[int | None] = mapped_column(Integer)
     likes: Mapped[int | None] = mapped_column(Integer)
     shares: Mapped[int | None] = mapped_column(Integer)

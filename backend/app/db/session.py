@@ -35,7 +35,23 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as s:
         try:
             yield s
+            # A timed-out/replaced worker must never commit into a newer execution.
+            from app.services.watchdog import job_lease
+            lease = job_lease.get()
+            if lease:
+                import asyncio
+
+                from sqlalchemy import select
+
+                from app.models import Simulation
+                token = (await s.execute(select(Simulation.execution_token).where(Simulation.id == lease[0]).with_for_update())).scalar_one_or_none()
+                if token != lease[1]:
+                    import logging
+                    logging.getLogger('kruvim.jobs').warning('Discarding writes from a replaced workflow execution',
+                        extra={'simulation_id': lease[0]})
+                    await s.rollback()
+                    raise asyncio.CancelledError("This workflow execution was replaced or expired")
             await s.commit()
-        except Exception:
+        except BaseException:
             await s.rollback()
             raise

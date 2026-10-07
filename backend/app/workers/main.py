@@ -3,6 +3,8 @@
 Scale horizontally by running more worker containers; each handles `KRUVIM_WORKER_MAX_JOBS` jobs."""
 from __future__ import annotations
 
+import os
+
 from arq import cron
 from arq.connections import RedisSettings
 
@@ -35,7 +37,14 @@ async def consolidate_agent_memory(ctx):
     return await consolidate()
 
 
+async def watch_runs(ctx):
+    from app.services.watchdog import check
+    return await check()
+
+
 class WorkerSettings:
+    health_check_interval = 30
+    health_check_key = f"kruvim:worker:{os.getenv('HOSTNAME', 'local')}:health"
     functions = [tasks.build_graph, tasks.prepare_environment, tasks.run_simulation, tasks.generate_report, tasks.run_survey,
                  tasks.refresh_datapool, tasks.monitoring_tick, tasks.run_connector, tasks.build_population, tasks.resume_autopilot]
     cron_jobs = [cron(tasks.refresh_datapool, minute=set(range(0, 60, 10)), run_at_startup=True, unique=True),
@@ -43,8 +52,10 @@ class WorkerSettings:
                  cron(sync_analytics, minute=set(range(3, 60, 10)), unique=True)]
     cron_jobs.append(cron(maintain_archive, minute=15, unique=True))
     cron_jobs.append(cron(consolidate_agent_memory, hour=2, minute=30, unique=True))
+    cron_jobs.append(cron(watch_runs, minute=set(range(60)), unique=True, run_at_startup=True))
     redis_settings = RedisSettings.from_dsn(settings.redis_url or "redis://localhost:6379")
     max_jobs = settings.worker_max_jobs
     job_timeout = 6 * 3600
+    allow_abort_jobs = True
     keep_result = 3600
     on_startup = startup

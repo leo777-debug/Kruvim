@@ -8,11 +8,12 @@ from pydantic import BaseModel, Field, model_validator
 class FollowerSplit(BaseModel):
     countries: dict[str, float] = Field(default_factory=dict, max_length=250)
     ages: dict[str, float] = Field(default_factory=dict, max_length=20)
+    cities: dict[str, float] = Field(default_factory=dict, max_length=250)
     genders: dict[Literal["female", "male", "unknown"], float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_percentages(self):
-        for name in ("countries", "ages", "genders"):
+        for name in ("countries", "ages", "genders", "cities"):
             values = getattr(self, name)
             if values and (any(not math.isfinite(v) or v < 0 or v > 100 for v in values.values()) or abs(sum(values.values()) - 100) > 1):
                 raise ValueError(f"{name}: enter percentages adding to 100 (within 1%).")
