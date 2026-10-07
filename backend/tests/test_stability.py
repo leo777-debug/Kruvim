@@ -136,3 +136,10 @@ async def test_agent_failure_falls_back_without_failing_run(client, auth, monkey
     result = (await client.get(f"/simulations/{sim['id']}", headers=h)).json()
     assert result["status"] == "completed", result.get("error")
     assert result["results"]["reliability"]["fallback_calls"] >= 10
+    assert result["progress"]["quick_read"]["sample_size"] == 5
+    assert result["progress"]["quick_read"]["preliminary"] is True
+    from app.models import SimEvent
+    async with session_scope() as s:
+        events = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim['id']).order_by(SimEvent.seq))).scalars().all()
+    types = [event.type for event in events]
+    assert types.index('simulation.quick_read') < types.index('simulation.completed')

@@ -19,6 +19,7 @@ import { InteractionStep } from "./steps/InteractionStep";
 import { ReportStep } from "./steps/ReportStep";
 import { SimulationStep } from "./steps/SimulationStep";
 import { useSimulationStream } from "./useSimulationStream";
+import { SimpleResults } from "./SimpleResults";
 
 const STEPS = [
   { n: 1, key: "graph", label: "Knowledge graph", sub: "Entities and live context" },
@@ -56,6 +57,7 @@ export default function SimulationPage() {
   const graphRef = useRef<GraphHandle>(null);
   const [step, setStep] = useState<number | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  const [technical, setTechnical] = useState(false);
   const [selected, setSelected] = useState<GNode | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GEdge | null>(null);
   const [agentRef, setAgentRef] = useState<string | null>(null);
@@ -70,9 +72,7 @@ export default function SimulationPage() {
   const refetch = useCallback(() => { qc.invalidateQueries({ queryKey: [orgId, "sim", simId] }); }, [qc, orgId, simId]);
   const stream = useSimulationStream(simId, graphRef, (t) => {
     refetch();
-    if (t === "graph.completed") toast.success("Knowledge graph ready");
-    if (t === "env.completed") toast.success("Environment ready");
-    if (t === "simulation.completed") { toast.success("Simulation complete. The analyst is writing the report."); setStep((current) => current === 3 ? 4 : current); }
+    if (t === "simulation.completed") { toast.success("Your audience has finished. Writing your results."); setStep((current) => current === 3 ? 4 : current); }
     if (t === "report.completed") toast.success("Report ready");
     if (t.endsWith(".failed")) toast.error("A step failed. See the details on the page.");
   });
@@ -136,9 +136,11 @@ export default function SimulationPage() {
   }
 
   const showGraph = cur <= 3;
+  if (!technical) return <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6"><div className="mb-5 flex flex-wrap items-start justify-between gap-3"><h1 className="min-w-0 break-words text-xl font-semibold">{sim.name}</h1><Button onClick={() => setTechnical(true)}>See how it works</Button></div><div className="mb-5 flex flex-wrap gap-2"><Button onClick={() => setStep(4)}>Results</Button><Button disabled={reach < 5} onClick={() => setStep(5)}>Interviews</Button>{sim.status === "completed" && <Button onClick={() => { setTechnical(true); setStep(4); }}>Details</Button>}</div>{cur === 5 && reach === 5 ? <InteractionStep sim={sim} stream={stream} /> : <SimpleResults sim={sim} stream={stream} refetch={refetch} onAgent={setAgentRef} onDetails={() => { setTechnical(true); setStep(4); }} />}<AgentSheet simId={sim.id} agentRef={agentRef} onClose={() => setAgentRef(null)} onChat={() => { setAgentRef(null); setStep(5); }} /></div>;
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-line bg-panel px-4 pt-4 sm:px-6">
+        <Button size="sm" className="mb-3" onClick={() => setTechnical(false)}>Back to simple view</Button>
         <div className="flex items-center gap-1.5 text-[13px] text-muted">
           <Link to="/projects" className="hover:text-fg">Projects</Link><ChevronRight className="h-3 w-3" />
           <Link to={`/projects/${sim.project_id}`} className="max-w-[240px] truncate hover:text-fg">{project.data?.name ?? "Project"}</Link><ChevronRight className="h-3 w-3" />

@@ -22,6 +22,7 @@ class VariantIn(BaseModel):
 
 
 class ContentIn(VariantIn):
+    source_url: str | None = Field(default=None, max_length=2000)
     type: ContentType = "text"
     format: str | None = Field(default=None, max_length=40)                   # see services/content/formats.py
     platform: str = "tiktok"

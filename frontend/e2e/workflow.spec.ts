@@ -21,29 +21,21 @@ test("short video completes, report opens and an interview is selected", async (
   await page.goto(path + "/new");
   await expect(page.getByRole("heading", { name: /New simulation|New test/ })).toBeVisible();
   await page.getByLabel(/Transcript, subtitles or script/).fill("Make breakfast in one minute. Mix yogurt and oats, add banana, and enjoy. Follow for another simple recipe tomorrow.");
+  await expect(page.getByRole("heading", {name: "Depth", exact: true})).toHaveCount(0);
+  await page.getByRole("button", {name: "More options", exact: true}).click();
+  await expect(page.getByRole("heading", {name: "Depth", exact: true})).toBeVisible();
+  await page.getByRole("button", {name: "More options", exact: true}).click();
   const quick = page.getByRole("button", { name: "Quick", exact: true });
   if (await quick.count()) await quick.click();
   // The original editor and simple mode expose the same primary action.
   await page.getByRole("button", { name: /Create.*build|Test it/ }).click();
   await expect(page).toHaveURL(/simulations\/[a-f0-9]+/);
   const sid = new URL(page.url()).pathname.split("/").at(-1)!;
-  // Complete legacy manual steps when the simple autopilot is not enabled yet.
-  const advanced = page.getByRole("button", { name: "See how it works", exact: true });
-  if (await advanced.count()) await advanced.click();
-  const nextEnv = page.getByRole("button", { name: /Environment/ }).first();
-  if (!(await advanced.count())) {
-    await expect(nextEnv).toBeVisible();
-    await expect(nextEnv).toBeEnabled();
-    await nextEnv.click();
-    const build = page.getByRole("button", { name: /Prepare environment/ });
-    await expect(build).toBeVisible();
-    await build.click();
-    const start = page.getByRole("button", { name: /Start simulation/ });
-    await expect(start).toBeEnabled();
-    await start.click();
-  }
+  await expect(page.getByRole("button", { name: "See how it works", exact: true })).toBeVisible();
   const interviews = page.getByRole("button", { name: /^.*Interviews/ }).first();
   await expect(interviews).toBeEnabled({ timeout: 120_000 });
+  await expect(page.getByLabel("Verdict")).toBeVisible();
+  await page.getByRole("button", { name: "Details", exact: true }).first().click();
   await page.getByRole("button", { name: /^.*Results/ }).first().click();
   await page.getByRole("button", { name: "Analyst report", exact: true }).click();
   await expect(page.locator(".prose-report h1")).toBeVisible();
@@ -53,7 +45,7 @@ test("short video completes, report opens and an interview is selected", async (
   await expect(page).toHaveURL(new RegExp(`simulations/${sid}.*agent=`));
   await expect(page.getByPlaceholder("Ask anything, in any language…")).toBeVisible();
   await noOverflow(page);
-  for (const route of ["/", "/my-audience", "/data-pool", "/projects", "/settings"]) {
+  for (const route of ["/", "/tests", "/my-audience", "/data-pool", "/projects", "/settings", "/help"]) {
     await page.goto(route);
     await expect(page.locator("h1").first()).toBeVisible();
     await noOverflow(page);

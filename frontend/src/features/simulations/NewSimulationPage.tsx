@@ -12,7 +12,7 @@ import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Swit
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useReference } from "@/lib/queries";
-import type { Asset, Format, Simulation } from "@/lib/types";
+import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
 import { cn, fmt } from "@/lib/utils";
 
 const DEPTH = {
@@ -40,7 +40,7 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
   );
 }
 
-export default function NewSimulationPage() {
+export default function NewSimulationPage({ home = false }: { home?: boolean }) {
   const { projectId, simId } = useParams();
   const nav = useNavigate();
   const ref = useReference();
@@ -71,6 +71,11 @@ export default function NewSimulationPage() {
   const [ov, setOv] = useState<any>({ ...DEPTH.quick, platforms: ["feed", "forum"], listening: true });
   const [count, setCount] = useState<{ n: number; regions: Record<string, number> } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [more, setMore] = useState(false);
+  const [link, setLink] = useState("");
+  const [linkNote, setLinkNote] = useState("");
+  const createdProject = useRef<string>();
+  const recent = useQuery({ queryKey: [orgId, "recent-tests"], queryFn: () => api<SimSummary[]>("/simulations?limit=6"), enabled: home });
   const f: Format | undefined = formats.find((x) => x.key === format);
   const type = f?.type || "video";
 
@@ -109,11 +114,20 @@ export default function NewSimulationPage() {
     if (nf && !platformTouched) setPlatform(nf.platform);
   }
 
+  async function ensureProject(): Promise<string> {
+    if (pid) return pid;
+    if (createdProject.current) return createdProject.current;
+    const projects = await api<{ id: string; name: string }[]>("/projects");
+    const project = projects.find((p) => p.name === "My tests") || await api<{ id: string }>("/projects", { json: { name: "My tests" } });
+    createdProject.current = project.id;
+    return project.id;
+  }
+
   async function upload(file: File, kind: string): Promise<Asset> {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("kind", kind);
-    return api<Asset>(`/projects/${pid}/assets`, { method: "POST", body: fd });
+    return api<Asset>(`/projects/${await ensureProject()}/assets`, { method: "POST", body: fd });
   }
 
   function validate(v: Variant, label: string): string | null {
@@ -145,19 +159,20 @@ export default function NewSimulationPage() {
     if (!aud.regions.length) return toast.error("Select at least one region.");
     setBusy(true);
     try {
+      const projectId = await ensureProject();
       const a = await payload(A, "content");
       const b = compare !== "none" ? await payload(B, "content_b") : null;
       const body = {
-        name: name || A.title || A.text.slice(0, 60) || "Untitled simulation", requirement: req,
-        content: { format, platform, goal, creator_subject: creatorSubject || "workspace", creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
+        name: name || A.title || A.text.slice(0, 60) || A.transcript.slice(0, 60) || A.file?.name || "Untitled test", requirement: req,
+        content: { format, platform, goal, source_url: link || undefined, creator_subject: creatorSubject || "workspace", creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
           variant_b: b ? { ...b, title: b.title || `${A.title || "Untitled"} (${compare === "competitor" ? "competitor" : "B"})` } : null },
         audience: cleanAud(aud),
         publish_at: when === "now" || !at ? null : new Date(at).toISOString(),
         overrides: ov,
       };
       const sim = edit ? await api<Simulation>(`/simulations/${simId}`, { method: "PATCH", json: body })
-        : await api<Simulation>(`/projects/${pid}/simulations`, { json: body });
-      if (build) await api(`/simulations/${sim.id}/graph`, { method: "POST" });
+        : await api<Simulation>(`/projects/${projectId}/simulations`, { json: body });
+      if (build) await api(`/simulations/${sim.id}/autopilot`, { method: "POST" });
       nav(`/simulations/${sim.id}`);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Could not save");
@@ -169,9 +184,10 @@ export default function NewSimulationPage() {
   const advancedCount = aud.professions.length + aud.incomes.length + Object.keys(aud.ocean).length + (aud.expats_only ? 1 : 0) + (aud.citizens_only ? 1 : 0);
 
   return (
-    <Page title={edit ? "Edit simulation" : "New simulation"} wide
+    <Page title={home ? "Home" : edit ? "Edit test" : "New test"} wide
       breadcrumb={<><Link to="/projects" className="hover:text-fg">Projects</Link> / {pid ? <Link to={`/projects/${pid}`} className="hover:text-fg">{project.data?.name || "…"}</Link> : "…"}</>}>
-      {!edit && (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">{home ? "Test something" : "What would you like to test?"}</h2><Button aria-expanded={more} onClick={() => setMore(!more)}>More options</Button></div>
+      {!edit && more && (
         <ol className="mb-5 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
           {[["1", "Describe the test", "What you are posting, who should see it and what you want to learn."],
             ["2", "Kruvim builds the world", "A knowledge graph, an audience of agents and this moment's news and trends."],
@@ -183,9 +199,9 @@ export default function NewSimulationPage() {
           ))}
         </ol>
       )}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className={cn("grid gap-5", more && "xl:grid-cols-[minmax(0,1fr)_340px]")}>
         <Card>
-          <Section title="Content type" desc="Pick what you are testing. Each format is judged the way people actually encounter it.">
+          {more && (<Section title="Content type" desc="Pick what you are testing. Each format is judged the way people actually encounter it.">
             <div className="space-y-3">
               {groups.map((g) => {
                 const Icon = GROUP_ICON[g] || FileText;
@@ -207,11 +223,13 @@ export default function NewSimulationPage() {
                 );
               })}
             </div>
-          </Section>
+          </Section>)}
 
           <Section title="Content" desc={f ? `Upload the ${f.label.toLowerCase()} or paste its text. Timed subtitles enable the second-by-second attention curve.` : undefined}>
+            <Field label="Content link" hint="Optional public article or document"><div className="flex flex-wrap gap-2"><Input className="min-w-0 flex-1" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" /><Button disabled={busy || !link} onClick={async () => { setBusy(true); try { const out = await api<{text: string; title: string; note: string}>(`/projects/${await ensureProject()}/import-link`, {json: {url: link}}); pickFormat("article"); setA({...blank(), text: out.text, title: out.title}); setLinkNote(out.note); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not import link"); } finally {setBusy(false);} }}>Import link</Button></div>{linkNote && <p className="mt-1 text-xs text-muted">{linkNote}</p>}</Field>
+            {!more && <Field label="Content format"><Select value={format} onChange={pickFormat} options={formats.map((f) => ({ value: f.key, label: f.label }))} /></Field>}
             {f && <VariantForm v={A} set={setA} f={f} label={compare !== "none" ? "Your content" : undefined} />}
-            <div className="rounded-md border border-line bg-raised/40 px-3.5 py-3">
+            {more && <><div className="rounded-md border border-line bg-raised/40 px-3.5 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[13px] font-medium">Compare against</span>
                 <Segmented size="md" value={compare} onChange={setCompare} options={Object.entries(COMPARE).map(([value, label]) => ({ value: value as keyof typeof COMPARE, label }))} />
@@ -222,10 +240,10 @@ export default function NewSimulationPage() {
                     : "Benchmark: the same agents react to a competitor's public content; you see where you lead and where you trail."}
               </p>
               {compare !== "none" && f && <div className="mt-4 border-t border-line pt-4"><VariantForm v={B} set={setB} f={f} label={compare === "competitor" ? "Competitor's content" : "Version B"} /></div>}
-            </div>
+            </div></>}
           </Section>
 
-          <Section title="Objective" desc="The analyst answers this question in the report. Name the audience and the decision you need to make.">
+          {more && (<Section title="Objective" desc="The analyst answers this question in the report. Name the audience and the decision you need to make.">
             <Field label="Research question">
               <Textarea value={req} onChange={(e) => setReq(e.target.value)} className="min-h-[72px]" placeholder="How will Gulf Gen Z react to this ad, and which version should we run during Ramadan?" />
             </Field>
@@ -236,31 +254,32 @@ export default function NewSimulationPage() {
               <Field label="Follower count" hint="Optional" help="Followers on the selected platform. Real-world reach estimates stay hidden when this is blank; estimates are not guaranteed views."><Input aria-label="Follower count" type="number" min={0} max={2000000000} step={1} value={followers} onChange={(e) => setFollowers(e.target.value)} placeholder="e.g. 12000" /></Field>
               <datalist id="goals">{["Grow followers", "Drive sales", "Brand awareness", "Spark discussion", "Inform / educate", "Recruit"].map((g) => <option key={g} value={g} />)}</datalist>
             </div>
-          </Section>
+          </Section>)}
 
-          <Section title="Background" desc="Briefs, brand guidelines, competitor notes or prior research. Used to build the knowledge graph and stakeholder accounts.">
+          {more && (<Section title="Background" desc="Briefs, brand guidelines, competitor notes or prior research. Used to build the knowledge graph and stakeholder accounts.">
             <SeedPicker projectAssets={(project.data?.assets || []).filter((a: Asset) => a.kind === "seed")} selected={seeds} setSelected={setSeeds} upload={(file) => upload(file, "seed")} onUploaded={() => project.refetch()} />
-          </Section>
+          </Section>)}
 
-          <Section title="Audience" desc={<>Who sees it, drawn from the 1,000,000-person population <InfoTip term="population" className="align-[-2px]" />. Counts update as you edit.</>}>
+          {!more && <Section title="Platform" desc="Where will you share it?"><Field label="Platform"><Select value={platform} onChange={(v) => { setPlatform(v); setPlatformTouched(true); }} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field></Section>}
+          <Section title="Who it's for" desc="Start with a preset, use your own audience, or choose who should see it.">
             <div className="flex flex-wrap items-end gap-2">
               <Field label="Creator preset" help="Start with a suggested audience, then adjust its filters." className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder="Apply a creator preset…" options={(presets.data || []).map((p) => ({ value: p.id, label: p.name }))}
                   onChange={(id) => { const p = presets.data?.find((x) => x.id === id); if (p) setAud({ regions: [], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false, expats_only: false, interests: [], professions: [], incomes: [], ocean: {}, ...p.filters }); }} />
               </Field>
-              <Field label="Saved audiences" className="min-w-0 basis-full sm:basis-auto sm:flex-1">
+              {more && <><Field label="Saved audiences" className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder={templates.data?.length ? "Load a saved audience…" : "No saved audiences yet"}
                   onChange={async (id) => { const t = templates.data?.find((x) => x.id === id); if (t) { setAud({ ...aud, ...t.filters }); api(`/audience-templates/${id}/use`, { method: "POST" }).catch(() => null); toast.success(`Loaded "${t.name}"`); } }}
                   options={(templates.data || []).map((t) => ({ value: t.id, label: `${t.name}${t.mine ? "" : " · community"}${t.accuracy != null ? ` · ${Math.round(t.accuracy * 100)}% accuracy` : ""}` }))} />
               </Field>
-              <Button onClick={() => setSaveTpl(true)}>Save this audience</Button>
+              <Button onClick={() => setSaveTpl(true)}>Save this audience</Button></>}
             </div>
             <Switch checked={!!aud.use_creator_audience} onChange={(v) => setAud({ ...aud, use_creator_audience: v })}
               label="Match my audience" />
             <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
             <Field label="Audience regions"><RegionPicker value={aud.regions} onChange={(value) => setAud({ ...aud, regions: value })} /></Field>
-            {(aud.regions.includes("AE") || aud.regions.some((v: string) => v.startsWith("AE-"))) && <UaeAudienceFilters value={aud} onChange={setAud} />}
-            <div className="space-y-3 rounded-md border border-line p-3">
+            {more && (aud.regions.includes("AE") || aud.regions.some((v: string) => v.startsWith("AE-"))) && <UaeAudienceFilters value={aud} onChange={setAud} />}
+            {more && <><div className="space-y-3 rounded-md border border-line p-3">
               <Field label="Creator or channel" hint="Use the same name in each test to retain this creator's simulated audience history.">
                 <Input maxLength={120} value={creatorSubject} onChange={(e) => setCreatorSubject(e.target.value)} placeholder="workspace" />
               </Field>
@@ -270,14 +289,14 @@ export default function NewSimulationPage() {
                   onChange={(e) => setOv({ ...ov, returning_share: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })} />
               </Field>
               <p className="text-xs text-muted">Simulated memories, never real follower data. Both A/B variants use the same memory snapshot.</p>
-            </div>
+            </div></>}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Age range"><div className="flex items-center gap-2"><Input type="number" min={16} max={70} value={aud.age_min} onChange={(e) => setAud({ ...aud, age_min: Number(e.target.value) })} />
                 <span className="text-[13px] text-muted">to</span><Input type="number" min={16} max={70} value={aud.age_max} onChange={(e) => setAud({ ...aud, age_max: Number(e.target.value) })} /></div></Field>
               <Field label="Gender"><Segmented size="md" value={aud.genders.length === 1 ? aud.genders[0] : "all"} onChange={(v) => setAud({ ...aud, genders: v === "all" ? [] : [v] })}
                 options={[{ value: "all", label: "All" }, { value: "female", label: "Women" }, { value: "male", label: "Men" }]} /></Field>
             </div>
-            <Field label="Platform users" hint={aud.platforms.length ? `${aud.platforms.length} selected` : "Any platform"}>
+            {more && <><Field label="Platform users" hint={aud.platforms.length ? `${aud.platforms.length} selected` : "Any platform"}>
               <div className="grid grid-cols-2 gap-x-2 rounded-md border border-line p-1.5 sm:grid-cols-4">
                 {(ref.data?.platforms || []).map((p) => <CheckRow key={p.key} checked={aud.platforms.includes(p.key)} onChange={() => toggle("platforms", p.key)} label={p.label} />)}
               </div>
@@ -325,30 +344,30 @@ export default function NewSimulationPage() {
                   </Field>
                 </div>
               )}
-            </div>
+            </div></>}
           </Section>
 
-          <Section title="Timing" desc={<>Which moment the agents live in: today's news, weather, calendar and trends for each region <InfoTip term="live" className="align-[-2px]" />.</>}>
+          {more && (<Section title="Timing" desc={<>Which moment the agents live in: today's news, weather, calendar and trends for each region <InfoTip term="live" className="align-[-2px]" />.</>}>
             <Segmented size="md" value={when} onChange={setWhen} options={Object.entries(WHEN).map(([value, label]) => ({ value: value as keyof typeof WHEN, label }))} />
             {when !== "now" && <Field label={when === "schedule" ? "Publish at" : "Replay the moment"}><Input className="max-w-xs" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></Field>}
             <p className="text-[13px] leading-relaxed text-muted">{when === "now" ? "Agents are conditioned on what is happening in each region this hour, and the run follows their local clocks from now."
               : when === "schedule" ? "Local clocks and the holiday calendar shift to the publish time; news and trends use the latest snapshot."
                 : "Agents see the archived snapshot of that moment: the news, weather and trends people actually saw. The archive must cover the date."}</p>
-          </Section>
+          </Section>)}
 
-          <Section title="Depth" desc="How many agents and how much simulated time. More depth means more detail and more model calls. Every value can be changed in step 2.">
+          {more && (<Section title="Depth" desc="How many agents and how much simulated time. More depth means more detail and more model calls. Every value can be changed in step 2.">
             <Segmented size="md" value={depth} onChange={(d) => { setDepth(d); setOv({ ...ov, ...DEPTH[d] }); }} options={Object.entries(DEPTH).map(([k, v]) => ({ value: k as keyof typeof DEPTH, label: v.label }))} />
             <KV className="max-w-md" rows={[
               [<span className="inline-flex items-center gap-1.5">Voice agents <InfoTip term="voice" /></span>, fmt.n(ov.voice)],
               [<span className="inline-flex items-center gap-1.5">Crowd agents <InfoTip term="crowd" /></span>, fmt.n(ov.crowd)],
               [<span className="inline-flex items-center gap-1.5">Stakeholder accounts <InfoTip term="stakeholder" /></span>, ov.stakeholders],
               ["Simulated time", `${ov.hours} h · ${Math.round((ov.hours * 60) / ov.minutes_per_round)} rounds`]]} />
-          </Section>
+          </Section>)}
         </Card>
 
         <div>
           <Card className="sticky top-6">
-            <div className="border-b border-line px-4 py-3">
+            {more && <><div className="border-b border-line px-4 py-3">
               <div className="text-xs font-medium text-muted">Audience size</div>
               <div className="num mt-0.5 text-[26px] font-semibold leading-tight">{count ? fmt.n(count.n) : "–"}</div>
               <div className="text-xs text-muted">{count ? `${fmt.pct(count.n / 1_000_000, 1)} of the population` : "Calculating…"}</div>
@@ -357,16 +376,17 @@ export default function NewSimulationPage() {
               <KV rows={[["Format", f?.label || "–"], ["Regions", aud.regions.length ? aud.regions.join(", ") : "None"], ["Ages", `${aud.age_min || 16}–${aud.age_max || 70}`],
                 ["Comparison", compare === "none" ? "None" : compare === "version" ? "A/B test" : "Competitor"], ["Timing", WHEN[when]], ["Depth", DEPTH[depth].label],
                 ["Advanced filters", advancedCount || "None"], ["Background files", seeds.length]]} />
-            </div>
+            </div></>}
             <div className="space-y-2 border-t border-line p-4">
-              <Button variant="primary" className="w-full" onClick={() => submit(true)} loading={busy}>{edit ? "Save and rebuild graph" : "Create and build graph"}</Button>
+              <Button variant="primary" className="w-full" onClick={() => submit(true)} loading={busy}>Test it</Button>
               <Button className="w-full" onClick={() => submit(false)} loading={busy}>Save as draft</Button>
-              <p className="pt-1 text-xs leading-relaxed text-muted">Building the graph takes under a minute. Nothing runs on the audience until you start the simulation in step 3.</p>
+              <p className="pt-1 text-xs leading-relaxed text-muted">Kruvim reads your content, shows it to your chosen audience and writes the results automatically.</p>
             </div>
           </Card>
         </div>
       </div>
       <SaveTemplateDialog open={saveTpl} onClose={() => setSaveTpl(false)} filters={cleanAud(aud)} onSaved={() => templates.refetch()} />
+      {home && <section className="mt-8"><h2 className="mb-3 text-base font-semibold">Recent tests</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{recent.data?.map((s) => <Link key={s.id} to={`/simulations/${s.id}`} className="card min-w-0 p-4 hover:bg-raised"><h3 className="truncate font-medium">{s.name}</h3><div className="mt-3 flex justify-between gap-2 text-sm"><span>{s.score != null ? `${s.score.toFixed(1)} / 10` : "In progress"}</span><span className="text-muted">{fmt.date(s.created_at)}</span></div></Link>)}</div>{recent.data?.length === 0 && <p className="text-sm text-muted">Your first test will appear here.</p>}</section>}
     </Page>
   );
 }

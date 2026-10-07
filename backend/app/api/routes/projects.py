@@ -4,6 +4,7 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,20 @@ from app.services import audit, storage
 from app.services.content import ContentError, document_text
 
 router = APIRouter(tags=["projects"])
+
+
+class LinkIn(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
+@router.post('/projects/{project_id}/import-link')
+async def from_link(project_id: str, body: LinkIn, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
+    await get_project(s, p, project_id)
+    from app.services.content.links import import_link
+    result = await import_link(body.url)
+    audit.record(s, 'content.import_link', org_id=p.org_id, user_id=p.user_id, target=project_id)
+    await s.commit()
+    return result
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ALLOWED = {
     "content": {"video/", "audio/", "image/", "text/", "application/pdf", DOCX},

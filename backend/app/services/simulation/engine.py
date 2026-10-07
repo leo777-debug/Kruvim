@@ -392,6 +392,15 @@ class Engine:
                 a.memory.append(f"You saw the creator's content and thought: \"{r['quote']}\" ({r['score']:.1f}/10)")
                 acts = await self.initial_actions(a, r)
                 await self.emit("reaction", {"agent": a.ref, "variant": "A", "r": _brief(r) | {"influence": _influence(r, a.followers)}, "actions": acts, "progress": [done, len(tasks)]})
+                answered = [person.reaction for person in voices if person.reaction and "score" in person.reaction]
+                if len(answered) == 5:
+                    self.quick_read = {"score": round(float(np.mean([reaction["score"] for reaction in answered])), 2),
+                        "sample_size": 5, "preliminary": True, "dry": self.llm.is_dry,
+                        "method": "First five completed simulated impressions; not the full audience prediction"}
+                    async with session_scope() as s:
+                        row = await s.get(Simulation, self.sim_id)
+                        row.progress = {**(row.progress or {}), "quick_read": self.quick_read}
+                    await self.emit("simulation.quick_read", self.quick_read)
         finally:
             for t in tasks:
                 if not t.done():
@@ -837,6 +846,7 @@ class Engine:
         await self.emit("round.end", m)
         async with session_scope() as s:
             await s.execute(update(Simulation).where(Simulation.id == self.sim_id).values(progress={
+                "quick_read": getattr(self, "quick_read", None),
                 "round": self.round, "rounds": self.rounds, "posts": len(self.posts), "actions": int(sum(self.counts.values())),
                 "sim_time": self.sim_time(self.round).isoformat(), "voice_opinion": m["voice_opinion"], "crowd_opinion": m["crowd_opinion"]}))
 
