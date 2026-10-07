@@ -36,14 +36,14 @@ def upgrade():
     op.create_index('uq_analytics_preset_org_name', 'analytics_mapping_presets', ['org_id', 'name'], unique=True)
     with op.batch_alter_table('performance_reports') as batch:
         batch.add_column(sa.Column('analytics_post_id', sa.String(32)))
-        batch.create_foreign_key('fk_performance_reports_analytics_post_id_imported_analytics_posts', 'imported_analytics_posts', ['analytics_post_id'], ['id'], ondelete='SET NULL')
+        batch.create_foreign_key(op.f('fk_performance_reports_analytics_post_id_imported_analytics_posts'), 'imported_analytics_posts', ['analytics_post_id'], ['id'], ondelete='SET NULL')
         batch.create_unique_constraint('uq_performance_reports_analytics_post_id', ['analytics_post_id'])
 
 
 def downgrade():
     with op.batch_alter_table('performance_reports') as batch:
         batch.drop_constraint('uq_performance_reports_analytics_post_id', type_='unique')
-        batch.drop_constraint('fk_performance_reports_analytics_post_id_imported_analytics_posts', type_='foreignkey')
+        batch.drop_constraint(op.f('fk_performance_reports_analytics_post_id_imported_analytics_posts'), type_='foreignkey')
         batch.drop_column('analytics_post_id')
     for table in ('analytics_mapping_presets', 'imported_analytics_posts', 'analytics_imports'):
         op.drop_table(table)
