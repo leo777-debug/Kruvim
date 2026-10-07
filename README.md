@@ -144,6 +144,12 @@ start `tools.serve_verify` with `KRUVIM_VERIFY_MEMORY=1`; this is restricted to 
 
 ## Quick start (local development)
 
+From the repository root, `python tools/dev.py` installs backend/frontend dependencies, migrates SQLite,
+seeds the demo account and starts both servers. Requires Python 3.11–3.13 and Node 20+.
+Use `python tools/dev.py --check` for setup, seed and frontend-build verification without starting servers.
+The launcher leaves all model keys blank and preserves configured local providers. Stop it with Ctrl+C.
+The manual commands below remain supported.
+
 Requirements: Python 3.11–3.13 (3.14 works without the `asyncpg` driver), Node 20+. Redis and PostgreSQL are optional
 locally: without `KRUVIM_REDIS_URL` jobs run in-process, and SQLite is the default database.
 
@@ -169,6 +175,32 @@ To exercise the real provider path without spending credits, run `python tools/m
 *Other OpenAI-compatible* with base URL `http://127.0.0.1:8499/v1` and key `test-key`.
 
 ## Production (Docker Compose)
+
+For a local disposable stack, `docker compose up --build` needs no `.env`: it runs a dedicated migration
+service before API/Redis workers start. Set a unique `KRUVIM_SECRET_KEY` and `POSTGRES_PASSWORD` before
+deploying outside your computer; the supplied Compose secret is explicitly a local-only default.
+
+### Reliability and smoke checks
+
+Every model request has bounded provider attempts/backoff, a concurrency limit and an overall deadline.
+Malformed JSON is repaired once; failed reaction/activity calls use deterministic simulated fallbacks,
+counted under Results → Method. A fallback is not a measured model answer. Workflow stages have a maximum
+duration (`KRUVIM_SIMULATION_MAX_DURATION_SECONDS`, default 7200). A watchdog recovers expired/orphaned
+jobs; failed tests expose Retry. The provider settings and local-model support are unchanged.
+
+For a real-model smoke test, configure `KRUVIM_LLM_PROVIDER=openai`, `KRUVIM_LLM_BASE_URL` (for example
+your local Ollama `/v1` endpoint), `KRUVIM_LLM_VOICE_MODEL` and `KRUVIM_LLM_REPORT_MODEL`, then run
+`python -m tools.model_smoke` from `backend`. The script uses a disposable database, runs all five stages,
+prints calls/tokens/duration/errors and cost when configured prices are available, and never prints keys.
+Remote providers read `KRUVIM_LLM_API_KEY`; local endpoints may leave it blank. External data feeds are
+disabled in this protocol smoke check. No real-model accuracy or speed claim follows from a protocol pass.
+
+`npm run test:e2e` in `frontend` runs bundled Playwright Chromium against a disposable offline dry-run
+server at desktop and 390px. Install it once with `npx playwright install chromium` (CI uses `--with-deps`).
+CI also exercises fresh setup, actual Compose Postgres/Redis workers, migrations and ten consecutive full
+backend suites with randomized test orders. Source weights preserve publisher permissions: all connectors
+have registry reliability defaults, but pending grants remain excluded. The verified CC0 Wikimedia pageview
+dataset is enabled by default; Data pool warns when recent connector outputs are all excluded.
 
 ```bash
 cp .env.example .env            # set KRUVIM_SECRET_KEY, POSTGRES_PASSWORD, KRUVIM_PUBLIC_URL, KRUVIM_CORS_ORIGINS

@@ -27,6 +27,13 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check app tests scripts migrations tools
       - run: pytest -q
+      - name: Ten consecutive complete suites with shuffled orders
+        run: python -m tools.repeat_suite --runs 10 --workers 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-repeat-suite
+          path: backend/data/repeat-suite
 
   migrations:
     runs-on: ubuntu-latest
@@ -93,3 +100,60 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t kruvim-api ./backend
       - run: docker build -t kruvim-web ./frontend
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pip install -r backend/requirements.txt
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-traces
+          path: frontend/test-results
+
+  fresh-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: One-command local setup, migrations, seed and build
+        env:
+          KRUVIM_ENV: development
+          KRUVIM_DATABASE_URL: sqlite+aiosqlite:////tmp/kruvim-fresh.db
+          KRUVIM_DATA_DIR: /tmp/kruvim-fresh-data
+        run: python tools/dev.py --check
+      - name: Start actual Compose stack
+        env:
+          KRUVIM_SECRET_KEY: ci-only-compose-secret-with-more-than-32-characters
+          KRUVIM_POPULATION_SIZE: "40000"
+        run: |
+          docker compose up --build --wait --wait-timeout 240
+          curl --fail --retry 15 --retry-delay 2 http://localhost:8080/api/v1/readyz
+          docker compose exec -T -e KRUVIM_ENV=test api python -m tools.verify_production
+          docker compose exec -T worker python -c "import asyncio; from app.core.redis import get_redis; print(asyncio.run(get_redis().ping()))"
+          .venv/bin/python -m tools.compose_smoke --url http://localhost:8080
+        working-directory: backend
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs --tail 150
+      - name: Stop disposable stack
+        if: always()
+        run: docker compose down --volumes

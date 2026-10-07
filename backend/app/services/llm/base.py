@@ -5,6 +5,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass, field
+from functools import wraps
 
 from app.core.metrics import LLM_CALLS, LLM_TOKENS
 
@@ -131,6 +132,22 @@ class BaseLLM:
     name = "base"
     is_dry = False
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Bound the whole request, including retry/backoff and waiting for capacity.
+        # HTTP timeouts alone do not bound repeated attempts or an SDK stream.
+        if "complete" in cls.__dict__:
+            call = cls.complete
+            @wraps(call)
+            async def bounded(self, **kw):
+                try:
+                    async with asyncio.timeout(max(.01, float(self.s.timeout)) * 4 + 90):
+                        return await call(self, **kw)
+                except TimeoutError as exc:
+                    kw["usage"].fail(self.name, kw["role"])
+                    raise LLMError("The model took too long to answer.") from exc
+            cls.complete = bounded
+
     def __init__(self, s: ProviderSettings):
         self.s = s
         self.sem = asyncio.Semaphore(max(1, int(s.concurrency or 1)))
@@ -157,7 +174,10 @@ class BaseLLM:
             text = await self.complete(system=system, user=prompt, role=role, max_tokens=max_tokens, usage=usage,
                                        json_out=True, images=images, temperature=temperature)
             try:
-                return extract_json(text)
+                result = extract_json(text)
+                if not isinstance(result, dict):
+                    raise ValueError("expected a JSON object")
+                return result
             except Exception as exc:
                 last = exc
                 prompt = user + "\n\nYour previous reply could not be parsed. Reply with ONE valid JSON object and nothing else."

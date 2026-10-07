@@ -469,6 +469,7 @@ function Run({ r, sim }: { r: any; sim: Simulation }) {
         <Card className="space-y-2 p-4 text-muted leading-relaxed">
           <div className="eyebrow mb-1">Method</div>
           <p>{r.score.method}</p>
+          {r.reliability && <p>Model fallbacks: {r.reliability.fallback_calls}. {r.reliability.method}</p>}
           <p>Audience population: {r.population_provenance?.label || "estimate, source pending"}.</p>
           {r.population_provenance?.sources?.map((s: any) => <p key={s.url}><a href={s.url} target="_blank" rel="noreferrer" className="text-brand hover:underline">{s.name}</a> · {s.status}</p>)}
           {!!r.population_provenance?.attribute_confidence && <p>Placeholder support: {Object.entries(r.population_provenance.attribute_confidence).filter(([, v]: any) => v.status !== "sourced").map(([k]) => k.replaceAll("_", " ")).join(", ")}</p>}

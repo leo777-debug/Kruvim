@@ -67,8 +67,8 @@ export default function NewSimulationPage() {
   const [saveTpl, setSaveTpl] = useState(false);
   const [when, setWhen] = useState<"now" | "schedule" | "backtest">("now");
   const [at, setAt] = useState("");
-  const [depth, setDepth] = useState<keyof typeof DEPTH>("standard");
-  const [ov, setOv] = useState<any>({ ...DEPTH.standard, platforms: ["feed", "forum"], listening: true });
+  const [depth, setDepth] = useState<keyof typeof DEPTH>("quick");
+  const [ov, setOv] = useState<any>({ ...DEPTH.quick, platforms: ["feed", "forum"], listening: true });
   const [count, setCount] = useState<{ n: number; regions: Record<string, number> } | null>(null);
   const [busy, setBusy] = useState(false);
   const f: Format | undefined = formats.find((x) => x.key === format);

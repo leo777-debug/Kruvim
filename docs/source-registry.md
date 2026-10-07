@@ -1,6 +1,6 @@
 # Source registry: imports and licence checklist
 
-Checked 2026-10-04. No demographic observations are seeded. Registration is not permission to reuse a resource. Production weighting requires an active source and recorded platform-admin commercial licence approval.
+Checked 2026-10-07. No demographic observations are seeded. Registration is not permission to reuse a resource. Production weighting requires an active source and recorded commercial licence approval. Wikimedia aggregate pageview data is active by default: its [analytics portal](https://analytics.wikimedia.org/) explicitly dedicates the data to CC0. This covers titles and counts, not article text. All other unapproved sources remain excluded; the Data pool health warning identifies connectors producing only excluded signals.
 
 World Bank UAE indicator API returned HTTP 200; its indicator page explicitly publishes CC BY 4.0. The native survey years and missing cells are preserved. Generic bounded CSV/XLSX download and parsing adapters support explicitly mapped public resources. FCSC SDMX endpoint returned HTTP 403: use an authorised manual export; no restrictions are bypassed.
 
@@ -16,7 +16,7 @@ Public reference observations are global; workspace files and mappings remain pr
 
 ## Pending imports and download locations
 
-All listed sources are registered. No official demographic values are preloaded. Every source starts excluded until platform-admin activation and commercial reuse approval; World Bank indicator CC BY 4.0 is verified, but still requires the admin record.
+All listed sources are registered. No official demographic values are preloaded. Sources other than CC0 aggregate pageviews start excluded until platform-admin activation and commercial reuse approval; World Bank indicator CC BY 4.0 is verified, but still requires the admin record.
 
 | Source / download location | Attributes | Access and import notes | Licence / attribution requirements |
 | --- | --- | --- | --- |

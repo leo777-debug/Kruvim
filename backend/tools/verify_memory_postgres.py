@@ -28,7 +28,7 @@ async def check():
         env = {**os.environ, "KRUVIM_DATABASE_URL": scratch.render_as_string(hide_password=False), "KRUVIM_REDIS_URL": "",
                "KRUVIM_ENV": "test", "KRUVIM_LLM_API_KEY": ""}
         root = Path(__file__).parents[1]
-        for revision in ("0006", "head"):
+        for revision in ("0006", "0010", "head", "head"):
             result = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "alembic", "upgrade", revision],
                 cwd=root, env=env, capture_output=True, timeout=120)
             if result.returncode:
@@ -45,6 +45,7 @@ async def check():
             assert await connection.fetchval("SELECT to_regclass('agent_creator_affinity')")
             assert await connection.fetchval("SELECT to_regclass('data_sources')")
             assert await connection.fetchval("SELECT to_regclass('source_observations')")
+            assert await connection.fetchval("SELECT count(*) FROM information_schema.columns WHERE table_name='simulations' AND column_name IN ('job_deadline', 'execution_token')") == 2
         finally:
             await connection.close()
         test = '''

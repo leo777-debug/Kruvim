@@ -53,6 +53,9 @@ class OpenAICompatLLM(BaseLLM):
                 try:
                     r = await self.client.post(self.base + "/chat/completions", json=body)
                 except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    if attempt < 3:
+                        await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
+                        continue
                     usage.fail(self.name, role)
                     raise LLMAuthError(f"Cannot reach {self.base} ({exc.__class__.__name__}). Is the model server running?")
                 except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.WriteTimeout) as exc:
@@ -94,7 +97,16 @@ class OpenAICompatLLM(BaseLLM):
                 if r.status_code != 200:
                     usage.fail(self.name, role)
                     raise LLMError(f"{r.status_code} from provider: {r.text[:300]}")
-                data = r.json()
+                try:
+                    data = r.json()
+                    if not isinstance(data, dict):
+                        raise ValueError("expected an object")
+                except ValueError as exc:
+                    if attempt < 3:
+                        await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
+                        continue
+                    usage.fail(self.name, role)
+                    raise LLMError("The model server returned an unreadable response.") from exc
                 u = data.get("usage") or {}
                 cached = u.get("prompt_cache_hit_tokens") or (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
                 usage.add(self.name, model, role, int(u.get("prompt_tokens") or 0), int(cached or 0),

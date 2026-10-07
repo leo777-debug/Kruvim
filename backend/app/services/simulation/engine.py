@@ -356,9 +356,15 @@ class Engine:
             history_state = self.cfg.get("agent_memory", {}).get("affinity", {}).get("people", {}).get(str(idx), {})
             if history_state:
                 personal += "\nYour simulated creator history (small familiarity/affinity effects; fatigue reduces novelty): " + json.dumps(history_state)
-            d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
-                                             max_tokens=700, usage=self.usage)
-            normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            try:
+                d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
+                                                 max_tokens=700, usage=self.usage)
+                normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            except Exception:
+                self.failures.append("A participant model call failed; a deterministic simulated response was used.")
+                tm = float(topic_match(self.pop, np.array([idx]), topic_vector(c.get("topics")))[0])
+                d = normalized = dry.reaction(a.persona, tm, True, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
+                normalized["fallback"] = True
             normalized.update({k: d[k] for k in ("rewatch_probability", "stitch_duet_likelihood", "sound_reuse_likelihood", "comment_bait") if k in d})
             return a, v, short_video_metrics(normalized)
 
@@ -595,8 +601,12 @@ class Engine:
             remembered = remembered + [m for m in self.cfg.get("agent_memory", {}).get("opinion_snapshots", {}).get(a.ref, [])
                                       if m["id"] not in {x["id"] for x in remembered}]
             ptxt += remember_block(remembered)
-            out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
-                                               user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking))
+            try:
+                out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
+                                                   user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking))
+            except Exception:
+                self.failures.append("An activity model call failed; deterministic simulated activity was used.")
+                out = dry.action(a, views, pl, np.random.default_rng([self.seed, a.id, self.round]))
         return a, pl, views, out
 
     async def apply_turn(self, a: AgentRT, pl: str, views: list[dict], out: dict) -> list[dict]:
@@ -851,6 +861,9 @@ class Engine:
         results = await asyncio.to_thread(finalize, self)
         results["runtime_seconds"] = round(time.time() - t0, 1)
         results["stopped_early"] = stopped
+        results["reliability"] = {"fallback_calls": len(self.failures), "failed_provider_calls": self.usage.failed,
+            "method": "Failed model responses use deterministic simulated behaviour. They are not real model answers.",
+            "warnings": sorted(set(self.failures))}
         return results
 
 

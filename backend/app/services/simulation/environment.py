@@ -36,7 +36,7 @@ def defaults(sim: Simulation) -> dict:
     o = sim.config.get("overrides", {}) if sim.config else {}
     hours = int(o.get("hours", 24))
     mpr = int(o.get("minutes_per_round", 60))
-    return {"voice": int(o.get("voice", 80)), "crowd": int(o.get("crowd", 3000)), "stakeholders": int(o.get("stakeholders", 5)),
+    return {"voice": int(o.get("voice", 40)), "crowd": int(o.get("crowd", 3000)), "stakeholders": int(o.get("stakeholders", 5)),
             "hours": hours, "minutes_per_round": mpr, "platforms": o.get("platforms") or ["feed", "forum"],
             "listening": bool(o.get("listening", True)), "seed": int(o.get("seed") or 0)}
 

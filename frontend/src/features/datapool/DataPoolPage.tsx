@@ -15,12 +15,15 @@ import { ObservationMappingDialog, SourcesPanel } from "./SourcesPanel";
 
 export default function DataPoolPage() {
   const [tab, setTab] = useState("world");
+  const orgId = useAuth((s) => s.orgId);
+  const health = useQuery({ queryKey: [orgId, "datapool-health"], queryFn: () => api("/datapool/health"), staleTime: 60_000 });
   return (
     <Page wide title="Data pool" subtitle="Live inputs every simulation is conditioned on: weather, news, news tone, attention, holidays, economy and social platforms. Fetched on a schedule and archived hourly so any past moment can be replayed. Survey data calibrates the population itself.">
       <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[
         { key: "world", label: "Regions" }, { key: "signals", label: "Signals" }, { key: "connectors", label: "Connectors" },
         { key: "listen", label: "Social listening" }, { key: "barometers", label: "Survey data" }, { key: "sources", label: "Sources" },
       ]} />
+      {!!health.data?.warnings?.length && <Callout tone="warn" className="mb-4"><strong>Some live inputs are excluded.</strong> {health.data.warnings.map((w: any) => <p key={w.source}>{w.message}</p>)}<p>Review Data pool → Sources to record permission or change reliability.</p></Callout>}
       {tab === "world" && <World />}
       {tab === "signals" && <Signals />}
       {tab === "connectors" && <Connectors />}

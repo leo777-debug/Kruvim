@@ -109,6 +109,26 @@ async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: Async
     return full(await get_sim(s, p, sim_id))
 
 
+@router.post("/simulations/{sim_id}/retry")
+async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    sim = await get_sim(s, p, sim_id)
+    if sim.status != "failed" and sim.report_status != "failed":
+        raise Conflict("Only a failed test can be retried.")
+    sim.config = {**(sim.config or {}), "autopilot": True}
+    if sim.status == "completed":
+        sim.report_status, sim.error = "queued", None
+        await s.commit()
+        sim.job_id = await jobs.enqueue("generate_report", sim_id=sim.id)
+        await s.commit()
+    elif (sim.config or {}).get("agents"):
+        await lifecycle.queue_run(s, sim, p.user_id)
+    elif (sim.ontology or {}).get("entity_types"):
+        await lifecycle.queue_environment(s, sim)
+    else:
+        await lifecycle.queue_graph(s, sim)
+    return {"status": "queued"}
+
+
 @router.patch("/simulations/{sim_id}")
 async def update_sim(sim_id: str, body: SimulationUpdate, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)

@@ -4,12 +4,16 @@ name: kruvim
 
 x-backend: &backend
   build: ./backend
-  env_file: .env
+  env_file:
+    - path: .env
+      required: false
   environment:
     KRUVIM_ENV: production
     KRUVIM_DATABASE_URL: postgresql+asyncpg://kruvim:${POSTGRES_PASSWORD:-kruvim}@postgres:5432/kruvim
     KRUVIM_REDIS_URL: redis://redis:6379/0
     KRUVIM_DATA_DIR: /data
+    KRUVIM_POPULATION_SIZE: ${KRUVIM_POPULATION_SIZE:-1000000}
+    KRUVIM_SECRET_KEY: ${KRUVIM_SECRET_KEY:-local-compose-only-change-this-secret-before-deploying}
   volumes:
     - kruvim-data:/data
   depends_on:
@@ -47,16 +51,31 @@ services:
     <<: *backend
     command: ["api"]
     expose: ["8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  migrate:
+    <<: *backend
+    command: ["migrate"]
+    restart: "no"
 
   worker:
     <<: *backend
     command: ["worker"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     healthcheck:
       disable: true
 
   connector-worker:
     <<: *backend
     entrypoint: ["arq", "app.workers.connectors.ConnectorWorkerSettings"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     healthcheck:
       disable: true
 

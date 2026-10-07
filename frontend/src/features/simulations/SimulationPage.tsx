@@ -195,6 +195,7 @@ export default function SimulationPage() {
         </div>
       </div>
 
+      {(sim.status === "failed" || sim.report_status === "failed") && <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-neg/30 bg-neg/5 px-5 py-3 text-sm"><span>{sim.error || "This test could not finish. Try again."}</span><Button onClick={async () => { try { await api(`/simulations/${simId}/retry`, { method: "POST" }); refetch(); } catch (e) { toast.error(e instanceof Error ? e.message : "Retry failed"); } }}>Retry</Button></div>}
       <StepIntro step={cur} sim={sim} />
       <div className={cn("min-h-0 flex-1", showGraph ? "flex flex-col overflow-y-auto lg:grid lg:grid-cols-[minmax(380px,0.9fr)_minmax(0,1.3fr)] lg:overflow-hidden" : "overflow-y-auto")}>
         <div className={cn(showGraph ? "min-w-0 border-line lg:min-h-0 lg:overflow-y-auto lg:border-r" : "")}>

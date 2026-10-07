@@ -65,6 +65,11 @@ async def lifespan(app: FastAPI):
             memory_day = None
             while True:
                 try:
+                    from app.services.watchdog import check
+                    await check()
+                except Exception:
+                    log.exception("run watchdog failed")
+                try:
                     await run_due()
                     from app.services.datapool.archive import compress_old
                     from app.services.datapool.cultural import synthesize_daily
