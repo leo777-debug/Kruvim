@@ -91,6 +91,7 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit -p .
       - run: npm run test:navigation
+      - run: node tools/test-retest.mjs
       - run: npx vite build
       - run: npm audit --audit-level=high
 
@@ -117,7 +118,7 @@ jobs:
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --repeat-each=3
         working-directory: frontend
       - uses: actions/upload-artifact@v4
         if: failure()

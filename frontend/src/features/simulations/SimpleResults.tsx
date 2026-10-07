@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth";
 import type { Simulation } from "@/lib/types";
 import { fmt } from "@/lib/utils";
 import type { StreamState } from "./useSimulationStream";
+import { prepareRetest } from "./retest";
 
 export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
   sim: Simulation; stream: StreamState; onDetails: () => void; onAgent: (ref: string) => void; refetch: () => void;
@@ -35,16 +36,11 @@ export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
   async function retest() {
     setBusy(true);
     try {
-      const field = sim.content.type === "text" ? "text" : "transcript";
-      const hook = r.rewrites?.hook?.text;
-      const first = sim.card?.segments?.[0]?.text;
-      const original = String(sim.content[field] || "");
-      const automatic = !!(hook && original && !sim.content.asset_id && !sim.content.asset_ids?.length);
-      const changes = automatic ? { [field]: first && original.includes(first) ? original.replace(first, hook) : `${hook} ${original}` } : {};
+      const { automatic, content } = prepareRetest(sim);
       const next = await api<Simulation>(`/simulations/${sim.id}/clone`, { json: { mode: "rerun", build: false } });
       await api(`/simulations/${next.id}`, {method: "PATCH", json: {
         name: `${sim.name} · improved`.slice(0, 200),
-        content: {...sim.content, ...changes, variant_b: null},
+        content,
         requirement: fix ? `${sim.requirement || ""}\nCheck this improvement: ${fix.title}. ${fix.detail}`.slice(0, 4000) : sim.requirement,
       }});
       if (automatic) await api(`/simulations/${next.id}/autopilot`, {method: "POST"});

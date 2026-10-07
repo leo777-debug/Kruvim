@@ -10,7 +10,7 @@ export default defineConfig({
     { name: "mobile", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
   ],
   webServer: [
-    { command: `"${py}" -m tools.serve_verify`, cwd: "../backend", url: "http://127.0.0.1:8016/healthz", timeout: 90_000, reuseExistingServer: false,
+    { command: `"${py}" -m tools.serve_verify`, cwd: "../backend", url: "http://127.0.0.1:8016/healthz", timeout: 90_000, reuseExistingServer: false, stdout: "pipe",
       env: { KRUVIM_VERIFY_PORT: "8016" } },
     { command: "npm run dev -- --host 127.0.0.1 --port 5186 --strictPort", url: "http://127.0.0.1:5186", timeout: 60_000, reuseExistingServer: false,
       env: { KRUVIM_API_URL: "http://127.0.0.1:8016" } },
