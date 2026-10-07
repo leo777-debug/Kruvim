@@ -112,6 +112,7 @@
 .demo-description { margin-top: 10px; font-size: 10px; color: var(--k-muted); }
 .demo-description summary { cursor: pointer; width: fit-content; }
 .demo-description p { margin-top: 14px; max-width: 730px; font-size: 12px; line-height: 1.8; }
+.demo-context { margin-top: 14px !important; font-size: 13px; color: var(--k-muted); }
 .video-error { color: #a22d2d; margin-top: 15px !important; font-size: 12px; }
 .product-explanation { display: grid; grid-template-columns: 1fr 1.25fr; gap: 130px; padding: 106px 0 94px; }
 .explanation-heading h2 { margin-top: 23px; }
@@ -121,6 +122,20 @@
 .workflow-row h3 { font-size: 17px; font-weight: 550; letter-spacing: -.025em; }
 .workflow-row p { margin-top: 10px; color: var(--k-muted); font-size: 13px; line-height: 1.85; max-width: 395px; }
 .simulation-note { font-size: 10px !important; color: var(--k-muted); padding: 14px 0 0 54px; line-height: 1.8; }
+.audience-insights { padding: 65px 0 75px; border-top: 1px solid var(--k-line); }
+.insights-intro { display: grid; grid-template-columns: 1fr 1.25fr; gap: 20px 130px; }
+.insights-intro .section-label { grid-column: 1 / -1; }
+.insights-intro > p:not(.section-label) { align-self: end; color: var(--k-muted); font-size: 14px; max-width: 430px; }
+.insight-questions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px; margin-top: 48px; }
+.insight-questions > div { padding-top: 22px; border-top: 1px solid var(--k-line); }
+.insight-questions h3 { font-size: 17px; font-weight: 550; letter-spacing: -.025em; }
+.insight-questions p { margin-top: 12px; font-size: 13px; color: var(--k-muted); line-height: 1.85; }
+.landing-faq { display: grid; grid-template-columns: 1fr 1.25fr; gap: 130px; padding: 20px 0 85px; }
+.landing-faq h2 { margin-top: 23px; }
+.faq-list details { border-top: 1px solid var(--k-line); padding: 20px 0; }
+.faq-list details:last-child { border-bottom: 1px solid var(--k-line); }
+.faq-list summary { cursor: pointer; font-size: 14px; font-weight: 550; padding-right: 10px; }
+.faq-list p { margin-top: 14px; font-size: 13px; color: var(--k-muted); line-height: 1.85; }
 #overview, #how-it-works, #signup, #feedback { scroll-margin-top: 100px; }
 .access-section { padding: 80px 0 62px; background: #eff3f9; border-block: 1px solid #e2e7ee; }
 .access-layout { display: grid; grid-template-columns: 1fr 1.15fr; gap: 140px; }
@@ -164,6 +179,8 @@ html { scroll-behavior: smooth; }
   .hero-intro { gap: 40px; grid-template-columns: 1.5fr 1fr; }
   .hero-title h1 { font-size: 59px; }
   .product-explanation, .access-layout, .feedback-section { gap: 65px; }
+  .insights-intro, .landing-faq { gap: 20px 65px; }
+  .insight-questions { gap: 30px; }
   .k-nav { padding: 0 32px; }
   .k-nav nav { gap: 20px; }
   .footer-main { gap: 25px; }
@@ -194,6 +211,13 @@ html { scroll-behavior: smooth; }
   .explanation-lede { max-width: 420px; margin-top: 18px !important; }
   .workflow-row { padding: 22px 0; }
   .workflow-row p { max-width: none; }
+  .audience-insights { padding: 45px 0 50px; }
+  .insights-intro, .landing-faq { grid-template-columns: 1fr; gap: 22px; }
+  .insights-intro > p:not(.section-label) { max-width: none; font-size: 13px; }
+  .insight-questions { grid-template-columns: 1fr; gap: 25px; margin-top: 30px; }
+  .insight-questions > div { padding-top: 20px; }
+  .landing-faq { padding: 10px 0 50px; }
+  .landing-faq h2 { margin-top: 18px; }
   .access-section { padding: 55px 0 30px; }
   .access-layout, .feedback-section { grid-template-columns: 1fr; gap: 32px; }
   .access-copy h2 { margin-top: 20px; }

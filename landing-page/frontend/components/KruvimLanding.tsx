@@ -90,11 +90,11 @@ export default function KruvimLanding() {
         <section className="k-hero page-width" id="overview" aria-labelledby="hero-heading">
           <div className="hero-intro">
             <div className="hero-title">
-              <p className="section-label">Synthetic audience research</p>
-              <h1 id="hero-heading">Test your content.<br />Before it goes live.</h1>
+              <p className="section-label">Audience testing, before you publish</p>
+              <h1 id="hero-heading">Test your content.<br />See how it lands.</h1>
             </div>
             <div className="hero-summary">
-              <p>Explore how an audience could respond to your next video, campaign or idea. Kruvim lets you test content with simulated audiences before you publish.</p>
+              <p>Kruvim gives your video, campaign or idea a test audience. AI-generated people with different backgrounds and interests react to it, so you can explore what connects, what confuses and what to change before publishing.</p>
               <a className="text-link" href="#signup">Request early access <ArrowRight size={17} /></a>
             </div>
           </div>
@@ -103,20 +103,62 @@ export default function KruvimLanding() {
 
         <section className="product-explanation page-width" id="how-it-works">
           <Reveal className="explanation-heading">
-            <p className="section-label">The workflow</p>
-            <h2>A closer look at<br />the response.</h2>
-            <p className="explanation-lede">For creators, agencies and teams who want to understand how their content might be received.</p>
+            <p className="section-label">How it works</p>
+            <h2>From first draft<br />to a clearer direction.</h2>
+            <p className="explanation-lede">Start with the content you’re working on and a question you want answered. Kruvim runs a simulated audience test, then brings the reactions together in a report you can explore.</p>
           </Reveal>
           <div className="workflow-list">
             {[
-              ["Set the context", "Add your content and choose the audience you want to explore. Give the simulation a clear starting point."],
-              ["Observe the conversation", "Follow simulated reactions and audience activity. Look at differences between segments and explore individual perspectives."],
-              ["Review and refine", "Read the report, ask audience agents questions and use the findings to inform your next edit."],
+              ["Bring your content and your question", "Add a video, image or text. Choose who you want to reach and what you want to learn. For example: does this campaign’s message come across clearly?"],
+              ["Watch the audience react", "Kruvim simulates how the audience responds, comments and interacts. Explore the conversation and see how reactions differ across groups."],
+              ["Find your next edit", "Review the report and ask simulated audience members follow-up questions. Compare two versions of your content to explore how a different message or approach changes the response."],
             ].map(([title, text], index) => <Reveal key={title} className="workflow-row">
               <span className="step-number">0{index + 1}</span>
               <div><h3>{title}</h3><p>{text}</p></div>
             </Reveal>)}
-            <p className="simulation-note">Simulated responses help you explore possibilities. They are not a guarantee of real audience behavior.</p>
+            <p className="simulation-note">These are simulated reactions, not responses from real participants. Use them to explore possibilities alongside your own judgment and real audience feedback.</p>
+          </div>
+        </section>
+
+        <section className="audience-insights page-width" aria-labelledby="insights-heading">
+          <Reveal className="insights-intro">
+            <p className="section-label">What you can explore</p>
+            <h2 id="insights-heading">A reaction is useful.<br />The reason matters.</h2>
+            <p>Whether you’re planning a creator post, shaping a client campaign or testing a brand message, start with a specific question.</p>
+          </Reveal>
+          <div className="insight-questions">
+            {[
+              ["Is the message clear?", "Read the simulated comments and ask follow-up questions to explore how the audience interprets your content."],
+              ["Who responds differently?", "Compare audience groups to see where their interests and reactions differ. A message can land differently with different people."],
+              ["What changes between versions?", "Test two versions with the same audience setup. Review the differences before choosing what to publish."],
+            ].map(([title, text]) => <Reveal key={title}>
+              <h3>{title}</h3><p>{text}</p>
+            </Reveal>)}
+          </div>
+        </section>
+
+        <section className="landing-faq page-width" aria-labelledby="faq-heading">
+          <Reveal>
+            <p className="section-label">A few useful answers</p>
+            <h2 id="faq-heading">Kruvim, explained.</h2>
+          </Reveal>
+          <div className="faq-list">
+            <details>
+              <summary>What is a simulated audience?</summary>
+              <p>A group of virtual people created with AI and statistical models. They have different backgrounds, interests and perspectives, and respond within a simulation. They help you explore possible reactions to your content.</p>
+            </details>
+            <details>
+              <summary>What do I get from a test?</summary>
+              <p>You can explore simulated reactions and comments, compare audience groups, and read an analysis report. You can also ask simulated audience members questions and compare two versions of your content.</p>
+            </details>
+            <details>
+              <summary>Can Kruvim tell me whether a post will succeed?</summary>
+              <p>No simulation can guarantee views, sales or a real audience’s response. Kruvim helps you examine an idea and decide what to test or change. Its results depend on your content, audience setup and the model’s assumptions.</p>
+            </details>
+            <details>
+              <summary>What happens when I sign up?</summary>
+              <p>You’ll join the early access list, and we’ll contact you about access to Kruvim. This form registers your interest; it does not create a product account.</p>
+            </details>
           </div>
         </section>
 
@@ -124,9 +166,9 @@ export default function KruvimLanding() {
           <div className="page-width access-layout">
             <Reveal className="access-copy">
               <p className="section-label">Early access</p>
-              <h2>Try Kruvim with<br />your next idea.</h2>
-              <p>Leave your details and we’ll be in touch about early access.</p>
-              <span className="access-note">For individuals and organizations.</span>
+              <h2>Have something<br />in the works?</h2>
+              <p>Join the early access list. Tell us who you are, and we’ll contact you about trying Kruvim with your own content.</p>
+              <span className="access-note">For creators, agencies, brands and independent teams.</span>
             </Reveal>
             <Reveal><LandingForm kind="signup" /></Reveal>
           </div>
@@ -135,8 +177,8 @@ export default function KruvimLanding() {
         <section className="feedback-section page-width" id="feedback">
           <Reveal>
             <p className="section-label">Feedback</p>
-            <h2>What do you need<br />to know about your audience?</h2>
-            <p>Tell us what you’re working on and what you’d like Kruvim to help you understand.</p>
+            <h2>What would you<br />put to the test?</h2>
+            <p>Tell us about your next post or campaign, the audience you want to reach, and the question you wish you could answer before publishing.</p>
           </Reveal>
           <Reveal><LandingForm kind="feedback" /></Reveal>
         </section>

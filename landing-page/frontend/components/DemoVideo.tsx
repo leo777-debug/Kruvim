@@ -51,6 +51,7 @@ export default function DemoVideo() {
       <figcaption className="demo-caption">
         <span>Demo workspace · Recorded at 3× speed · No audio</span>
       </figcaption>
+      <p className="demo-context">Follow a campaign from audience setup to simulated reactions and the final report.</p>
       {error && <p className="video-error" role="alert">{error}</p>}
       <details className="demo-description" id="demo-description">
         <summary>What the walkthrough shows</summary>
