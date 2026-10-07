@@ -37,6 +37,11 @@ async def prepare():
     if os.environ.get("KRUVIM_VERIFY_MEMORY") == "1":
         from tools.memory_fixture import prepare as memory_fixture
         await memory_fixture()
+    # Seeding runs under asyncio.run(), before uvicorn creates its own event loop.
+    # Never transfer a live async connection pool between those loops: a busy
+    # browser can otherwise wait on the seed loop's closed queue.
+    from app.db.session import engine
+    await engine.dispose()
 
 
 if __name__ == "__main__":

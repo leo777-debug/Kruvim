@@ -14,6 +14,21 @@ Content + question ──► 1 Knowledge graph ──► 2 Environment ──►
 
 ## How it works
 
+The default creator interface starts with **Home → Test something**: paste content
+or a link, upload media/a document, choose an audience and platform, then **Test it**.
+The existing autopilot runs all stages and shows one progress bar. Results open
+with a verdict, audience differences and one fix; **Details** and **See how it works**
+retain the graph, transcript, report, method and all workflow controls. **More options**
+retains A/B tests, scheduling, deeper settings and advanced audience filters.
+The main navigation has six items; additional pages stay under **Advanced**.
+
+Creators can import CSV/XLSX or enter post analytics under **My audience → Import
+analytics**, preview/map columns, save mappings, match their follower breakdown,
+calculate private medians and link published posts to tests for calibration.
+All TikTok, Instagram and YouTube exports currently use the generic mapper because
+no real export sample has been verified. [Units, coverage, privacy, deletion and
+connector scaffolding](docs/analytics-import.md) are documented explicitly.
+
 **Population.** One million agents are rows in NumPy arrays, not running models: age, sex, region, origin, language,
 education, income, OCEAN personality, attitudes, platform use, interests and a heavy-tailed, homophilous follow graph.
 Unloaded regional priors are labelled **estimate, source pending**. Approved native official tables or licensed survey

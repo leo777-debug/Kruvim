@@ -75,6 +75,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   const [link, setLink] = useState("");
   const [linkNote, setLinkNote] = useState("");
   const createdProject = useRef<string>();
+  useEffect(() => { createdProject.current = undefined; }, [orgId]);
   const recent = useQuery({ queryKey: [orgId, "recent-tests"], queryFn: () => api<SimSummary[]>("/simulations?limit=6"), enabled: home });
   const f: Format | undefined = formats.find((x) => x.key === format);
   const type = f?.type || "video";
@@ -83,6 +84,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     const s = existing.data;
     if (!s) return;
     const c = s.content || {};
+    setLink(c.source_url || "");
     setFollowers(c.creator_followers == null ? "" : String(c.creator_followers));
     setCreatorSubject(c.creator_subject || "workspace");
     setName(s.name); setReq(s.requirement); setFormat(c.format || "short_video"); setPlatform(c.platform || "tiktok"); setPlatformTouched(true); setGoal(c.goal || "");
@@ -185,7 +187,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
 
   return (
     <Page title={home ? "Home" : edit ? "Edit test" : "New test"} wide
-      breadcrumb={<><Link to="/projects" className="hover:text-fg">Projects</Link> / {pid ? <Link to={`/projects/${pid}`} className="hover:text-fg">{project.data?.name || "…"}</Link> : "…"}</>}>
+      breadcrumb={home ? undefined : <><Link to="/projects" className="hover:text-fg">Projects</Link> / {pid ? <Link to={`/projects/${pid}`} className="hover:text-fg">{project.data?.name || "…"}</Link> : "…"}</>}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">{home ? "Test something" : "What would you like to test?"}</h2><Button aria-expanded={more} onClick={() => setMore(!more)}>More options</Button></div>
       {!edit && more && (
         <ol className="mb-5 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
@@ -228,7 +230,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
           <Section title="Content" desc={f ? `Upload the ${f.label.toLowerCase()} or paste its text. Timed subtitles enable the second-by-second attention curve.` : undefined}>
             <Field label="Content link" hint="Optional public article or document"><div className="flex flex-wrap gap-2"><Input className="min-w-0 flex-1" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" /><Button disabled={busy || !link} onClick={async () => { setBusy(true); try { const out = await api<{text: string; title: string; note: string}>(`/projects/${await ensureProject()}/import-link`, {json: {url: link}}); pickFormat("article"); setA({...blank(), text: out.text, title: out.title}); setLinkNote(out.note); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not import link"); } finally {setBusy(false);} }}>Import link</Button></div>{linkNote && <p className="mt-1 text-xs text-muted">{linkNote}</p>}</Field>
             {!more && <Field label="Content format"><Select value={format} onChange={pickFormat} options={formats.map((f) => ({ value: f.key, label: f.label }))} /></Field>}
-            {f && <VariantForm v={A} set={setA} f={f} label={compare !== "none" ? "Your content" : undefined} />}
+            {f && <VariantForm v={A} set={setA} f={f} anyFile={home} onFile={(file) => {pickFormat(file.type.startsWith("video/") ? "short_video" : file.type.startsWith("audio/") ? "podcast" : file.type.startsWith("image/") ? "image_post" : "article");}} label={compare !== "none" ? "Your content" : undefined} />}
             {more && <><div className="rounded-md border border-line bg-raised/40 px-3.5 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[13px] font-medium">Compare against</span>
@@ -357,6 +359,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
 
           {more && (<Section title="Depth" desc="How many agents and how much simulated time. More depth means more detail and more model calls. Every value can be changed in step 2.">
             <Segmented size="md" value={depth} onChange={(d) => { setDepth(d); setOv({ ...ov, ...DEPTH[d] }); }} options={Object.entries(DEPTH).map(([k, v]) => ({ value: k as keyof typeof DEPTH, label: v.label }))} />
+            <div className="grid gap-3 sm:grid-cols-2">{[{key: "voice", label: "People giving detailed feedback", min: 10, max: 2000}, {key: "crowd", label: "Wider audience sample", min: 0, max: 250000}, {key: "stakeholders", label: "Additional accounts", min: 0, max: 30}, {key: "hours", label: "Simulated hours", min: 1, max: 168}, {key: "minutes_per_round", label: "Minutes per round", min: 15, max: 240}].map((item) => <Field key={item.key} label={item.label}><Input type="number" min={item.min} max={item.max} value={ov[item.key]} onChange={(e) => setOv({...ov, [item.key]: Number(e.target.value)})} /></Field>)}</div>
             <KV className="max-w-md" rows={[
               [<span className="inline-flex items-center gap-1.5">Voice agents <InfoTip term="voice" /></span>, fmt.n(ov.voice)],
               [<span className="inline-flex items-center gap-1.5">Crowd agents <InfoTip term="crowd" /></span>, fmt.n(ov.crowd)],
@@ -419,11 +422,11 @@ function SaveTemplateDialog({ open, onClose, filters, onSaved }: { open: boolean
   );
 }
 
-function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => void; f: Format; label?: string }) {
+function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant; set: (v: Variant) => void; f: Format; label?: string; anyFile?: boolean; onFile?: (file: File) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const multi = useRef<HTMLInputElement>(null);
   const type = f.type;
-  const accept = type === "text" ? ".pdf,.docx,.txt,.md" : type === "video" ? "video/*" : type === "audio" ? "audio/*" : "image/*";
+  const accept = anyFile ? "video/*,audio/*,image/*,.pdf,.docx,.txt,.md" : type === "text" ? ".pdf,.docx,.txt,.md" : type === "video" ? "video/*" : type === "audio" ? "audio/*" : "image/*";
   const titleLabel = f.key === "thumbnail" ? "Video title shown next to the thumbnail" : f.poll ? "Poll title (optional)" : type === "text" ? "Headline or first line" : "Title or opening line";
   const transcriptLabel = f.key === "song" ? "Lyrics" : f.key === "podcast" ? "Transcript or show notes" : "Transcript, subtitles or script";
   const descLabel = f.multi ? "Slide captions, one per line" : f.key === "thumbnail" ? "What the thumbnail shows" : type === "image" ? "Caption and description" : "On-screen description";
@@ -436,18 +439,18 @@ function VariantForm({ v, set, f, label }: { v: Variant; set: (v: Variant) => vo
       <Field label={titleLabel} hint={f.poll ? "Optional" : undefined}><Input value={v.title} onChange={(e) => set({ ...v, title: e.target.value })} placeholder={f.key === "thumbnail" ? "I tried working out while fasting for 30 days" : "3-minute apartment workout"} /></Field>
 
       {!f.poll && !f.multi && (
-        <Field label={`${f.label} file`} hint={type === "text" ? "PDF, Word (.docx), text or Markdown" : type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
+        <Field label={anyFile ? "Upload content" : `${f.label} file`} hint={anyFile ? "Video, audio, image, PDF, Word, text or Markdown" : type === "text" ? "PDF, Word (.docx), text or Markdown" : type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
           <div onClick={() => input.current?.click()} onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const x = e.dataTransfer.files[0]; if (x) set({ ...v, file: x }); }}
+            onDrop={(e) => { e.preventDefault(); const x = e.dataTransfer.files[0]; if (x) {onFile?.(x); set({ ...v, file: x });} }}
             className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-line-strong bg-panel px-3.5 py-3 hover:bg-raised/50">
             <Upload className="h-4 w-4 text-faint" />
             <div className="min-w-0 flex-1 text-[13px]">
               {v.file ? <><span className="font-medium">{v.file.name}</span> <span className="text-muted">· {(v.file.size / 1e6).toFixed(1)} MB</span></>
                 : v.asset_id ? <span className="text-muted">A file is attached. Drop a new one to replace it.</span>
-                  : <span className="text-muted">Drop a {type} file here or <span className="text-brand">browse</span></span>}
+                  : <span className="text-muted">{anyFile ? "Drop your content here or " : `Drop a ${type} file here or `}<span className="text-brand">browse</span></span>}
             </div>
             {(v.file || v.asset_id) && <button type="button" onClick={(e) => { e.stopPropagation(); set({ ...v, file: null, asset_id: null }); }} className="rounded p-0.5 text-muted hover:text-fg" aria-label="Remove file"><X className="h-4 w-4" /></button>}
-            <input ref={input} aria-label={`${label || "Content"} file`} type="file" accept={accept} className="hidden" onChange={(e) => set({ ...v, file: e.target.files?.[0] || null })} />
+            <input ref={input} aria-label={`${label || "Content"} file`} type="file" accept={accept} className="hidden" onChange={(e) => {const file = e.target.files?.[0]; if (file) onFile?.(file); set({ ...v, file: file || null });}} />
           </div>
         </Field>
       )}

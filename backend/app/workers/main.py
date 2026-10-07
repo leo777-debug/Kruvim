@@ -2,6 +2,7 @@
 
 Scale horizontally by running more worker containers; each handles `KRUVIM_WORKER_MAX_JOBS` jobs."""
 from __future__ import annotations
+
 import os
 
 from arq import cron

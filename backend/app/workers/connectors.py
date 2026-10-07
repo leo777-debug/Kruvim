@@ -1,5 +1,6 @@
 """Dedicated connector queue: arq app.workers.connectors.ConnectorWorkerSettings."""
 import os
+
 from arq.connections import RedisSettings
 
 from app.core.config import settings

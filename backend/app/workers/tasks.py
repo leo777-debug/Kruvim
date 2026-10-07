@@ -208,6 +208,10 @@ async def run_simulation(ctx, sim_id: str):
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
         engine = Engine(sim_id, llm, usage)
         results = await engine.run()
+        from app.services.analytics_import import forecast
+        async with session_scope() as s:
+            results['creator_analytics'] = await forecast(s, org_id, sim.content.get('platform'),
+                None if llm.is_dry else results.get('viral', {}).get('raw', {}).get('mean_share_intent'))
         results["usage"] = usage.as_dict(res.settings)
         results["provider"] = {"name": res.settings.provider, "preset": res.settings.preset, "dry": llm.is_dry, "source": res.source,
                                "voice_model": llm.model_for("voice"), "report_model": llm.model_for("report")}

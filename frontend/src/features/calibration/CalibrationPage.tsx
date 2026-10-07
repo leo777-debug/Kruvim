@@ -14,9 +14,11 @@ export default function CalibrationPage() {
   const q = useQuery({ queryKey: [orgId, "calibration"], queryFn: () => api("/calibration") });
   const weights = useQuery({ queryKey: [orgId, "source-weights"], queryFn: () => api<{ sources: Record<string, { n: number; weight: number }>; minimum: number; method: string }>("/calibration/source-weights") });
   const c = q.data;
+  const imported = useQuery({queryKey: [orgId, "analytics-summary"], queryFn: () => api<any>("/analytics/summary")});
   return (
     <Page title="Calibration" subtitle="Linked analytics update real results automatically. Rank correlation measures how well predictions track actual outcomes across your runs.">
       <AccuracyReport />
+      <Card className="mb-5 space-y-3 p-5"><h2 className="font-semibold">Your imported post outcomes</h2><p className="text-sm text-muted">{imported.data?.linked || 0} posts linked to tests. Dry runs and predictions made after publication are excluded from these error estimates.</p>{Object.entries(imported.data?.calibration || {}).map(([metric, value]: any) => <p className="text-sm" key={metric}>{metric === "retention" ? "Average % watched" : metric}: average error {value.mean_absolute_error} {value.unit} across your last {value.n} comparable predictions.</p>)}{!Object.keys(imported.data?.calibration || {}).length && <p className="text-sm text-muted">Link imported posts to tests made with a connected model before publication to measure their accuracy.</p>}<Link className="text-sm text-brand" to="/my-audience">Import analytics or link a post</Link></Card>
       <p className="mb-5 text-sm"><Link to="/my-audience" className="text-brand">Connect analytics</Link> · <Link to="/accuracy" className="text-brand">View the public accuracy report</Link></p>
       <Card className="mb-5 space-y-3 p-5"><h2 className="font-semibold">Does simulated memory improve accuracy?</h2>
         <p className="text-xs text-muted">{c?.memory_comparison?.method || "Compare first-impression predictions from memory and Fresh audience tests against linked real outcomes. This comparison stays within your workspace."}</p>

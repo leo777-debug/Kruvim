@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.db.base import utcnow
 from app.db.session import session_scope
 from app.models import DataSource, Simulation
@@ -26,6 +27,65 @@ def test_compose_worker_health_checks():
     compose = (Path(__file__).parents[2] / 'docker-compose.yml').read_text()
     assert '"app.workers.main.WorkerSettings", "--check"' in compose
     assert '"app.workers.connectors.ConnectorWorkerSettings", "--check"' in compose
+
+
+async def test_browser_seed_pool_does_not_cross_event_loops(tmp_path):
+    """Reproduce the closed seed-loop queue under contention, then verify disposal."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    async def exercise(engine):
+        async with engine.connect():
+            async def waiting():
+                async with engine.connect() as conn:
+                    return await conn.scalar(text('SELECT 1'))
+            task = asyncio.create_task(waiting())
+            # Wait until the pool's waiter has actually entered its queue.
+            while not task.done() and not engine.pool._pool._queue._getters:
+                await asyncio.sleep(0)
+        return await task
+    def verify():
+        for dispose in (False, True):
+            engine = create_async_engine('sqlite+aiosqlite:///' + (tmp_path / f'pool-{dispose}.db').as_posix(),
+                pool_size=1, max_overflow=0)
+            async def seed(engine=engine, dispose=dispose):
+                assert await exercise(engine) == 1
+                if dispose:
+                    await engine.dispose()
+            asyncio.run(seed())
+            async def server(engine=engine, dispose=dispose):
+                try:
+                    if dispose:
+                        assert await exercise(engine) == 1
+                    else:
+                        with pytest.raises(RuntimeError, match='different event loop'):
+                            await exercise(engine)
+                finally:
+                    await engine.dispose()
+            asyncio.run(server())
+    await asyncio.to_thread(verify)
+
+
+async def test_api_watchdog_runs_without_workers_and_stops_on_shutdown(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app import main
+    started = asyncio.Event()
+    async def checked():
+        started.set()
+    with monkeypatch.context() as patch:
+        patch.setattr(settings, 'env', 'production')
+        patch.setattr(settings, 'redis_url', 'redis://unused')
+        patch.setattr(main, '_bootstrap', AsyncMock())
+        patch.setattr(main, 'close_redis', AsyncMock())
+        patch.setattr('app.services.watchdog.check', checked)
+        before = set(asyncio.all_tasks())
+        async with main.lifespan(main.app):
+            await asyncio.wait_for(started.wait(), 2)
+            assert any(task not in before for task in asyncio.all_tasks())
+        assert not {task for task in asyncio.all_tasks() if task not in before}
 
 
 async def test_default_registry_has_weights_and_personal_signals(client, auth):

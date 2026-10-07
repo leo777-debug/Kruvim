@@ -45,6 +45,9 @@ async def check():
             assert await connection.fetchval("SELECT to_regclass('agent_creator_affinity')")
             assert await connection.fetchval("SELECT to_regclass('data_sources')")
             assert await connection.fetchval("SELECT to_regclass('source_observations')")
+            for table in ('analytics_imports', 'imported_analytics_posts', 'analytics_mapping_presets'):
+                assert await connection.fetchval('SELECT to_regclass($1)', table)
+            assert await connection.fetchval("SELECT count(*) FROM information_schema.columns WHERE table_name='performance_reports' AND column_name='analytics_post_id'") == 1
             assert await connection.fetchval("SELECT count(*) FROM information_schema.columns WHERE table_name='simulations' AND column_name IN ('job_deadline', 'execution_token')") == 2
         finally:
             await connection.close()

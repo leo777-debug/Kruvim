@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AudienceMemory } from "./AudienceMemory";
 import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
+import { AnalyticsImports } from "./AnalyticsImports";
 
 type Split = { countries: Record<string, number>; ages: Record<string, number>; genders: Record<string, number> };
 type Connection = { id: string; platform: string; account_name: string; connected: boolean; share_accuracy: boolean;
@@ -34,12 +35,13 @@ export default function MyAudiencePage() {
   const accounts = useQuery({ queryKey: [orgId, "social"], queryFn: () => api<Connections>("/social/connections"), refetchInterval: 60_000 });
   const profile = useQuery({ queryKey: [orgId, "my-audience"], queryFn: () => api<{ profile: { split: Split; label: string; source: string; filters?: Record<string, any> } | null;
     memory: { summary?: string; real_summary?: string; note?: string; observations?: { simulation_id: string; title: string; score: number; dry: boolean }[] } }>("/my-audience") });
-  const [countries, setCountries] = useState("SA: 70%\nAE: 30%");
-  const [ages, setAges] = useState("18-24: 60%\n25-34: 40%");
-  const [genders, setGenders] = useState("female: 55%\nmale: 45%");
+  const [countries, setCountries] = useState("");
+  const [ages, setAges] = useState("");
+  const [genders, setGenders] = useState("");
   const [label, setLabel] = useState("My audience");
   const [uaeFilters, setUaeFilters] = useState<Record<string, any> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const capabilities = useQuery({queryKey: [orgId, "analytics-capabilities"], queryFn: () => api<{oauth_enabled: boolean}>("/analytics/formats")});
   async function action(key: string, path: string, method = "POST", json?: unknown) {
     setBusy(key);
     try {
@@ -50,10 +52,11 @@ export default function MyAudiencePage() {
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not update audience analytics"); }
     finally { setBusy(null); }
   }
-  return <Page title="My audience" subtitle="Connect real outcomes automatically and test content against your own audience. Only aggregate analytics are collected.">
+  return <Page title="My audience" subtitle="Import your analytics, match your own followers and learn from your real results.">
+    <AnalyticsImports key={orgId} />
     {params.get("connection") && <Card className="mb-4 p-4" role="status">{params.get("connection") === "connected" ? "Account connected. Sync analytics to load its breakdown." : "Account connection failed. Check permissions and try again."}</Card>}
     {(accounts.isError || profile.isError) && <Card className="mb-4 p-4" role="alert">Could not load audience data. <Button onClick={() => { accounts.refetch(); profile.refetch(); }}>Retry</Button></Card>}
-    <Card className="overflow-x-auto">
+    {(capabilities.data?.oauth_enabled || accounts.data?.connections.some((c) => c.connected)) && <details className="mt-5"><summary className="cursor-pointer text-sm font-medium">Automatic platform connections (advanced)</summary><Card className="mt-3 overflow-x-auto">
       <table className="dt account-table"><thead><tr><th>Platform</th><th>Account</th><th>Available analytics</th><th>Actions</th></tr></thead><tbody>
         {accounts.data?.providers.map((provider) => {
           const c = accounts.data.connections.find((x) => x.platform === provider.platform);
@@ -70,7 +73,7 @@ export default function MyAudiencePage() {
               label="Contribute anonymous A/B accuracy" /></div>}</td></tr>;
         })}
       </tbody></table>{accounts.isPending && <p className="p-4 text-muted" role="status">Loading accounts…</p>}
-    </Card>
+    </Card></details>}
     <div className="mt-5 grid gap-5 lg:grid-cols-2">
       <Card className="space-y-4 p-5"><h2 className="font-semibold">Follower breakdown</h2>
         <p className="text-sm text-muted">Countries use two-letter codes. Each supplied country, age or gender split must add to 100%. The simulator supports ages 16–70 and its listed countries; coverage limitations appear in the results.</p>

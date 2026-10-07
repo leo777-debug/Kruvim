@@ -205,6 +205,7 @@ class PerformanceReport(IdMixin, TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(32), default="")
     variant: Mapped[str] = mapped_column(String(1), default="A", server_default="A")
     social_post_id: Mapped[str | None] = mapped_column(ForeignKey("social_posts.id", ondelete="SET NULL"), unique=True)
+    analytics_post_id: Mapped[str | None] = mapped_column(ForeignKey('imported_analytics_posts.id', ondelete='SET NULL'), unique=True)
     views: Mapped[int | None] = mapped_column(Integer)
     likes: Mapped[int | None] = mapped_column(Integer)
     shares: Mapped[int | None] = mapped_column(Integer)

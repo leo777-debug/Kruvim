@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     instagram_client_secret: str = ""
     instagram_api_version: str = "v25.0"
     social_sync_minutes: int = Field(default=60, ge=10)
+    analytics_oauth_enabled: bool = False
     accuracy_min_tests: int = Field(default=20, ge=1)
     accuracy_min_workspaces: int = Field(default=3, ge=2)
     source_weight_min_tests: int = Field(default=20, ge=3)
