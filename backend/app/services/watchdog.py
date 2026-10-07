@@ -16,12 +16,19 @@ REASON = "This test took too long or its worker stopped. Retry the test to start
 job_lease = ContextVar("kruvim_job_lease", default=None)
 
 
+def active_workflow():
+    return or_(Simulation.status.in_(['building_graph', 'preparing', 'queued', 'running', 'paused']),
+        Simulation.report_status.in_(['queued', 'running']),
+        Simulation.status.in_(['graph_ready', 'ready']) & Simulation.config['autopilot'].as_boolean().is_(True))
+
+
 async def fail_expired(sim_id, token):
     async with session_scope() as s:
-        row = await s.get(Simulation, sim_id)
-        if not row or row.execution_token != token:
+        result = await s.execute(update(Simulation).where(Simulation.id == sim_id, Simulation.execution_token == token,
+            active_workflow())
+            .values(status='failed', error=REASON, report_status='failed'))
+        if not result.rowcount:
             return
-        row.status, row.error, row.report_status = "failed", REASON, "failed"
     await bus.publish(sim_id, "simulation.failed", {"message": REASON})
 
 
@@ -58,8 +65,7 @@ async def check(now=None):
     now = now or utcnow()
     async with session_scope() as s:
         rows = (await s.execute(select(Simulation).where(
-            or_(Simulation.status.in_(["building_graph", "preparing", "queued", "running", "paused"]),
-                Simulation.report_status.in_(["queued", "running"])),
+            active_workflow(),
             or_(Simulation.job_deadline <= now,
                 (Simulation.job_deadline.is_(None)) & (Simulation.updated_at < now - timedelta(seconds=settings.simulation_max_duration_seconds)))))).scalars().all()
     for row in rows:

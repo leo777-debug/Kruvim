@@ -205,3 +205,31 @@ async def test_future_connector_is_off_and_reuses_private_import_tables(client, 
         row = await sync(s, org_id, 'youtube', FixtureConnector())
         assert row.status == 'applied' and row.summary['inserted'] == 3
     assert len((await client.get('/analytics/posts', headers=auth[0])).json()) == 3
+
+
+async def test_delete_waits_for_inflight_upload_and_removes_its_file(client, auth, monkeypatch):
+    from app.services.lifecycle import _start_locks
+    entered, release = asyncio.Event(), asyncio.Event()
+    keys = []
+    original = storage.put
+    async def held(key, raw):
+        keys.append(key)
+        entered.set()
+        await release.wait()
+        await original(key, raw)
+    monkeypatch.setattr(storage, 'put', held)
+    upload = asyncio.create_task(client.post('/analytics/imports', headers=auth[0],
+        data={'platform': 'youtube', 'kind': 'posts', 'aggregate_only': 'true'},
+        files={'file': ('fixture.csv', (FIXTURES / 'posts.csv').read_bytes())}))
+    await asyncio.wait_for(entered.wait(), 2)
+    removal = asyncio.create_task(client.post('/analytics/delete', headers=auth[0], json={'confirmed': True}))
+    lock = _start_locks[auth[1]['orgs'][0]['id']]
+    while not removal.done() and not lock._waiters:
+        await asyncio.sleep(0)
+    assert not removal.done()
+    release.set()
+    assert (await upload).status_code == 200
+    assert (await removal).json()['deleted_imports'] == 1
+    with pytest.raises(FileNotFoundError):
+        await storage.get(keys[0])
+    assert (await client.get('/analytics/imports', headers=auth[0])).json() == []

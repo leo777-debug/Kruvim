@@ -15,10 +15,20 @@ from app.db.session import get_session
 from app.models import AnalyticsImport, AnalyticsMappingPreset, ImportedAnalyticsPost, Organization, PerformanceReport
 from app.services import analytics_import as service
 from app.services import audit, storage
+from app.services.lifecycle import _start_locks
 
 router = APIRouter(tags=['analytics imports'])
 Platform = Literal['tiktok', 'instagram', 'youtube']
 Kind = Literal['posts', 'audience']
+
+
+async def mutation_guard(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
+    # Serialize upload/apply/delete in SQLite, and across API replicas on Postgres.
+    # In particular, deleting files and rows must not race another upload.
+    async with _start_locks[p.org_id]:
+        await s.execute(select(Organization).where(Organization.id == p.org_id)
+            .execution_options(populate_existing=True).with_for_update())
+        yield
 
 
 class MappingIn(BaseModel):
@@ -87,7 +97,7 @@ async def presets(p: Principal = Depends(principal), s: AsyncSession = Depends(g
     return [{'id': row.id, 'name': row.name, 'platform': row.platform, 'kind': row.kind, 'mapping': row.mapping} for row in rows]
 
 
-@router.post('/analytics/imports')
+@router.post('/analytics/imports', dependencies=[Depends(mutation_guard)])
 async def upload(platform: Platform = Form(...), kind: Kind = Form(...), aggregate_only: bool = Form(False),
     file: UploadFile = File(...), p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     if not aggregate_only:
@@ -105,11 +115,15 @@ async def upload(platform: Platform = Form(...), kind: Kind = Form(...), aggrega
     await storage.put(row.storage_key, raw)
     s.add(row)
     audit.record(s, 'analytics.upload', org_id=p.org_id, user_id=p.user_id, target=filename, meta={'platform': platform, 'rows': len(rows)})
-    await s.commit()
+    try:
+        await s.commit()
+    except Exception:
+        await storage.delete(row.storage_key)
+        raise
     return {**public_import(row), 'columns': headers, 'preview': rows[:5]}
 
 
-@router.put('/analytics/imports/{import_id}/mapping')
+@router.put('/analytics/imports/{import_id}/mapping', dependencies=[Depends(mutation_guard)])
 async def mapping(import_id: str, body: MappingIn, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     row = await service.own_import(s, p.org_id, import_id)
     if row.status != 'preview':
@@ -131,7 +145,7 @@ async def mapping(import_id: str, body: MappingIn, p: Principal = Depends(role('
     return {'summary': {key: value for key, value in parsed.items() if key != 'posts'}, 'posts_preview': parsed.get('posts', [])[:5]}
 
 
-@router.post('/analytics/imports/{import_id}/apply')
+@router.post('/analytics/imports/{import_id}/apply', dependencies=[Depends(mutation_guard)])
 async def apply(import_id: str, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     row = await service.own_import(s, p.org_id, import_id)
     if row.status == 'applied':
@@ -148,7 +162,7 @@ async def apply(import_id: str, p: Principal = Depends(role('member')), s: Async
     return public_import(row)
 
 
-@router.post('/analytics/manual')
+@router.post('/analytics/manual', dependencies=[Depends(mutation_guard)])
 async def manual(body: ManualPostIn, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     import csv
     import io
@@ -189,7 +203,7 @@ async def suggestions(post_id: str, p: Principal = Depends(principal), s: AsyncS
     return await service.suggestions(s, p.org_id, await own_post(s, p.org_id, post_id))
 
 
-@router.put('/analytics/posts/{post_id}/link')
+@router.put('/analytics/posts/{post_id}/link', dependencies=[Depends(mutation_guard)])
 async def link(post_id: str, body: LinkIn, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     post = await own_post(s, p.org_id, post_id)
     if not body.simulation_id:
@@ -213,7 +227,7 @@ async def link(post_id: str, body: LinkIn, p: Principal = Depends(role('member')
     return {'ok': True, 'simulation_id': post.simulation_id}
 
 
-@router.post('/analytics/delete')
+@router.post('/analytics/delete', dependencies=[Depends(mutation_guard)])
 async def delete_imports(body: DeleteIn, p: Principal = Depends(role('admin')), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(AnalyticsImport).where(AnalyticsImport.org_id == p.org_id))).scalars().all()
     for row in rows:

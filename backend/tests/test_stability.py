@@ -160,6 +160,34 @@ async def test_expired_worker_cannot_commit(client, auth):
     assert (await client.get(f"/simulations/{sim['id']}", headers=h)).json()["status"] == "draft"
 
 
+async def test_watchdog_recovers_lost_autopilot_handoff_but_keeps_manual_pause(client, auth):
+    from app.services.watchdog import fail_expired
+    h, _ = auth
+    project = (await client.post('/projects', headers=h, json={'name': 'Handoffs'})).json()
+    ids = []
+    for autopilot in (False, True):
+        sim = (await client.post(f"/projects/{project['id']}/simulations", headers=h,
+            json={'content': {'type': 'text', 'text': 'Fixture'}})).json()
+        async with session_scope() as s:
+            row = await s.get(Simulation, sim['id'])
+            row.status = 'graph_ready'
+            row.config = {'autopilot': autopilot}
+        ids.append(sim['id'])
+    assert await check(utcnow() + timedelta(seconds=settings.simulation_max_duration_seconds + 1)) == 1
+    assert (await client.get(f'/simulations/{ids[0]}', headers=h)).json()['status'] == 'graph_ready'
+    assert (await client.get(f'/simulations/{ids[1]}', headers=h)).json()['status'] == 'failed'
+    async with session_scope() as s:
+        row = await s.get(Simulation, ids[1])
+        row.status, row.execution_token = 'running', 'replacement'
+    await fail_expired(ids[1], 'expired')
+    assert (await client.get(f'/simulations/{ids[1]}', headers=h)).json()['status'] == 'running'
+    async with session_scope() as s:
+        row = await s.get(Simulation, ids[1])
+        row.status, row.report_status = 'completed', 'done'
+    await fail_expired(ids[1], 'replacement')
+    assert (await client.get(f'/simulations/{ids[1]}', headers=h)).json()['status'] == 'completed'
+
+
 async def test_watchdog_and_tenant_retry(client, auth):
     h, _ = auth
     project = (await client.post("/projects", headers=h, json={"name": "Watchdog"})).json()

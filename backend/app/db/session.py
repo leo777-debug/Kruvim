@@ -44,7 +44,7 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
                 from sqlalchemy import select
 
                 from app.models import Simulation
-                token = (await s.execute(select(Simulation.execution_token).where(Simulation.id == lease[0]))).scalar_one_or_none()
+                token = (await s.execute(select(Simulation.execution_token).where(Simulation.id == lease[0]).with_for_update())).scalar_one_or_none()
                 if token != lease[1]:
                     await s.rollback()
                     raise asyncio.CancelledError("This workflow execution was replaced or expired")
