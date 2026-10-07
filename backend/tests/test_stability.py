@@ -133,6 +133,43 @@ async def test_event_stream_releases_authorisation_connection(client, auth):
         assert engine.pool.checkedout() == before
 
 
+@pytest.mark.parametrize('during_subscribe', [False, True])
+async def test_disconnected_stream_closes_redis_subscription(client, auth, monkeypatch, during_subscribe):
+    import anyio
+
+    from app.services import events
+    h, _ = auth
+    project = (await client.post('/projects', headers=h, json={'name': 'Redis stream'})).json()
+    sim = (await client.post(f"/projects/{project['id']}/simulations", headers=h,
+        json={'content': {'type': 'text', 'text': 'Redis fixture'}})).json()
+    await events.bus.publish(sim['id'], 'graph.progress', {'message': 'Fixture'})
+    class Subscription:
+        closed = False
+        async def subscribe(self, channel):
+            await anyio.lowlevel.checkpoint()
+        async def unsubscribe(self, channel):
+            await anyio.lowlevel.checkpoint()
+        async def aclose(self):
+            await anyio.lowlevel.checkpoint()
+            self.closed = True
+    subscription = Subscription()
+    class Redis:
+        def pubsub(self):
+            return subscription
+    monkeypatch.setattr(events, 'get_redis', Redis)
+    stream = events.bus.stream(sim['id'])
+    if during_subscribe:
+        with anyio.CancelScope() as disconnected:
+            disconnected.cancel()
+            await anext(stream)
+    else:
+        assert 'graph.progress' in await anext(stream)
+        with anyio.CancelScope() as disconnected:
+            disconnected.cancel()
+            await stream.aclose()
+    assert subscription.closed
+
+
 async def test_api_watchdog_runs_without_workers_and_stops_on_shutdown(monkeypatch):
     import asyncio
     from unittest.mock import AsyncMock

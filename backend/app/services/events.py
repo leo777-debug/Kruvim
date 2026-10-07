@@ -62,14 +62,14 @@ class EventBus:
         r = get_redis()
         pubsub = None
         q: asyncio.Queue | None = None
-        if follow:
-            if r is not None:
-                pubsub = r.pubsub()
-                await pubsub.subscribe(f"sim:{sim_id}")
-            else:
-                q = asyncio.Queue()
-                self._local[sim_id].add(q)
         try:
+            if follow:
+                if r is not None:
+                    pubsub = r.pubsub()
+                    await pubsub.subscribe(f"sim:{sim_id}")
+                else:
+                    q = asyncio.Queue()
+                    self._local[sim_id].add(q)
             last = after
             ended = False
             while True:   # replay in pages
@@ -114,8 +114,11 @@ class EventBus:
                 yield msg
         finally:
             if pubsub is not None:
-                await pubsub.unsubscribe(f"sim:{sim_id}")
-                await pubsub.aclose()
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await pubsub.unsubscribe(f"sim:{sim_id}")
+                    finally:
+                        await pubsub.aclose()
             if q is not None:
                 self._local[sim_id].discard(q)
 
