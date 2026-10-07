@@ -68,7 +68,11 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     healthcheck:
-      disable: true
+      test: ["CMD", "arq", "app.workers.main.WorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   connector-worker:
     <<: *backend
@@ -77,7 +81,11 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     healthcheck:
-      disable: true
+      test: ["CMD", "arq", "app.workers.connectors.ConnectorWorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   web:
     build: ./frontend

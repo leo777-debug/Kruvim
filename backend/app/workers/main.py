@@ -2,6 +2,7 @@
 
 Scale horizontally by running more worker containers; each handles `KRUVIM_WORKER_MAX_JOBS` jobs."""
 from __future__ import annotations
+import os
 
 from arq import cron
 from arq.connections import RedisSettings
@@ -41,6 +42,8 @@ async def watch_runs(ctx):
 
 
 class WorkerSettings:
+    health_check_interval = 30
+    health_check_key = f"kruvim:worker:{os.getenv('HOSTNAME', 'local')}:health"
     functions = [tasks.build_graph, tasks.prepare_environment, tasks.run_simulation, tasks.generate_report, tasks.run_survey,
                  tasks.refresh_datapool, tasks.monitoring_tick, tasks.run_connector, tasks.build_population, tasks.resume_autopilot]
     cron_jobs = [cron(tasks.refresh_datapool, minute=set(range(0, 60, 10)), run_at_startup=True, unique=True),

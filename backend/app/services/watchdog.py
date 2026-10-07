@@ -69,7 +69,7 @@ async def check(now=None):
             # Ask a live worker to cancel before making the test retryable.
             try:
                 await Job(row.job_id, await jobs._arq_pool()).abort(timeout=2)
-            except TimeoutError:
+            except Exception:
                 pass  # The database fence below also blocks a slow worker's later commits.
         elif row.job_id in jobs._local_tasks:
             task = jobs._local_tasks[row.job_id]

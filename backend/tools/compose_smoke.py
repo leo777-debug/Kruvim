@@ -19,11 +19,11 @@ async def check(url):
         response = await client.post(f"/projects/{project.json()['id']}/simulations", json={
             'content': {'type': 'video', 'format': 'short_video', 'platform': 'tiktok',
                 'transcript': 'Mix oats with yogurt and a banana for a quick breakfast. Try it tomorrow.'},
-            'audience': {'regions': ['SA']}, 'autopilot': True,
+            'audience': {'regions': ['SA']},
             'overrides': {'voice': 10, 'crowd': 50, 'stakeholders': 0, 'hours': 1, 'listening': False}})
         response.raise_for_status()
         sid = response.json()['id']
-        response = await client.post(f'/simulations/{sid}/graph')
+        response = await client.post(f'/simulations/{sid}/autopilot')
         response.raise_for_status()
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:

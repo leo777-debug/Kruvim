@@ -16,6 +16,18 @@ from app.services.sources import ensure_sources
 from app.services.watchdog import check
 
 
+def test_compose_worker_health_checks():
+    from pathlib import Path
+
+    from app.workers.connectors import ConnectorWorkerSettings
+    from app.workers.main import WorkerSettings
+    assert WorkerSettings.health_check_interval == ConnectorWorkerSettings.health_check_interval == 30
+    assert WorkerSettings.health_check_key != ConnectorWorkerSettings.health_check_key
+    compose = (Path(__file__).parents[2] / 'docker-compose.yml').read_text()
+    assert '"app.workers.main.WorkerSettings", "--check"' in compose
+    assert '"app.workers.connectors.ConnectorWorkerSettings", "--check"' in compose
+
+
 async def test_default_registry_has_weights_and_personal_signals(client, auth):
     h, session = auth
     await ensure_platform_connectors()
