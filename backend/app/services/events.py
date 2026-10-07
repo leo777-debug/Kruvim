@@ -11,6 +11,7 @@ import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
 
+import anyio
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -72,9 +73,13 @@ class EventBus:
             last = after
             ended = False
             while True:   # replay in pages
-                async with session_scope() as s:
-                    rows = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim_id, SimEvent.seq > last)
-                                            .order_by(SimEvent.seq).limit(500))).scalars().all()
+                # Finish this short read before handling a stream disconnect.
+                # Cancellation inside aiosqlite's cursor invalidates the pooled
+                # connection before session cleanup can shield its rollback.
+                with anyio.CancelScope(shield=True):
+                    async with session_scope() as s:
+                        rows = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim_id, SimEvent.seq > last)
+                                                .order_by(SimEvent.seq).limit(500))).scalars().all()
                 for row in rows:
                     last = row.seq
                     ended = ended or row.type in TERMINAL

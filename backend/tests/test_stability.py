@@ -105,6 +105,7 @@ async def test_disconnected_stream_finishes_database_cleanup(monkeypatch, tmp_pa
 async def test_event_stream_releases_authorisation_connection(client, auth):
     from types import SimpleNamespace
 
+    import anyio
     from starlette.requests import Request
 
     from app.api.routes.simulations import events
@@ -121,7 +122,11 @@ async def test_event_stream_releases_authorisation_connection(client, auth):
         response = await events(sim['id'], request, SimpleNamespace(org_id=account['orgs'][0]['id']), session)
         assert engine.pool.checkedout() == before
         assert not session.in_transaction()
-        assert b'graph.progress' in (await anext(response.body_iterator)).encode()
+        first = None
+        with anyio.CancelScope() as disconnected:
+            disconnected.cancel()
+            first = await anext(response.body_iterator)
+        assert first is not None and 'graph.progress' in first
         assert len(bus._local[sim['id']]) == 1
         await response.body_iterator.aclose()
         assert not bus._local[sim['id']]
