@@ -17,6 +17,7 @@ const DataPool = lazy(() => import("./features/datapool/DataPoolPage"));
 const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
+const LaunchForecasts = lazy(() => import("./features/launches/LaunchForecastsPage"));
 const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
 const PublicResults = lazy(() => import("./features/simulations/PublicResultsPage"));
 const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
@@ -87,6 +88,7 @@ export default function App() {
           <Route path="my-audience" element={<MyAudience />} />
           <Route path="monitoring" element={<Monitoring />} />
           <Route path="calibration" element={<Calibration />} />
+          <Route path="launches" element={<LaunchForecasts />} />
           <Route path="settings" element={<Settings />} />
           <Route path="usage" element={<Usage />} />
           <Route path="admin" element={<Admin />} />

@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     embedding_price_per_million: float | None = Field(default=None, ge=0)
     connector_concurrency: int = Field(default=3, ge=1, le=20)
     connector_min_interval_seconds: dict[str, float] = Field(default_factory=lambda: {"gdelt": 10, "reddit": 2})
+    # Units Kruvim may spend per UTC day on each keyed API (YouTube's default project quota is 10,000).
+    connector_daily_quota_units: dict[str, int] = Field(default_factory=lambda: {"youtube": 9000})
     snapshot_archive_days: int = Field(default=30, ge=1)
     signal_max_age_hours: dict[str, float] = Field(default_factory=lambda: {
         "weather": 1, "headline": 3, "tone": 3, "trend": 6, "social_trend": 6, "event": 24, "economy": 24})

@@ -38,3 +38,29 @@ async def source_slot(key):
     finally:
         if redis:
             await redis.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end", 1, lock_key, token)
+
+
+_spent = {}
+
+
+async def spend_quota(key, units):
+    """Reserve `units` of today's (UTC) API budget for `key`; False once the budget would be exceeded.
+    Keys without a configured budget are unlimited."""
+    limit = settings.connector_daily_quota_units.get(key)
+    if limit is None:
+        return True
+    day = time.strftime("%Y%m%d", time.gmtime())
+    redis = get_redis()
+    if redis:
+        counter = f"connector-quota:{key}:{day}"
+        used = await redis.incrby(counter, units)
+        await redis.expire(counter, 2 * 86400)
+        if used > limit:
+            await redis.decrby(counter, units)
+            return False
+        return True
+    used = _spent.get((key, day), 0)
+    if used + units > limit:
+        return False
+    _spent[(key, day)] = used + units
+    return True

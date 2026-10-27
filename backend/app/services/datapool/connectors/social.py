@@ -193,7 +193,8 @@ class YouTubeConnector(BaseConnector):
         return [x for lst in res if isinstance(lst, list) for x in lst]
 
     async def search(self, client, query, regions, secrets, config, limit=10):
-        if not secrets.get("youtube_api_key"):
+        from ..limits import spend_quota
+        if not secrets.get("youtube_api_key") or not await spend_quota("youtube", 100):
             return []
         reg = regions[0] if regions else {"yt_region": "US", "code": "*"}
         r = await client.get("https://www.googleapis.com/youtube/v3/search", params={
@@ -203,6 +204,49 @@ class YouTubeConnector(BaseConnector):
         return [SignalItem("social_post", reg.get("code", "*"), f"{i['snippet']['title']} — {i['snippet'].get('description', '')[:200]}",
                            url=f"https://youtu.be/{i['id'].get('videoId')}", observed_at=_iso(i["snippet"].get("publishedAt")),
                            payload={"platform": "youtube", "author": i["snippet"].get("channelTitle", "")}) for i in r.json().get("items", [])]
+
+
+    async def comments(self, client, video_id, secrets, limit=200, after=None, before=None, max_pages=10):
+        """Top-level comments on one video, newest first, published in [after, before). Each page costs 1 quota unit;
+        paging stops at `limit`, at `max_pages`, once comments are older than `after`, or when today's budget runs out."""
+        from ..limits import spend_quota
+        if not secrets.get("youtube_api_key"):
+            return []
+        out, token = [], None
+        for _ in range(max_pages):
+            if not await spend_quota("youtube", 1):
+                break
+            params = {"part": "snippet", "videoId": video_id, "order": "time", "maxResults": 100, "textFormat": "plainText",
+                      "key": secrets["youtube_api_key"]}
+            if token:
+                params["pageToken"] = token
+            r = await client.get("https://www.googleapis.com/youtube/v3/commentThreads", params=params)
+            if r.status_code == 403 and "commentsDisabled" in r.text:
+                return out
+            r.raise_for_status()
+            d = r.json()
+            older = False
+            for item in d.get("items", []):
+                top = (item.get("snippet") or {}).get("topLevelComment") or {}
+                c = top.get("snippet") or {}
+                at = _iso(c.get("publishedAt"))
+                if at is None or (before and at >= before):
+                    continue
+                if after and at < after:
+                    older = True
+                    break
+                text = (c.get("textDisplay") or c.get("textOriginal") or "").strip()
+                if text:
+                    out.append(SignalItem("social_comment", "*", text[:1000], value=float(c.get("likeCount") or 0), observed_at=at,
+                                          url=f"https://www.youtube.com/watch?v={video_id}&lc={top.get('id', '')}",
+                                          payload={"platform": "youtube", "video_id": video_id, "author": c.get("authorDisplayName", ""),
+                                                   "replies": (item.get("snippet") or {}).get("totalReplyCount", 0)}))
+                if len(out) >= limit:
+                    return out
+            token = d.get("nextPageToken")
+            if older or not token:
+                break
+        return out
 
 
 class XConnector(BaseConnector):

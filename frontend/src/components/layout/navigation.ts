@@ -31,6 +31,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     { to: "/population", label: "Population", icon: "Users2", description: "Population: the synthetic people behind every simulation" },
     { to: "/monitoring", label: "Monitoring", icon: "Gauge", description: "Monitoring: watch feeds and test new posts automatically" },
     { to: "/calibration", label: "Calibration", icon: "Gauge", description: "Calibration: compare predicted and actual post outcomes" },
+    { to: "/launches", label: "Launch forecasts", icon: "Gauge", description: "Launch forecasts: lock predictions for product launches and score them after release" },
     { to: "/accuracy", label: "Public accuracy", icon: "BarChart3", description: "Public accuracy: published measurements and their uncertainty" },
     { to: "/usage", label: "Usage and credits", icon: "BarChart3", description: "Usage and credits: review your plan, balance and model usage" },
     { to: "/admin", label: "Platform admin", icon: "Shield", adminOnly: true, description: "Platform admin: manage workspaces, plans and system health" },
