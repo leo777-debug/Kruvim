@@ -10,6 +10,7 @@ import type { Simulation } from "@/lib/types";
 import { fmt } from "@/lib/utils";
 import type { StreamState } from "./useSimulationStream";
 import { prepareRetest } from "./retest";
+import { CrowdSegments } from "./results/CrowdSegments";
 
 export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
   sim: Simulation; stream: StreamState; onDetails: () => void; onAgent: (ref: string) => void; refetch: () => void;
@@ -68,6 +69,7 @@ export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
         {["video", "audio"].includes(sim.content.type) && worst && <p className="text-sm">The biggest drop is at <strong>{worst.label}</strong>{r.heatmap.timed && worst.start != null ? ` (${fmt.t(worst.start)})` : ""}: {fmt.pct(worst.loss)} stop paying attention.</p>}
         <div className="border-t border-line pt-4"><h3 className="font-semibold">The most important fix</h3><p className="mt-1 text-sm">{fix?.title || "Keep the strongest part and try a new opening"}</p>{fix?.detail && <p className="mt-1 text-sm text-muted">{fix.detail}</p>}<Button className="mt-3" variant="primary" loading={busy} onClick={retest}>Re-test with this fix</Button></div>
       </Card>
+      <CrowdSegments segments={r.described_segments} brief={sim.audience?.brief} onAgent={onAgent} />
       <Card className="p-5"><h2 className="mb-3 font-semibold">What people said</h2><p className="mb-3 text-xs text-muted">Simulated reactions, not real follower feedback.</p>{[...(r.winners || []), ...(r.losers || [])].filter((g) => g.evidence).slice(0, 4).map((g) => <blockquote className="mb-4 border-l-2 border-line pl-3 text-sm" key={g.key}><p>“{g.evidence.quote}”</p><button className="mt-1 text-xs text-brand" onClick={() => onAgent(g.evidence.agent)}>{g.evidence.name} · {g.label}</button></blockquote>)}</Card>
       <Card className="p-5"><h2 className="mb-3 font-semibold">Who it reaches</h2><div className="grid gap-3 sm:grid-cols-3">{(r.groups?.region || []).map((g: any) => <div key={g.key} className="rounded border border-line p-3 text-sm"><strong>{g.label}</strong><p className="mt-1">{g.score.toFixed(1)} / 10</p><p className="text-xs text-muted">{fmt.pct(g.share_of_audience)} of your chosen audience</p></div>)}</div></Card>
       <Card className="p-5"><h2 className="mb-3 font-semibold">Fixes</h2>{(r.recommendations || []).slice(1, 4).map((x: any) => <div key={x.id} className="mb-4 text-sm"><h3 className="font-medium">{x.title}</h3><p className="mt-1 text-muted">{x.detail}</p></div>)}<Button onClick={onDetails}>Details</Button><p className="mt-2 text-xs text-muted">Full report, charts, transcript, graph and method.</p></Card>

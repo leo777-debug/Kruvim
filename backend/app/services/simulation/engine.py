@@ -506,6 +506,7 @@ class Engine:
         self.c_region = self.pop.region[self.crowd_idx].astype(np.int64)
         reddit = ((self.pop.platforms[self.crowd_idx] >> PLATFORMS.index("reddit")) & 1).astype(bool)
         self.c_forum = reddit | (self.rng.random(self.crowd_idx.size) < 0.15)
+        self.apply_traits(self.audience.get("traits") or {})
         self.c_exposed_creator = 0
         self.c_reposts_creator = 0
         codes = [r["code"] for r in REGIONS]
@@ -514,6 +515,30 @@ class Engine:
             self.writer.node(f"crowd:{codes[k]}", "crowd", f"Crowd · {REGIONS[k]['city']}", "crowd", f"{n_k:,} population agents",
                              region=codes[k], size=n_k)
             self.writer.edge(f"crowd:{codes[k]}", f"region:{codes[k]}", "lives_in", "")
+
+    def apply_traits(self, t: dict):
+        """Behaviour from the creator's crowd description. Crowd agents never read the brief, so its behavioural side
+        (how often they scroll, share, push back, argue in threads) is applied to their policy here. Opinion needs no
+        adjustment: the projection is fitted on voice agents who did read the brief."""
+        n = self.crowd_idx.size
+        if t.get("activity"):
+            self.c_act = np.clip(self.c_act * float(t["activity"]), 0.01, 0.95)
+        if t.get("sharing"):
+            self.c_share = np.clip(self.c_share * float(t["sharing"]), 0, 1)
+
+        def retarget(flags: np.ndarray, share: float) -> np.ndarray:
+            # move the smallest number of agents across so the flagged share matches the description
+            want, have = int(round(share * n)), int(flags.sum())
+            out = flags.copy()
+            if want > have:
+                out[self.rng.choice(np.flatnonzero(~flags), want - have, replace=False)] = True
+            elif want < have:
+                out[self.rng.choice(np.flatnonzero(flags), have - want, replace=False)] = False
+            return out
+        if t.get("contrarian") is not None:
+            self.c_contrarian = retarget(self.c_contrarian, float(t["contrarian"]))
+        if t.get("forum") is not None:
+            self.c_forum = retarget(self.c_forum, float(t["forum"]))
 
     def crowd_step(self) -> dict:
         if getattr(self, "crowd_idx", np.array([])).size == 0:

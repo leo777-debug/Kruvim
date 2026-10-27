@@ -19,7 +19,8 @@ TOOL_SPECS = {
     "panorama_search": "Current and superseded facts with validity dates. input: {\"query\": str}",
     "insight_search": "Decompose a question into 3-5 sub-questions, hybrid search and expand 1-2 relation hops. input: {\"query\": str, \"hops\": 1|2}",
     "graph_search": "Search the knowledge graph (entities, relations, live news/trend signals, simulated posts). input: {\"query\": str}",
-    "simulation_stats": "Aggregated results. input: {\"section\": one of overview|segments|attention|spread|platforms|psychology|discourse|timeline|ab}",
+    "simulation_stats": "Aggregated results. input: {\"section\": one of overview|segments|attention|spread|platforms|psychology|discourse|timeline|ab}. "
+                        "segments includes creator_segments: the groups the creator asked to compare.",
     "top_posts": "Most engaging posts from the simulation. input: {\"platform\": \"feed\"|\"forum\"|\"any\", \"limit\": int<=10}",
     "population_query": "Projected reaction of any slice of the population. input: {\"regions\": [codes], \"age_min\": int, \"age_max\": int, "
                         "\"genders\": [\"female\"|\"male\"], \"platforms\": [keys], \"citizens_only\": bool}",
@@ -105,7 +106,7 @@ class Toolbox:
             return {"score": r.get("score"), "viral": {k: r.get("viral", {}).get(k) for k in ("score", "factors", "in_simulation")},
                     "audience": r.get("audience"), "trend": {"score": r.get("trend", {}).get("score"), "matches": r.get("trend", {}).get("matches", [])[:4]}}
         if sec == "segments":
-            return {"winners": r.get("winners"), "losers": r.get("losers"), "opportunities": r.get("opportunities"),
+            return {"creator_segments": r.get("described_segments") or None, "winners": r.get("winners"), "losers": r.get("losers"), "opportunities": r.get("opportunities"),
                     "by_region": r.get("groups", {}).get("region"), "by_age": r.get("groups", {}).get("age"), "by_stance": r.get("groups", {}).get("stance")}
         if sec == "attention":
             h = r.get("heatmap", {})

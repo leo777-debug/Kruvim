@@ -8,7 +8,7 @@ import re
 
 from pydantic import ValidationError
 
-from app.schemas.simulation import AudienceIn
+from app.schemas.simulation import AudienceIn, CrowdSegment, CrowdTraits
 from app.services.llm import BaseLLM, Usage
 from app.services.population.regions import (
     INCOME_LABELS,
@@ -43,6 +43,14 @@ Rules:
 - The brief is 1-4 plain sentences in third person describing the crowd as people ("They follow street-food creators,
   are sceptical of influencer ads..."). Merge the new message into the previous brief; drop anything the creator retracts.
   Do not restate filters already captured (ages, regions) unless needed for nuance. Empty if nothing goes beyond filters.
+- traits: how this crowd behaves online, for the thousands of statistical crowd agents that never read the brief.
+  activity and sharing are multipliers (1 = typical; 2 = doomscrolls / forwards everything; 0.5 = lurks / rarely
+  shares); contrarian = share who push back against the room (typical 0.1); forum = share who argue in threads rather
+  than the feed (typical 0.2). Use null for anything the creator did not imply. Keep current traits unless changed.
+- segments: 2-4 named groups inside the crowd that the results should compare. If the creator names groups ("the
+  skeptics vs the fans", "students against working parents"), use exactly those. Otherwise keep the current segments,
+  or propose 2-3 contrasts that matter for this crowd. Define each with filters (usually stances, ages, genders,
+  interests, professions, incomes) that pick that group out of the crowd; do not repeat the crowd's own filters.
 - reply: one or two friendly sentences telling the creator what you set and anything you could not map.
 
 Allowed values:
@@ -53,6 +61,8 @@ Reply with JSON only:
   "interests": [...], "professions": [...], "incomes": [...], "stances": [...], "citizens_only": <bool>, "expats_only": <bool>,
   "education_min": <0-3 or null>, "emirates": [...], "nationality_groups": [...], "income_bands": [...], "languages": [...],
   "ocean": {{"<trait>": [<lo 0-1>, <hi 0-1>]}}}},
+ "traits": {{"activity": <0.3-3 or null>, "sharing": <0.3-3 or null>, "contrarian": <0-1 or null>, "forum": <0-1 or null>}},
+ "segments": [{{"name": "<short name>", "description": "<one line>", "filters": {{<same keys as filters, only what defines the group>}}}}],
  "brief": "<crowd brief>", "reply": "<what you did>"}}"""
 
 
@@ -74,9 +84,9 @@ def _num(v, lo: float, hi: float, cast=int):
         return None
 
 
-def sanitize(current: dict, filters: dict) -> dict:
-    """Merge proposed filters onto the current audience, dropping unknown values and any field that fails validation."""
-    out = dict(current)
+def coerce(filters: dict) -> dict:
+    """Only the filter keys given, with unknown values dropped and numbers clamped."""
+    out = {}
     for k in FIELDS:
         if k not in filters:
             continue
@@ -94,6 +104,12 @@ def sanitize(current: dict, filters: dict) -> dict:
             rng = {t: (_num(r[0], 0.0, 1.0, float), _num(r[1], 0.0, 1.0, float)) for t, r in v.items()
                    if t in OCEAN and isinstance(r, (list, tuple)) and len(r) == 2}
             out[k] = {t: sorted(r) for t, r in rng.items() if None not in r and r != (0.0, 1.0)}
+    return out
+
+
+def sanitize(current: dict, filters: dict) -> dict:
+    """Merge proposed filters onto the current audience, dropping unknown values and any field that fails validation."""
+    out = dict(current) | coerce(filters)
     if not out.get("regions"):
         out["regions"] = current.get("regions") or []         # a crowd always lives somewhere; keep the last places
     if out.get("age_min") and out.get("age_max") and out["age_min"] > out["age_max"]:
@@ -107,21 +123,50 @@ def sanitize(current: dict, filters: dict) -> dict:
         return AudienceIn.model_validate({k: v for k, v in out.items() if k not in bad} | {k: current[k] for k in bad if k in current}).model_dump()
 
 
+def traits(current: dict, proposed) -> dict:
+    """Merge proposed behaviour traits onto the current ones; out-of-range values are clamped, junk is ignored."""
+    out = dict(current.get("traits") or {})
+    bounds = {"activity": (0.3, 3.0), "sharing": (0.3, 3.0), "contrarian": (0.0, 1.0), "forum": (0.0, 1.0)}
+    for k, (lo, hi) in bounds.items():
+        if isinstance(proposed, dict) and k in proposed:
+            out[k] = None if proposed[k] is None else _num(proposed[k], lo, hi, float)
+    return CrowdTraits.model_validate(out).model_dump()
+
+
+def segments(proposed, fallback: list) -> list[dict]:
+    """Keep only well-formed, distinct segments; an unusable proposal keeps the previous segments."""
+    out = []
+    for seg in proposed if isinstance(proposed, list) else []:
+        try:
+            s = CrowdSegment.model_validate({"name": str(seg.get("name", "")).strip()[:80], "description": str(seg.get("description") or "")[:300],
+                                             "filters": coerce(seg.get("filters") or {})})
+        except (ValidationError, AttributeError, TypeError):
+            continue
+        if s.filters and s.name.lower() not in {x["name"].lower() for x in out}:
+            out.append(s.model_dump())
+    return out[:4] if len(out) >= 2 else list(fallback or [])
+
+
 async def interpret(message: str, current: dict, llm: BaseLLM, usage: Usage) -> dict:
     """One chat turn. Returns {"audience": updated audience, "reply": text, "mode": "model" | "keywords"}."""
     if llm.is_dry:
         return keywords(message, current)
     user = json.dumps({"current_filters": {k: current.get(k) for k in FIELDS}, "current_brief": current.get("brief", ""),
+                       "current_traits": current.get("traits") or {}, "current_segments": current.get("segments") or [],
                        "message": message}, ensure_ascii=False)
-    out = await llm.complete_json(system=SYSTEM.format(vocab=vocab()), user=user, role="brief", max_tokens=1200, usage=usage,
+    out = await llm.complete_json(system=SYSTEM.format(vocab=vocab()), user=user, role="brief", max_tokens=1800, usage=usage,
                                   temperature=0.2)
     aud = sanitize(current, out.get("filters") or {})
     aud["brief"] = str(out.get("brief") or "").strip()[:BRIEF_MAX]
+    aud["traits"] = traits(current, out.get("traits"))
+    aud["segments"] = segments(out.get("segments"), current.get("segments"))
     return {"audience": aud, "reply": str(out.get("reply") or "Updated the crowd.").strip()[:600], "mode": "model"}
 
 
 # ---- keyword fallback (dry run, or when the model is unavailable) ---------------------------------------------------
 GULF = ["AE", "SA", "KW", "QA", "BH", "OM"]
+DEMONYMS = {"SA": r"\bsaudis?\b", "AE": r"\bemirat", "US": r"\bamerican", "GB": r"\bbritish|\bbrits?\b|\bengland|\benglish people",
+            "MA": r"\bmorocc", "IN": r"\bindians? in india|\bdesi\b"}
 AGE_WORDS = {"gen z": (16, 27), "genz": (16, 27), "zoomer": (16, 27), "teen": (16, 19), "student": (16, 25), "millennial": (28, 43),
              "gen x": (44, 59), "boomer": (60, 70), "young": (16, 30), "older": (45, 70), "retire": (60, 70)}
 GENDER_WORDS = {"female": ["women", "woman", "female", "girls", "moms", "mothers", "ladies"],
@@ -133,6 +178,17 @@ INTEREST_WORDS = {"gaming": ["gamer", "gaming", "esports"], "fitness_health": ["
                   "tech": ["tech", "developer", "coder", "gadget", "ai "], "food": ["food", "cook", "recipe", "restaurant"],
                   "cars": ["car ", "cars", "motor"], "travel": ["travel"], "sports": ["sport", "football", "soccer", "cricket"],
                   "music": ["music", "concert"], "comedy": ["comedy", "meme", "funny"], "education": ["learn", "educat"]}
+
+
+TRAIT_WORDS = [("activity", r"doomscroll|always online|scroll all day|chronically online|addicted", 1.8),
+               ("activity", r"\blurk|rarely (?:post|open|use)|barely (?:use|online)|offline", 0.5),
+               ("sharing", r"share everything|forward(?:s|ing)? everything|reshar|repost a lot", 1.8),
+               ("contrarian", r"skeptic|sceptic|cynic|roll(?:s)? their eyes|argue|troll|hater", 0.35),
+               ("forum", r"reddit|forum|threads|argue in the comments|comment section", 0.45)]
+SEGMENT_WORDS = {"Fans": (r"\bfans?\b|enthusias|\blove\b|superfans?", "Enthusiasts who are primed to like it", ["enthusiast"]),
+                 "Skeptics": (r"skeptic|sceptic|cynic|roll(?:s)? their eyes", "People who want proof before they buy in", ["skeptic"]),
+                 "Contrarians": (r"contrarian|hater|troll|argue", "People who look for what is wrong", ["contrarian"]),
+                 "Casual scrollers": (r"casual|lurk|disengaged|barely", "People who barely pay attention", ["disengaged", "neutral"])}
 
 
 def keywords(message: str, current: dict) -> dict:
@@ -160,7 +216,8 @@ def keywords(message: str, current: dict) -> dict:
     names = lambda r: {r["name"], r["short"]} | ({r["city"]} if r["city"] not in EMIRATES.values() else set())  # noqa: E731
     # "egypt" also matches "egyptian"; short names ("uk", "usa") must match whole words
     word = lambda n: rf"\b{re.escape(n.lower())}" + (r"\b" if len(n) <= 3 else "")  # noqa: E731
-    regs = [r["code"] for r in REGIONS if any(re.search(word(n), t) for n in names(r))] + emirates
+    regs = [r["code"] for r in REGIONS if any(re.search(word(n), t) for n in names(r))
+            or re.search(rf"(?:{DEMONYMS.get(r['code'], '$^')})(?!\w*\s+expat)", t)] + emirates  # "British expats" is a nationality
     if re.search(r"\bgulf\b|\bgcc\b|\bkhaleeji\b", t):
         regs += [c for c in GULF if c in LISTS["regions"] and c not in regs]
     if regs and re.search(r"\b(too|also|add|plus|as well)\b", t):
@@ -168,7 +225,7 @@ def keywords(message: str, current: dict) -> dict:
     if regs:
         f["regions"] = regs
         said.append(", ".join({r["code"]: r["short"] for r in REGIONS}.get(c) or EMIRATES[c] for c in regs))
-    ints = [k for k, ws in INTEREST_WORDS.items() if any(w in t for w in ws)]
+    ints = [k for k, ws in INTEREST_WORDS.items() if any(re.search(rf"\b{w}", t) for w in ws)]
     if ints:
         f["interests"] = list(dict.fromkeys((current.get("interests") or []) + ints))
         said.append("into " + ", ".join(INTEREST_LABELS[k].lower() for k in ints))
@@ -187,6 +244,13 @@ def keywords(message: str, current: dict) -> dict:
         f["citizens_only"], f["expats_only"] = True, False
         said.append("citizens")
     aud = sanitize(current, f)
+    aud["traits"] = traits(current, {k: v for k, pattern, v in TRAIT_WORDS if re.search(pattern, t)})
+    if any(v is not None for v in aud["traits"].values()) and aud["traits"] != (current.get("traits") or {}):
+        said.append("adjusted how the crowd behaves")
+    groups = [(name, desc, st) for name, (pattern, desc, st) in SEGMENT_WORDS.items() if re.search(pattern, t)]
+    if len(groups) >= 2:
+        aud["segments"] = segments([{"name": n, "description": d, "filters": {"stances": st}} for n, d, st in groups], current.get("segments"))
+        said.append("comparing " + " vs ".join(n.lower() for n, _, _ in groups))
     prev = (current.get("brief") or "").strip()
     sep = " " if prev[-1:] in ".!?" else ". "
     aud["brief"] = (f"{prev}{sep}{message.strip()}" if prev else message.strip())[-BRIEF_MAX:]

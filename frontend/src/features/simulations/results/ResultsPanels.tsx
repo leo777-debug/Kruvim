@@ -10,6 +10,7 @@ import { engColor, REGION_COLORS, scoreColor, STANCE_COLORS } from "@/lib/colors
 import { useReference } from "@/lib/queries";
 import type { Simulation } from "@/lib/types";
 import { cn, fmt, platformName } from "@/lib/utils";
+import { CrowdSegments } from "./CrowdSegments";
 
 const SECTIONS = [
   ["verdict", "Summary"], ["attention", "Attention"], ["audience", "Audience"], ["dynamics", "Conversation"], ["spread", "Reach"], ["platforms", "Platforms"],
@@ -179,7 +180,8 @@ function Audience({ r, sim, onAgent }: { r: any; sim: Simulation; onAgent: (r: s
   const g = r.groups;
   const toRows = (arr: any[]) => arr.map((x) => ({ label: x.label, value: x.score, sub: fmt.pct(x.share_of_audience) }));
   return (
-    <S id="audience" title="Who it lands with" sub="Demographic intersections ranked by projected opinion. Evidence quotes come from interviewed agents in each group.">
+    <S id="audience" title="Who it lands with" sub="Your own segments first, then demographic intersections ranked by projected opinion. Evidence quotes come from interviewed agents in each group.">
+      {r.described_segments?.length > 0 && <div className="mb-4"><CrowdSegments segments={r.described_segments} brief={sim.audience?.brief} onAgent={onAgent} /></div>}
       <div className="grid gap-4 lg:grid-cols-3">
         <GroupCard title="Loves it" list={r.winners} onAgent={onAgent} tone="pos" />
         <GroupCard title="Resists it" list={r.losers} onAgent={onAgent} tone="neg" />

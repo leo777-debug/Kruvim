@@ -10,12 +10,20 @@ import { cn } from "@/lib/utils";
 /** Fields the crowd chat owns; resetting clears these and keeps the rest (creator split, "match my audience"). */
 export const CROWD_DEFAULTS = { regions: ["AE", "SA", "EG", "JO", "MA"], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false,
   expats_only: false, interests: [], professions: [], incomes: [], stances: [], education_min: null, emirates: [], nationality_groups: [],
-  income_bands: [], languages: [], ocean: {}, brief: "" };
+  income_bands: [], languages: [], ocean: {}, brief: "", traits: {}, segments: [] };
+
+const TRAITS: Record<string, (v: number) => string> = {
+  activity: (v) => (v >= 1 ? `Online ${v.toFixed(1)}× as much` : `Online ${Math.round(v * 100)}% as much`),
+  sharing: (v) => (v >= 1 ? `Shares ${v.toFixed(1)}× as much` : `Shares ${Math.round(v * 100)}% as much`),
+  contrarian: (v) => `${Math.round(v * 100)}% push back`,
+  forum: (v) => `${Math.round(v * 100)}% argue in threads`,
+};
 
 const EXAMPLES = [
   "Gen Z gamers in Riyadh who mostly watch on TikTok and roll their eyes at sponsored posts",
   "Night-shift nurses in Dubai who scroll on breaks and love wholesome content",
   "Skeptical Egyptian dads, 35-50, into football and money talk",
+  "Saudi tech fans who doomscroll; compare the skeptics against the fans",
 ];
 
 interface Msg { role: "user" | "assistant"; text: string }
@@ -60,7 +68,9 @@ export function CrowdChat({ value, onChange }: { value: any; onChange: (v: any) 
     ...["professions", "incomes", "stances", "nationality_groups", "income_bands", "languages", "emirates"].flatMap((k) =>
       (value[k] || []).filter((v: string) => k !== "emirates" || !value.regions?.includes(v)).map((v: string) => ({ label: k === "incomes" ? `${v} income` : k === "emirates" ? regionName(v) : v, clear: () => without(k, v) }))),
     ...Object.entries(value.ocean || {}).map(([t, r]: any) => ({ label: `${t} ${r[0].toFixed(1)}–${r[1].toFixed(1)}`, clear: () => { const o = { ...value.ocean }; delete o[t]; drop({ ocean: o }); } })),
+    ...Object.entries(value.traits || {}).filter(([k, v]) => v != null && TRAITS[k]).map(([k, v]) => ({ label: TRAITS[k](v as number), clear: () => drop({ traits: { ...value.traits, [k]: null } }) })),
   ];
+  const segments: { name: string; description?: string }[] = value.segments || [];
 
   return (
     <div className="overflow-hidden rounded-md border border-line">
@@ -93,6 +103,19 @@ export function CrowdChat({ value, onChange }: { value: any; onChange: (v: any) 
           ))}
           {chips.length <= (value.regions?.length || 0) && <span className="text-xs text-muted">Everyone in these places, any age.</span>}
         </div>
+        {segments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted">Results will compare:</span>
+            {segments.map((s, i) => (
+              <span key={s.name} className="inline-flex items-center gap-1">
+                {i > 0 && <span className="text-faint">vs</span>}
+                <span title={s.description} className="inline-flex h-6 items-center gap-1 rounded-md border border-brand/30 bg-brand-soft/60 px-2 text-brand">{s.name}
+                  <button type="button" aria-label={`Stop comparing ${s.name}`} onClick={() => drop({ segments: segments.filter((x) => x.name !== s.name) })} className="hover:text-fg"><X className="h-3 w-3" /></button>
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
         {value.brief && (
           <div className="flex items-start gap-2 rounded-md bg-brand-soft/50 px-2.5 py-2 text-xs leading-relaxed">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" />

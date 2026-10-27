@@ -20,7 +20,8 @@ from .tools import TOOL_SPECS, Toolbox
 
 OUTLINE_SYSTEM = """You are the lead analyst at Kruvim, a synthetic-audience testing platform. A simulation just finished.
 Plan a report that answers the user's question for a content creator or brand team. Use the overview to decide what
-matters. Return JSON: {"title": "...", "summary": "2-3 sentence answer to the question, grounded in the overview numbers",
+matters. If "crowd" describes the audience in the creator's own words, write for that crowd, and if it names segments,
+compare them explicitly (who likes it more, by how much, and why). Return JSON: {"title": "...", "summary": "2-3 sentence answer to the question, grounded in the overview numbers",
  "sections": [{"title": "...", "goal": "what this section must establish"} (3-5 sections)]}"""
 
 REACT_SYSTEM = """You are writing ONE section of a Kruvim simulation report. Work in steps. At each step reply with JSON only:
@@ -69,6 +70,7 @@ async def optimize(sim: Simulation, llm: BaseLLM, usage: Usage) -> dict | None:
         "resists": [{"group": g["label"], "score": g["score"], "quote": (g.get("evidence") or {}).get("quote")} for g in r.get("losers", [])[:3]],
         "loves": [{"group": g["label"], "score": g["score"], "quote": (g.get("evidence") or {}).get("quote")} for g in r.get("winners", [])[:3]],
         "share_intent": ((r.get("viral") or {}).get("raw") or {}).get("mean_share_intent"),
+        "crowd": crowd_context(sim),
     }
     try:
         d = await llm.complete_json(system=OPTIMIZE_SYSTEM, user=json.dumps(evidence, ensure_ascii=False, default=str), role="report",
@@ -127,6 +129,7 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
         try:
             outline = await llm.complete_json(system=OUTLINE_SYSTEM, role="report", max_tokens=1500, usage=usage, temperature=0.3,
                                               user=json.dumps({"question": sim.requirement, "content": sim.card.get("title"),
+                                                               "crowd": crowd_context(sim),
                                                                "overview": json.loads(overview) if overview.startswith("{") else overview}, ensure_ascii=False))
         except LLMAuthError:
             raise
@@ -195,6 +198,17 @@ async def chat(sim: Simulation, report_md: str, history: list[dict], question: s
 
 
 # ---- dry run ----------------------------------------------------------------------------------------------
+def crowd_context(sim: Simulation) -> dict | None:
+    """The crowd as the creator described it, plus how each named segment scored."""
+    aud, r = sim.audience or {}, sim.results or {}
+    if not aud.get("brief") and not r.get("described_segments"):
+        return None
+    return {"description": aud.get("brief", ""), "behaviour": {k: v for k, v in (aud.get("traits") or {}).items() if v is not None},
+            "segments": [{k: s.get(k) for k in ("name", "description", "score", "low", "high", "share_of_audience", "voice_n",
+                                                 "gap_to_best", "objection", "note")} | {"quote": (s.get("evidence") or {}).get("quote")}
+                         for s in r.get("described_segments", [])]}
+
+
 def _dry_outline(sim: Simulation) -> dict:
     sc = (sim.results or {}).get("score", {})
     return {"title": f"[dry run] How audiences responded to “{sim.card.get('title', 'the content')}”",
@@ -216,6 +230,9 @@ async def _dry_section(tb: Toolbox, sec: dict, emit) -> tuple[str, list]:
     r = tb.r
     lines = []
     if goal == "segments":
+        for g in r.get("described_segments", []):
+            if "score" in g:
+                lines.append(f"- Your segment **{g['name']}**: {g['score']:.1f} ({g['share_of_audience']:.1%} of audience)")
         for g in r.get("winners", [])[:2]:
             lines.append(f"- **{g['label']}** score {g['score']:.1f} ({g['share_of_audience']:.1%} of audience)")
         for g in r.get("losers", [])[:2]:

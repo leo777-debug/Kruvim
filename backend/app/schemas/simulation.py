@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.creator import FollowerSplit
 
@@ -44,6 +44,27 @@ class ContentIn(VariantIn):
         return self
 
 
+class CrowdTraits(BaseModel):
+    """How the described crowd behaves, applied to the statistical crowd agents. None keeps the population default."""
+    activity: float | None = Field(default=None, ge=0.3, le=3)       # how often they open the app (multiplier)
+    sharing: float | None = Field(default=None, ge=0.3, le=3)        # how readily they repost (multiplier)
+    contrarian: float | None = Field(default=None, ge=0, le=1)       # share who push back against the room
+    forum: float | None = Field(default=None, ge=0, le=1)            # share who argue in threads rather than the feed
+
+
+class CrowdSegment(BaseModel):
+    """A named group inside the crowd the creator wants to compare ("the skeptics", "the fans"), defined by filters."""
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=300)
+    filters: dict = Field(default_factory=dict)
+
+    @field_validator("filters")
+    @classmethod
+    def _filters(cls, v: dict) -> dict:
+        own = {k: x for k, x in v.items() if k not in ("segments", "traits", "brief", "follower_split", "use_creator_audience")}
+        return AudienceIn.model_validate(own).model_dump(exclude_defaults=True)
+
+
 class AudienceIn(BaseModel):
     follower_split: FollowerSplit | None = None
     use_creator_audience: bool = False
@@ -66,6 +87,8 @@ class AudienceIn(BaseModel):
     expats_only: bool = False
     ocean: dict[Literal["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"], tuple[float, float]] = Field(default_factory=dict)
     brief: str = Field(default="", max_length=2000)          # the crowd in the creator's own words; read by every voice agent
+    traits: CrowdTraits = Field(default_factory=CrowdTraits)
+    segments: list[CrowdSegment] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def _ranges(self):

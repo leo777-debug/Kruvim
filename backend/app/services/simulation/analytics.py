@@ -39,6 +39,39 @@ def real_world(casc: dict, followers: int | None, platform: str | None) -> dict 
                       "viewers; the simulated cascade's amplification is applied to them. Rough order of magnitude, not a forecast."}
 
 
+def described_segments(e, pop, aud, P, ids, by_idx, widening: float) -> list[dict]:
+    """The groups the creator named in the crowd chat ("the skeptics", "the fans"), scored on the same projection as
+    every other segment. Membership comes from each segment's filters inside the audience."""
+    out = []
+    in_aud = np.zeros(pop.n, dtype=bool)
+    in_aud[aud] = True
+    for seg in e.audience.get("segments") or []:
+        m = pop.mask({**seg.get("filters", {}), "include_visitors": e.audience.get("include_visitors", False)}) & in_aud
+        members = aud[m[aud]]             # keeps follower-split resampling weights
+        voices = [by_idx[int(i)] for i in ids if m[int(i)]]
+        row = {"name": seg["name"], "description": seg.get("description", ""), "filters": seg.get("filters", {}),
+               "n": int(members.size), "share_of_audience": round(float(members.size / max(aud.size, 1)), 4), "voice_n": len(voices)}
+        if members.size:
+            score = float(P[members, 0].mean())
+            row.update(score=round(score, 2), low=round(max(0.0, score - widening), 2), high=round(min(10.0, score + widening), 2),
+                       would_share=round(float(P[members, 1].mean()), 3))
+        if voices:
+            a = min(voices, key=lambda a: abs(a.opinion - row.get("score", a.opinion)))
+            row["evidence"] = {"agent": a.ref, "name": a.name, "quote": a.reaction["quote"], "score": a.opinion,
+                               "objection": a.reaction.get("objection", "")}
+            objs = Counter(v.reaction["objection"].lower() for v in voices if v.reaction.get("objection"))
+            row["objection"] = objs.most_common(1)[0][0] if objs else ""
+        out.append(row)
+    scored = [s for s in out if "score" in s]
+    if len(scored) >= 2:
+        hi, lo = max(scored, key=lambda s: s["score"]), min(scored, key=lambda s: s["score"])
+        for s in out:
+            s["gap_to_best"] = round(hi["score"] - s["score"], 2) if "score" in s else None
+        out.sort(key=lambda s: -s.get("score", -1))
+        out[0]["note"] = f"{hi['name']} rate it {hi['score'] - lo['score']:.1f} points higher than {lo['name']}."
+    return out
+
+
 def finalize(e) -> dict:
     pop = e.pop
     mask = pop.mask(e.audience)
@@ -154,6 +187,7 @@ def finalize(e) -> dict:
         g["gap"] = round(res["score"]["mean"] - g["score"], 2)
     res["winners"], res["losers"], res["opportunities"] = winners, losers, opps
     res["intersections"] = sorted(inter, key=lambda g: -g["n"])[:60]
+    res["described_segments"] = described_segments(e, pop, aud, P, ids, by_idx, widening)
 
     # attention ---------------------------------------------------------------------------------------
     segcols = [k for k, t in enumerate(surface.targets) if t.startswith("seg")]
