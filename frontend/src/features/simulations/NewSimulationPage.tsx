@@ -1,19 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, FileAudio, FileImage, FileText, FileUp, FileVideo, Plus, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, FileAudio, FileImage, FileText, FileUp, FileVideo, Plus, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
-import { RegionPicker } from "@/components/ui/RegionPicker";
-import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
-import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
+import { Card, CheckRow, Field, InfoTip, Input, KV, Segmented, Switch, Textarea } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useReference } from "@/lib/queries";
 import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
 import { cn, fmt } from "@/lib/utils";
+import { CROWD_DEFAULTS, CrowdChat } from "./CrowdChat";
 
 const DEPTH = {
   quick: { label: "Quick", voice: 40, crowd: 1500, stakeholders: 3, hours: 12, minutes_per_round: 60 },
@@ -22,7 +21,6 @@ const DEPTH = {
 } as const;
 const WHEN = { now: "Now", schedule: "Scheduled", backtest: "Backtest" } as const;
 const GROUP_ICON: Record<string, typeof FileVideo> = { Video: FileVideo, Audio: FileAudio, Image: FileImage, Text: FileText };
-const OCEAN = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"] as const;
 const COMPARE = { none: "No comparison", version: "Another version of mine", competitor: "A competitor's content" } as const;
 
 interface Variant { title: string; text: string; transcript: string; description: string; asset_id: string | null; asset_ids: string[]; poll_options: string[]; file?: File | null; files?: File[] }
@@ -61,9 +59,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   const [compare, setCompare] = useState<keyof typeof COMPARE>("none");
   const [B, setB] = useState<Variant>(blank());
   const [seeds, setSeeds] = useState<Asset[]>([]);
-  const [aud, setAud] = useState<any>({ regions: ["AE", "SA", "EG", "JO", "MA"], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false,
-    expats_only: false, interests: [], professions: [], incomes: [], ocean: {} });
-  const [advanced, setAdvanced] = useState(false);
+  const [aud, setAud] = useState<any>({ ...CROWD_DEFAULTS });
   const [saveTpl, setSaveTpl] = useState(false);
   const [when, setWhen] = useState<"now" | "schedule" | "backtest">("now");
   const [at, setAt] = useState("");
@@ -158,7 +154,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     const err = validate(A, compare === "none" ? "Content" : "Your content") || (compare !== "none" ? validate(B, compare === "competitor" ? "Competitor" : "Version B") : null);
     if (err) return toast.error(err);
     if (followers !== "" && (!Number.isInteger(Number(followers)) || Number(followers) < 0 || Number(followers) > 2_000_000_000)) return toast.error("Enter a whole follower count between 0 and 2 billion, or leave it blank.");
-    if (!aud.regions.length) return toast.error("Select at least one region.");
+    if (!aud.regions.length) return toast.error("Tell the crowd chat where your audience lives.");
     setBusy(true);
     try {
       const projectId = await ensureProject();
@@ -181,9 +177,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     } finally { setBusy(false); }
   }
 
-  const toggle = (k: string, v: string) => setAud({ ...aud, [k]: aud[k].includes(v) ? aud[k].filter((x: string) => x !== v) : [...aud[k], v] });
   const groups = useMemo(() => Array.from(new Set(formats.map((x) => x.group))), [formats]);
-  const advancedCount = aud.professions.length + aud.incomes.length + Object.keys(aud.ocean).length + (aud.expats_only ? 1 : 0) + (aud.citizens_only ? 1 : 0);
 
   return (
     <Page title={home ? "Home" : edit ? "Edit test" : "New test"} wide
@@ -263,11 +257,11 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
           </Section>)}
 
           {!more && <Section title="Platform" desc="Where will you share it?"><Field label="Platform"><Select value={platform} onChange={(v) => { setPlatform(v); setPlatformTouched(true); }} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field></Section>}
-          <Section title="Who it's for" desc="Start with a preset, use your own audience, or choose who should see it.">
+          <Section title="Who it's for" desc="Describe your crowd in your own words, or start from a preset and refine it in the chat.">
             <div className="flex flex-wrap items-end gap-2">
-              <Field label="Creator preset" help="Start with a suggested audience, then adjust its filters." className="min-w-0 basis-full sm:basis-auto sm:flex-1">
+              <Field label="Creator preset" help="Start with a suggested audience, then refine it in the chat." className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder="Apply a creator preset…" options={(presets.data || []).map((p) => ({ value: p.id, label: p.name }))}
-                  onChange={(id) => { const p = presets.data?.find((x) => x.id === id); if (p) setAud({ regions: [], age_min: 16, age_max: 70, genders: [], platforms: [], citizens_only: false, expats_only: false, interests: [], professions: [], incomes: [], ocean: {}, ...p.filters }); }} />
+                  onChange={(id) => { const p = presets.data?.find((x) => x.id === id); if (p) setAud({ ...aud, ...CROWD_DEFAULTS, regions: [], ...p.filters }); }} />
               </Field>
               {more && <><Field label="Saved audiences" className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                 <Select value="" placeholder={templates.data?.length ? "Load a saved audience…" : "No saved audiences yet"}
@@ -276,11 +270,10 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
               </Field>
               <Button onClick={() => setSaveTpl(true)}>Save this audience</Button></>}
             </div>
+            <CrowdChat value={aud} onChange={setAud} />
             <Switch checked={!!aud.use_creator_audience} onChange={(v) => setAud({ ...aud, use_creator_audience: v })}
               label="Match my audience" />
-            <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within your selected filters. Unsupported demographics are disclosed in results.</p>
-            <Field label="Audience regions"><RegionPicker value={aud.regions} onChange={(value) => setAud({ ...aud, regions: value })} /></Field>
-            {more && (aud.regions.includes("AE") || aud.regions.some((v: string) => v.startsWith("AE-"))) && <UaeAudienceFilters value={aud} onChange={setAud} />}
+            <p className="text-xs text-muted">Uses the breakdown from <Link to="/my-audience" className="text-brand">My audience</Link>, within the crowd you described. Unsupported demographics are disclosed in results.</p>
             {more && <><div className="space-y-3 rounded-md border border-line p-3">
               <Field label="Creator or channel" hint="Use the same name in each test to retain this creator's simulated audience history.">
                 <Input maxLength={120} value={creatorSubject} onChange={(e) => setCreatorSubject(e.target.value)} placeholder="workspace" />
@@ -291,61 +284,6 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
                   onChange={(e) => setOv({ ...ov, returning_share: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })} />
               </Field>
               <p className="text-xs text-muted">Simulated memories, never real follower data. Both A/B variants use the same memory snapshot.</p>
-            </div></>}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Age range"><div className="flex items-center gap-2"><Input type="number" min={16} max={70} value={aud.age_min} onChange={(e) => setAud({ ...aud, age_min: Number(e.target.value) })} />
-                <span className="text-[13px] text-muted">to</span><Input type="number" min={16} max={70} value={aud.age_max} onChange={(e) => setAud({ ...aud, age_max: Number(e.target.value) })} /></div></Field>
-              <Field label="Gender"><Segmented size="md" value={aud.genders.length === 1 ? aud.genders[0] : "all"} onChange={(v) => setAud({ ...aud, genders: v === "all" ? [] : [v] })}
-                options={[{ value: "all", label: "All" }, { value: "female", label: "Women" }, { value: "male", label: "Men" }]} /></Field>
-            </div>
-            {more && <><Field label="Platform users" hint={aud.platforms.length ? `${aud.platforms.length} selected` : "Any platform"}>
-              <div className="grid grid-cols-2 gap-x-2 rounded-md border border-line p-1.5 sm:grid-cols-4">
-                {(ref.data?.platforms || []).map((p) => <CheckRow key={p.key} checked={aud.platforms.includes(p.key)} onChange={() => toggle("platforms", p.key)} label={p.label} />)}
-              </div>
-            </Field>
-            <Field label="Interests" hint={aud.interests.length ? `${aud.interests.length} selected` : "Any interest"}>
-              <div className="grid grid-cols-2 gap-x-2 rounded-md border border-line p-1.5 sm:grid-cols-3">
-                {(ref.data?.interests || []).map((p) => <CheckRow key={p.key} checked={aud.interests.includes(p.key)} onChange={() => toggle("interests", p.key)} label={p.label} />)}
-              </div>
-            </Field>
-            <div className="rounded-md border border-line">
-              <button type="button" onClick={() => setAdvanced(!advanced)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] font-medium hover:bg-raised">
-                {advanced ? <ChevronDown className="h-4 w-4 text-muted" /> : <ChevronRight className="h-4 w-4 text-muted" />}
-                Advanced filters <span className="font-normal text-muted">· nationality, work, income, personality{advancedCount ? ` · ${advancedCount} active` : ""}</span>
-              </button>
-              {advanced && (
-                <div className="space-y-4 border-t border-line p-3">
-                  <Field label="Nationality">
-                    <Segmented size="md" value={aud.citizens_only ? "citizens" : aud.expats_only ? "expats" : "all"}
-                      onChange={(v) => setAud({ ...aud, citizens_only: v === "citizens", expats_only: v === "expats" })}
-                      options={[{ value: "all", label: "Everyone" }, { value: "citizens", label: "Citizens only" }, { value: "expats", label: "Expatriates only" }]} />
-                  </Field>
-                  <Field label="Occupation" hint={aud.professions.length ? `${aud.professions.length} selected` : "Any"}>
-                    <div className="grid grid-cols-2 gap-x-2 rounded-md border border-line p-1.5 sm:grid-cols-3">
-                      {(ref.data?.professions || []).map((p) => <CheckRow key={p} checked={aud.professions.includes(p)} onChange={() => toggle("professions", p)} label={p[0].toUpperCase() + p.slice(1)} />)}
-                    </div>
-                  </Field>
-                  <Field label="Income" hint={aud.incomes.length ? `${aud.incomes.length} selected` : "Any"}>
-                    <div className="grid grid-cols-2 gap-x-2 rounded-md border border-line p-1.5 sm:grid-cols-5">
-                      {(ref.data?.incomes || []).map((p) => <CheckRow key={p} checked={aud.incomes.includes(p)} onChange={() => toggle("incomes", p)} label={p[0].toUpperCase() + p.slice(1)} />)}
-                    </div>
-                  </Field>
-                  <Field label="Personality (Big Five)" help="Limit the audience to a range on any trait; 0 is lowest in the population, 1 highest. Leave a trait at the full range to ignore it.">
-                    <div className="space-y-2 rounded-md border border-line p-3">
-                      {OCEAN.map((t) => {
-                        const v: [number, number] = aud.ocean[t] || [0, 1];
-                        return (
-                          <div key={t} className="grid grid-cols-[120px_1fr_70px] items-center gap-3 text-[13px]">
-                            <span className="capitalize">{t}</span>
-                            <RangeSlider value={v} onChange={(nv) => { const o = { ...aud.ocean }; if (nv[0] <= 0 && nv[1] >= 1) delete o[t]; else o[t] = nv; setAud({ ...aud, ocean: o }); }} />
-                            <span className="num text-right text-xs text-muted">{v[0].toFixed(2)}–{v[1].toFixed(2)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Field>
-                </div>
-              )}
             </div></>}
           </Section>
 
@@ -378,7 +316,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
             <div className="px-4 py-2">
               <KV rows={[["Format", f?.label || "–"], ["Regions", aud.regions.length ? aud.regions.join(", ") : "None"], ["Ages", `${aud.age_min || 16}–${aud.age_max || 70}`],
                 ["Comparison", compare === "none" ? "None" : compare === "version" ? "A/B test" : "Competitor"], ["Timing", WHEN[when]], ["Depth", DEPTH[depth].label],
-                ["Advanced filters", advancedCount || "None"], ["Background files", seeds.length]]} />
+                ["Crowd description", aud.brief ? "Yes" : "None"], ["Background files", seeds.length]]} />
             </div></>}
             <div className="space-y-2 border-t border-line p-4">
               <Button variant="primary" className="w-full" onClick={() => submit(true)} loading={busy}>Test it</Button>

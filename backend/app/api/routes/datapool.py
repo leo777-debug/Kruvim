@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.errors import AppError, Forbidden, NotFound
 from app.db.session import get_session
 from app.models import Connector, Dataset, DataSource, PopulationVersion, RegionSnapshot, Signal, SourceObservation, User
-from app.schemas.simulation import AudienceIn
+from app.schemas.simulation import AudienceIn, CrowdChatIn
 from app.services import audit, jobs, storage
 from app.services.datapool import REGISTRY, ensure_platform_connectors, listen, snapshots_at
 from app.services.datapool.runner import env_secrets, secrets_of, set_secrets
@@ -393,6 +393,29 @@ async def audience_count(body: AudienceIn, p: Principal = Depends(principal)):
     idx = np.flatnonzero(m)
     by_region = np.bincount(pop.region[idx].astype(np.int64), minlength=len(REGION_CODES)) if idx.size else np.zeros(len(REGION_CODES), int)
     return {"n": int(idx.size), "share": round(float(idx.size / pop.n), 5), "regions": {REGION_CODES[k]: int(v) for k, v in enumerate(by_region) if v}}
+
+
+@router.post("/population/crowd")
+async def crowd_chat(body: CrowdChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    """One turn of the crowd builder: the creator describes who should see the content; filters and brief come back."""
+    import asyncio
+
+    from app.services import crowd, metering
+    from app.services.llm import LLMError, Usage, make_llm
+    from app.services.providers import resolve
+    current = body.audience.model_dump()
+    res = await resolve(s, p.org_id)
+    llm, usage = make_llm(res.settings), Usage()
+    try:
+        out = await asyncio.wait_for(crowd.interpret(body.message, current, llm, usage), timeout=60)
+    except (LLMError, TimeoutError):
+        out = crowd.keywords(body.message, current)
+        out["reply"] = "The model did not answer, so I matched keywords instead. " + out["reply"]
+    finally:
+        await llm.aclose()
+    if usage.calls:
+        await metering.record(p.org_id, None, "crowd", usage, res)
+    return out
 
 
 @router.get("/population/agents/{idx}")

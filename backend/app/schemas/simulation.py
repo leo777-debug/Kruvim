@@ -65,6 +65,7 @@ class AudienceIn(BaseModel):
     incomes: list[str] = Field(default_factory=list)
     expats_only: bool = False
     ocean: dict[Literal["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"], tuple[float, float]] = Field(default_factory=dict)
+    brief: str = Field(default="", max_length=2000)          # the crowd in the creator's own words; read by every voice agent
 
     @model_validator(mode="after")
     def _ranges(self):
@@ -142,6 +143,11 @@ class CloneIn(BaseModel):
 
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+
+
+class CrowdChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    audience: AudienceIn = Field(default_factory=AudienceIn)
 
 
 class SurveyIn(BaseModel):

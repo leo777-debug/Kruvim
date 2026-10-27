@@ -126,6 +126,9 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     if fresh_audience:
         creator_memory = ""
     personas = [pop.persona(int(i)) for i in voice_idx]
+    if brief := str(audience.get("brief") or "").strip():
+        for p in personas:
+            p["crowd_brief"] = brief
     from app.services.datapool.retrieval import prepare_retrieval
     retrieved, retrieval_usage = await prepare_retrieval(org_id, personas, card, context, llm, usage)
     regions_in = sorted({p["region"] for p in personas})

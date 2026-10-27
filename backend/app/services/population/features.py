@@ -103,6 +103,8 @@ def persona_text(p: dict, platform_label: str = "social media") -> str:
         f"- Disposition toward new content: {p['stance']}\n"
         f"- Follows {p['follows']} accounts; {p['followers']} followers\n"
         f"- Encounters content on: {platform_label}"
+        + (f"\n- The crowd you belong to, in the creator's words (be this person within it, not a stereotype of it): "
+           f"{p['crowd_brief']}" if p.get("crowd_brief") else "")
         + (f"\n- UAE residence: {p['residence_emirate']}; work: {p['work_emirate']}; nationality: {p['nationality_group']}; "
            f"occupation/income: {p['income_band']}; household: {p['household_type']}; visa: {p['visa_type']}; "
            f"calendar: {', '.join(p['calendar_memberships'])}; status: {p['status']}. "
