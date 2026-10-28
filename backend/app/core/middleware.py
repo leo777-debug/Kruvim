@@ -54,6 +54,11 @@ class RequestContextMiddleware:
         except Exception:
             # Never a stack trace or plain-text error page: log it with the request id and give the user that id.
             log.exception("unhandled error", extra={"method": scope["method"], "path": scope["path"]})
+            import traceback
+
+            from app.services.ops import record_error
+            await record_error("server", traceback.format_exc().strip().splitlines()[-1], detail=traceback.format_exc(),
+                               path=f'{scope["method"]} {scope["path"]}', request_id=rid)
             if "started" in status_holder:
                 raise
             await _send_error(_send, rid)

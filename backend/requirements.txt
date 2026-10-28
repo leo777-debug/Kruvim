@@ -28,6 +28,7 @@ python-docx>=1.1,<2
 Pillow>=13,<14
 openpyxl>=3.1,<4
 tzdata>=2026.5
+sentry-sdk>=2.20,<3   # optional error monitoring (KRUVIM_SENTRY_DSN)
 
 # Security floors for transitive dependencies (pip-audit, 2026-10-28)
 dnspython>=2.9.0

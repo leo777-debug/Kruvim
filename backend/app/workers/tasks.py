@@ -66,6 +66,8 @@ async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed")
     msg = str(exc) if isinstance(exc, USER_ERRORS) else "This step could not finish. Retry the test; contact support if it happens again."
     if not isinstance(exc, USER_ERRORS):
         log.error("job failed\n%s", traceback.format_exc(), extra={"simulation_id": sim_id, "job": stage})
+        from app.services.ops import record_error
+        await record_error("job", f"{stage} failed: {exc.__class__.__name__}", detail=traceback.format_exc(), path=f"simulation {sim_id}")
     await _set(sim_id, status=status, error=msg[:2000])
     await bus.publish(sim_id, f"{stage}.failed", {"message": msg[:2000]})
     await monitoring.on_failed(sim_id, msg)

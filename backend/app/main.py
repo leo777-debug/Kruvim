@@ -14,6 +14,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select
 
 from app.api.routes import (
+    admin_ops,
     analytics,
     auth,
     barometers,
@@ -145,7 +146,29 @@ async def lifespan(app: FastAPI):
         await close_redis()
 
 
+def init_sentry() -> None:
+    """Optional error monitoring. Personal data, request bodies, cookies and headers are never sent."""
+    if not settings.sentry_dsn:
+        return
+    import sentry_sdk
+
+    from app.services.ops import scrub
+
+    def before_send(event, hint):
+        request = event.get("request") or {}
+        for field in ("data", "cookies", "headers", "query_string"):
+            request.pop(field, None)
+        event.pop("user", None)
+        for exc in (event.get("exception") or {}).get("values") or []:
+            exc["value"] = scrub(str(exc.get("value") or ""))
+        return event
+
+    sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.env, send_default_pii=False, traces_sample_rate=0,
+                    max_request_body_size="never", before_send=before_send)
+
+
 def create_app() -> FastAPI:
+    init_sentry()
     docs = not settings.is_prod   # the schema maps every endpoint; keep it off public production hosts
     app = FastAPI(title="Kruvim API", version="1.0.0", lifespan=lifespan, docs_url="/api/docs" if docs else None,
                   openapi_url="/api/openapi.json" if docs else None, redoc_url=None)
@@ -154,7 +177,7 @@ def create_app() -> FastAPI:
                        allow_headers=["*"], expose_headers=["x-request-id"])
     app.add_middleware(RequestContextMiddleware)
     errors.install(app)
-    for r in (auth.router, barometers.router, keyvault.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, launch_forecasts.router, monitoring.router, runs.router, sharing.router, track_record.router, datapool.router, platform.router):
+    for r in (auth.router, barometers.router, keyvault.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, launch_forecasts.router, monitoring.router, runs.router, sharing.router, track_record.router, datapool.router, platform.router, admin_ops.router):
         app.include_router(r, prefix="/api/v1")
     app.add_api_route("/healthz", platform.healthz, include_in_schema=False)
     app.add_api_route("/readyz", platform.readyz, include_in_schema=False)

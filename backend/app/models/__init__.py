@@ -9,6 +9,7 @@ from .datapool import Connector, Dataset, PopulationVersion, RegionSnapshot, Sig
 from .keyvault import ProviderKey  # noqa: F401
 from .launch import LaunchForecast  # noqa: F401
 from .monitoring import Alert, Watch  # noqa: F401
+from .ops import BetaInvite, ErrorEvent  # noqa: F401
 from .project import Asset, Project  # noqa: F401
 from .providers import ProviderConfig  # noqa: F401
 from .sharing import ResultShare  # noqa: F401

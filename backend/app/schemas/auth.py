@@ -26,6 +26,7 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=10, max_length=200)
     name: str = Field(default="", max_length=200)
     org_name: str = Field(default="", max_length=200)
+    invite_code: str | None = Field(default=None, max_length=100)
 
 
 class LoginIn(BaseModel):

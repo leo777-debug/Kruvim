@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import client_ip, current_user
 from app.core.config import settings
-from app.core.errors import Conflict, Forbidden, NotFound, Unauthorized
+from app.core.errors import Conflict, NotFound, Unauthorized
 from app.core.ratelimit import hit
 from app.core.security import create_access_token, hash_password, new_refresh_token, sha256, verify_password
 from app.db.base import utcnow
@@ -80,11 +80,14 @@ async def _session(s: AsyncSession, user: User, request: Request, org_id: str | 
 async def register(body: RegisterIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
     await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
     n_users = (await s.execute(select(func.count()).select_from(User))).scalar()
-    if not settings.registration_open and (n_users > 0 or settings.is_prod):
-        raise Forbidden("Kruvim is invite-only right now. Ask a workspace admin for an invite link.", code="registration_closed")
     email = body.email.lower()
     if (await s.execute(select(User).where(User.email == email))).scalar_one_or_none():
         raise Conflict("An account with this email already exists.")
+    from app.services.ops import admit
+    if n_users > 0 or settings.is_prod:
+        invite = await admit(s, email, body.invite_code)     # invite-only beta: code, allowlist or open registration
+        if invite is not None:
+            audit.record(s, "beta_invite.used", target=email, meta={"invite": invite.id})
     # Production administrators come only from KRUVIM_FIRST_SUPERUSER_*; a race to sign up first must not grant them.
     user = User(email=email, name=body.name or email.split("@")[0], password_hash=hash_password(body.password),
                 is_superuser=n_users == 0 and not settings.is_prod)

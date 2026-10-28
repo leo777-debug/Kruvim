@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     access_token_minutes: int = 30
     refresh_token_days: int = 14
     allow_registration: bool | None = None          # unset = open outside production, closed (invite-only) in production
+    signup_allowlist: Annotated[list[str], NoDecode] = Field(default_factory=list)   # emails or @domains that may always sign up
+    sentry_dsn: str = ""                            # optional error monitoring; personal data and secrets are never sent
     first_superuser_email: str | None = None
     first_superuser_password: str | None = None
 
@@ -108,7 +110,7 @@ class Settings(BaseSettings):
     signal_max_age_hours: dict[str, float] = Field(default_factory=lambda: {
         "weather": 1, "headline": 3, "tone": 3, "trend": 6, "social_trend": 6, "event": 24, "economy": 24})
 
-    @field_validator("cors_origins", "previous_secret_keys", mode="before")
+    @field_validator("cors_origins", "previous_secret_keys", "signup_allowlist", mode="before")
     @classmethod
     def _split(cls, v):
         if isinstance(v, str):
