@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     rate_limit_runs_per_hour: int = 30                             # starting, retrying or cloning simulation steps
     rate_limit_uploads_per_hour: int = 60
 
+    barometer_excerpts: int = Field(default=6, ge=0, le=20)        # barometer library excerpts given to each simulation
+
     population_size: int = 1_000_000
     population_seed: int = 7
 

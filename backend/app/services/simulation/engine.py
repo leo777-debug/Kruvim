@@ -209,6 +209,9 @@ class Engine:
         self.snaps = self.cfg.get("context", {})
         self.world_block = "\n".join(f"{v.get('name')} ({v.get('city')}): {v.get('brief')}" for v in self.snaps.values()) or "No live context."
         self.world_block += "\n" + "\n".join(f"{code} cultural moment: {snapshot.get('cultural_moment', '')}" for code, snapshot in self.snaps.items())
+        if self.cfg.get("barometers"):
+            from app.services.barometers import world_lines
+            self.world_block += "\n" + world_lines(self.cfg["barometers"])
         if self.cfg.get("creator_memory"):
             self.world_block += "\nCreator audience memory (simulated observations): " + self.cfg["creator_memory"]
         self.enabled = [p for p in ("feed", "forum") if self.cfg["platforms"][p]["enabled"]] or ["feed"]

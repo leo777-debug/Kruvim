@@ -158,6 +158,12 @@ async def build_graph(ctx, sim_id: str):
         cfg = dict(sim.config or {})
         cfg["context"] = snaps
         cfg["context_source_checks"] = source_checks
+        # Barometer library: the most relevant public data, verbatim and with provenance, for the agents and the graph.
+        from app.services import barometers
+        query = " ".join(str(x) for x in (sim.requirement, cards["A"].get("title"), cards["A"].get("summary")) if x)
+        async with session_scope() as s:
+            cfg["barometers"] = await barometers.search(s, org_id, query, countries=regions, k=settings.barometer_excerpts)
+        seeds = seeds + [(f"{x['publisher']}: {x['title']} ({x['location']})", x["text"]) for x in cfg["barometers"]]
         await _set(sim_id, card=cards["A"], content=content, config=cfg)
         await bus.publish(sim_id, "graph.context", {"regions": {k: {kk: v.get(kk) for kk in ("name", "city", "local_time", "weather", "brief", "brief_by")}
                                                                  for k, v in snaps.items()}})

@@ -255,6 +255,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             "external_seed": external[:12], "ab": has_b, "regions": regions_in, "audience_size": n_aud,
             "behaviour": {"max_actions": 3, "memory": 6, "crowd_exposures": 4},
             "context": context, "overrides": (sim.config or {}).get("overrides", {}),
+            "barometers": (sim.config or {}).get("barometers", []),
             "audience_twin": twin, "creator_memory": creator_memory, "accuracy_live_model": not llm.is_dry,
             "retrieval_usage": retrieval_usage,
             "agent_memory": memory_snapshot,
