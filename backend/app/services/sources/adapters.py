@@ -24,10 +24,13 @@ def table(raw: bytes, filename="data.csv", sheet=None):
         raise ValueError("Import exceeds the 25 MB table limit")
     if filename.lower().endswith(".xlsx"):
         from openpyxl import load_workbook
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            if sum(x.file_size for x in archive.infolist()) > MAX_BYTES * 4:
-                raise ValueError("Expanded workbook is too large")
-        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                if sum(x.file_size for x in archive.infolist()) > MAX_BYTES * 4:
+                    raise ValueError("Expanded workbook is too large")
+            workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
+        except (zipfile.BadZipFile, KeyError, OSError) as exc:
+            raise ValueError("This is not a readable Excel workbook. Re-save it as .xlsx or export it as CSV.") from exc
         try:
             page = workbook[sheet] if sheet else workbook.worksheets[0]
             rows = []
