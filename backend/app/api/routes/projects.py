@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, get_project, principal, role
+from app.api.deps import Principal, get_project, principal, role, throttle
 from app.core.config import settings
 from app.core.errors import AppError, NotFound
+from app.core.uploads import parse_off_loop, read_limited
 from app.db.session import get_session
 from app.models import Asset, Project, Simulation
 from app.schemas.workspace import ProjectIn, ProjectUpdate
@@ -24,7 +25,7 @@ class LinkIn(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
-@router.post('/projects/{project_id}/import-link')
+@router.post('/projects/{project_id}/import-link', dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def from_link(project_id: str, body: LinkIn, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     await get_project(s, p, project_id)
     from app.services.content.links import import_link
@@ -102,7 +103,7 @@ def asset_out(a: Asset) -> dict:
             "excerpt": (a.text_excerpt or "")[:300]}
 
 
-@router.post("/projects/{project_id}/assets")
+@router.post("/projects/{project_id}/assets", dependencies=[Depends(throttle("uploads", "rate_limit_uploads_per_hour", 3600))])
 async def upload_asset(project_id: str, file: UploadFile = File(...), kind: str = Form("content"),
                        p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     pr = await get_project(s, p, project_id)
@@ -112,18 +113,13 @@ async def upload_asset(project_id: str, file: UploadFile = File(...), kind: str 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if not any(mime.startswith(m) for m in ALLOWED[kind]) and not (kind == "seed" and ext in SEED_EXT) and ext not in DOC_EXT:
         raise AppError(f"File type {mime} is not accepted for {kind}.", code="unsupported_media", status=415)
-    data = bytearray()
-    limit = settings.max_upload_mb * 1024 * 1024
-    while chunk := await file.read(1 << 20):
-        data.extend(chunk)
-        if len(data) > limit:
-            raise AppError(f"File larger than {settings.max_upload_mb} MB.", code="too_large", status=413)
+    data = await read_limited(file, settings.max_upload_mb * 1024 * 1024)
     key = f"{p.org_id}/{pr.id}/{uuid.uuid4().hex}{ext[:10]}"
     await storage.put(key, bytes(data))
     excerpt = ""
     if kind == "seed" or ext in DOC_EXT:
         try:
-            excerpt = document_text(bytes(data), file.filename or "")
+            excerpt = await parse_off_loop(document_text, data, file.filename or "")
         except ContentError as exc:
             raise AppError(str(exc), code="unreadable", status=422)
     a = Asset(org_id=p.org_id, project_id=pr.id, kind=kind, filename=(file.filename or "upload")[:300], mime=mime, size=len(data),

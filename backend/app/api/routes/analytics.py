@@ -105,9 +105,10 @@ async def upload(platform: Platform = Form(...), kind: Kind = Form(...), aggrega
     filename = (file.filename or 'analytics.csv')[:240]
     if not filename.lower().endswith(('.csv', '.xlsx')):
         raise AppError('Upload a CSV or XLSX analytics file')
-    raw = await file.read(25 * 1024 * 1024 + 1)
+    from app.core.uploads import parse_off_loop, read_limited
+    raw = await read_limited(file, 25 * 1024 * 1024)
     try:
-        headers, rows = service.inspect_file(raw, filename)
+        headers, rows = await parse_off_loop(service.inspect_file, raw, filename)
     except (ValueError, OSError) as exc:
         raise AppError(str(exc)) from exc
     row = AnalyticsImport(org_id=p.org_id, platform=platform, kind=kind, filename=filename,

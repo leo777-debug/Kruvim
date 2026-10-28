@@ -116,7 +116,10 @@ def document_text(data: bytes, filename: str, limit: int = 60_000) -> str:
     elif ext == ".docx":
         try:
             import zipfile
-            xml = zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml").decode("utf-8", errors="replace")
+            archive = zipfile.ZipFile(io.BytesIO(data))
+            if archive.getinfo("word/document.xml").file_size > 50 * 1024 * 1024:
+                raise ContentError("This Word document expands to more than 50 MB of text. Split it and try again.")
+            xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
             paras = re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)
             text = "\n".join("".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", p)) for p in paras)
             text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&amp;", "&")
