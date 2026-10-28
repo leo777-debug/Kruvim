@@ -19,6 +19,8 @@ const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
 const LaunchForecasts = lazy(() => import("./features/launches/LaunchForecastsPage"));
+const TrackRecord = lazy(() => import("./features/launches/TrackRecordPage"));
+const PublicRecord = lazy(() => import("./features/launches/PublicRecordPage"));
 const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
 const PublicResults = lazy(() => import("./features/simulations/PublicResultsPage"));
 const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
@@ -68,6 +70,7 @@ export default function App() {
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/share/:token" element={<PublicResults />} />
+        <Route path="/record" element={<PublicRecord />} />
         <Route path="/accuracy" element={signedIn ? <AppShell /> : <PublicAccuracy />}>
           <Route index element={<PublicAccuracy />} />
         </Route>
@@ -91,6 +94,7 @@ export default function App() {
           <Route path="monitoring" element={<Monitoring />} />
           <Route path="calibration" element={<Calibration />} />
           <Route path="launches" element={<LaunchForecasts />} />
+          <Route path="track-record" element={<TrackRecord />} />
           <Route path="settings" element={<Settings />} />
           <Route path="usage" element={<Usage />} />
           <Route path="admin" element={<Admin />} />
