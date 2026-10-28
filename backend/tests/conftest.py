@@ -71,3 +71,18 @@ async def auth(client):
     assert r.status_code == 200, r.text
     data = r.json()
     return {"Authorization": f"Bearer {data['access_token']}"}, data
+
+
+@pytest.fixture
+def accept_keys(monkeypatch):
+    """Model-provider keys are validated with a live call before saving; tests answer that call locally."""
+    from app.services import keyvault
+    seen = []
+
+    async def validate(provider, key, base_url="", **kw):
+        seen.append((provider, key, base_url))
+        if key.startswith("bad-"):
+            raise keyvault.KeyRejected(f"{keyvault.KEY_PROVIDERS[provider].label} rejected this key.")
+        return keyvault.Check(True, f"{keyvault.KEY_PROVIDERS[provider].label} accepted the key.")
+    monkeypatch.setattr(keyvault, "validate", validate)
+    return seen

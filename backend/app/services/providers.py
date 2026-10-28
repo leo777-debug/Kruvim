@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.crypto import decrypt
-from app.models import ProviderConfig
+from app.models import ProviderConfig, ProviderKey
 from app.services.llm import ProviderSettings
 
 
@@ -31,12 +31,24 @@ def to_settings(c: ProviderConfig) -> ProviderSettings:
                             json_mode=bool(c.json_mode), price_in=c.price_in, price_cached=c.price_cached, price_out=c.price_out)
 
 
+async def vault_key(s: AsyncSession, org_id: str, preset: str) -> str:
+    """The workspace's saved key for this preset's provider ("" if none)."""
+    from app.services.llm import PRESETS
+    provider = (PRESETS.get(preset) or {}).get("key_provider")
+    if not provider:
+        return ""
+    row = (await s.execute(select(ProviderKey).where(and_(ProviderKey.org_id == org_id, ProviderKey.provider == provider)))).scalar_one_or_none()
+    return decrypt(row.api_key_enc) if row else ""
+
+
 async def resolve(s: AsyncSession, org_id: str | None) -> Resolved:
     if org_id:
         c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id == org_id, ProviderConfig.is_default.is_(True)))
                              .order_by(ProviderConfig.created_at.desc()).limit(1))).scalar_one_or_none()
         if c is not None:
-            return Resolved(to_settings(c), "org", c.id)
+            ps = to_settings(c)
+            ps.api_key = await vault_key(s, org_id, c.preset) or ps.api_key   # the vault wins; older rows kept the key inline
+            return Resolved(ps, "org", c.id)
     c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id.is_(None), ProviderConfig.is_default.is_(True)))
                          .order_by(ProviderConfig.created_at.desc()).limit(1))).scalar_one_or_none()
     if c is not None:

@@ -168,11 +168,24 @@ def _provider_out(c: ProviderConfig) -> dict:
             "scope": "platform" if c.org_id is None else "org"}
 
 
+async def _provider_view(s: AsyncSession, c: ProviderConfig) -> dict:
+    """A workspace's config shows the status of the vault key its preset uses (never the key itself)."""
+    out = _provider_out(c)
+    provider = (PRESETS.get(c.preset) or {}).get("key_provider")
+    out["key_provider"] = provider
+    if c.org_id is not None and provider:
+        from app.api.routes.keyvault import get_key
+        k = await get_key(s, c.org_id, provider)
+        if k is not None:
+            out.update(api_key_set=True, api_key_hint=k.key_hint, key_status=k.status)
+    return out
+
+
 @router.get("/providers")
 async def providers(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id).order_by(desc(ProviderConfig.created_at)))).scalars().all()
     res = await resolve(s, p.org_id)
-    return {"configs": [_provider_out(c) for c in rows], "presets": PRESETS,
+    return {"configs": [await _provider_view(s, c) for c in rows], "presets": PRESETS,
             "active": {"source": res.source, "provider": res.settings.provider, "preset": res.settings.preset,
                        "voice_model": res.settings.voice_model, "report_model": res.settings.report_model, "metered": res.metered}}
 
@@ -206,7 +219,7 @@ def safe_error(exc: Exception, *secrets: str, limit: int = 300) -> str:
     return text[:limit]
 
 
-async def _upsert_provider(s: AsyncSession, org_id: str | None, body: ProviderIn) -> ProviderConfig:
+async def _upsert_provider(s: AsyncSession, org_id: str | None, body: ProviderIn, p: Principal | None = None) -> ProviderConfig:
     body = checked_provider(body)
     preset = PRESETS[body.preset]
     c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id.is_(None) if org_id is None else ProviderConfig.org_id == org_id,
@@ -219,17 +232,25 @@ async def _upsert_provider(s: AsyncSession, org_id: str | None, body: ProviderIn
     for k, v in data.items():
         setattr(c, k, v)
     c.provider = preset["provider"]
-    if api_key is not None:
+    if org_id is not None and preset["key_provider"]:
+        # Workspace keys live in the vault (validated before storing); a key sent here is saved there.
+        from app.api.routes.keyvault import get_key, store_key
+        if api_key:
+            await store_key(s, p, preset["key_provider"], api_key, body.base_url)
+        elif api_key == "" and (k := await get_key(s, org_id, preset["key_provider"])):
+            await s.delete(k)
+        c.api_key_enc = None
+    elif api_key is not None:
         c.api_key_enc = encrypt(api_key) if api_key else None
     return c
 
 
 @router.put("/providers")
 async def save_provider(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
-    c = await _upsert_provider(s, p.org_id, body)
+    c = await _upsert_provider(s, p.org_id, body, p)
     audit.record(s, "provider.save", org_id=p.org_id, user_id=p.user_id, meta={"preset": body.preset})
     await s.commit()
-    return _provider_out(c)
+    return await _provider_view(s, c)
 
 
 @router.delete("/providers")
@@ -241,10 +262,12 @@ async def clear_provider(p: Principal = Depends(role("admin")), s: AsyncSession 
     return {"ok": True}
 
 
-def _settings_from(body: ProviderIn, existing: ProviderConfig | None) -> ProviderSettings:
+async def _settings_from(s: AsyncSession, org_id: str | None, body: ProviderIn, existing: ProviderConfig | None) -> ProviderSettings:
     from app.core.crypto import decrypt
+    from app.services.providers import vault_key
     preset = PRESETS.get(body.preset, PRESETS["custom"])
-    key = body.api_key if body.api_key is not None else (decrypt(existing.api_key_enc) if existing else "")
+    key = body.api_key if body.api_key is not None else (
+        (await vault_key(s, org_id, body.preset) if org_id else "") or (decrypt(existing.api_key_enc) if existing else ""))
     return ProviderSettings(provider=preset["provider"], preset=body.preset, base_url=body.base_url, api_key=key or "",
                             voice_model=body.voice_model, report_model=body.report_model, vision_model=body.vision_model,
                             concurrency=body.concurrency, temperature=body.temperature, json_mode=body.json_mode, timeout=60)
@@ -254,7 +277,7 @@ def _settings_from(body: ProviderIn, existing: ProviderConfig | None) -> Provide
 async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
     body = checked_provider(body)
-    settings_ = _settings_from(body, existing)
+    settings_ = await _settings_from(s, p.org_id, body, existing)
     llm = None
     try:
         llm = make_llm(settings_)
@@ -277,7 +300,7 @@ async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")),
 async def provider_models(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
     body = checked_provider(body)
-    settings_ = _settings_from(body, existing)
+    settings_ = await _settings_from(s, p.org_id, body, existing)
     llm = None
     try:
         llm = make_llm(settings_)

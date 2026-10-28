@@ -20,6 +20,7 @@ from app.api.routes import (
     collab,
     creator,
     datapool,
+    keyvault,
     monitoring,
     platform,
     projects,
@@ -151,7 +152,7 @@ def create_app() -> FastAPI:
                        allow_headers=["*"], expose_headers=["x-request-id"])
     app.add_middleware(RequestContextMiddleware)
     errors.install(app)
-    for r in (auth.router, barometers.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router):
+    for r in (auth.router, barometers.router, keyvault.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router):
         app.include_router(r, prefix="/api/v1")
     app.add_api_route("/healthz", platform.healthz, include_in_schema=False)
     app.add_api_route("/readyz", platform.readyz, include_in_schema=False)

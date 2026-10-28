@@ -20,7 +20,17 @@ from app.services.datapool import context, targeted  # noqa: E402
 from scripts.seed_demo import main as seed  # noqa: E402
 
 
+async def _offline_key_check(provider, key, base_url="", **kw):
+    """The verification server is offline: answer model-key checks locally ("bad-" keys are rejected)."""
+    from app.services import keyvault
+    if key.startswith("bad-"):
+        raise keyvault.KeyRejected(f"{keyvault.KEY_PROVIDERS[provider].label} rejected this key. Check that it was copied in full.")
+    return keyvault.Check(True, f"{keyvault.KEY_PROVIDERS[provider].label} accepted the key.")
+
+
 async def prepare():
+    from app.services import keyvault
+    keyvault.validate = _offline_key_check
     await seed()
     await datapool.ensure_platform_connectors()
     async with session_scope() as s:

@@ -14,6 +14,8 @@ PRESETS = {
                "voice_model": "", "report_model": "", "vision_model": ""},
     "anthropic": {"label": "Anthropic (Claude)", "provider": "anthropic", "base_url": "", "local": False,
                   "voice_model": "claude-opus-5-5", "report_model": "claude-opus-5-5", "vision_model": "claude-opus-5-5"},
+    "gemini": {"label": "Google Gemini", "provider": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+               "local": False, "voice_model": "", "report_model": "", "vision_model": ""},
     "groq": {"label": "Groq", "provider": "openai", "base_url": "https://api.groq.com/openai/v1", "local": False,
              "voice_model": "", "report_model": "", "vision_model": ""},
     "together": {"label": "Together AI", "provider": "openai", "base_url": "https://api.together.xyz/v1", "local": False,
@@ -29,6 +31,9 @@ PRESETS = {
     "vllm": {"label": "vLLM (self-hosted)", "provider": "openai", "base_url": "http://localhost:8000/v1", "local": True,
              "voice_model": "", "report_model": "", "vision_model": ""},
 }
+# Which saved workspace key (app.services.keyvault) each preset uses; local servers and dry run need none.
+for _name, _preset in PRESETS.items():
+    _preset["key_provider"] = None if _preset["local"] or _name == "dryrun" else _name
 
 
 class DryRunLLM(BaseLLM):
