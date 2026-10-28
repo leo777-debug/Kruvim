@@ -7,6 +7,7 @@ from .collab import Annotation, AudienceTemplate  # noqa: F401
 from .cultural import CulturalMoment  # noqa: F401
 from .datapool import Connector, Dataset, PopulationVersion, RegionSnapshot, Signal, SignalEmbedding  # noqa: F401
 from .keyvault import ProviderKey  # noqa: F401
+from .launch import LaunchForecast  # noqa: F401
 from .monitoring import Alert, Watch  # noqa: F401
 from .project import Asset, Project  # noqa: F401
 from .providers import ProviderConfig  # noqa: F401
