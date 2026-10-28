@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, principal
 from app.core.errors import AppError, Forbidden, NotFound
+from app.core.netguard import public_client
 from app.db.base import utcnow
 from app.db.session import get_session
 from app.models import DataSource, SourceObservation
@@ -145,7 +146,7 @@ async def fetch_source(source_id: str, p: Principal = Depends(principal), s: Asy
     if not adapter or row.status in ("deprecated", "placeholder"):
         raise AppError("This source needs a manual file import. See its download instructions.")
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with public_client(timeout=60) as client:
             fetched = await adapter.fetch(row, client)
         records, missing = adapter.parse(fetched, row)
     except (ValueError, httpx.HTTPError, OSError, KeyError) as exc:

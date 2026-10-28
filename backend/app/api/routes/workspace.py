@@ -10,7 +10,8 @@ from app.api.deps import Principal, current_user, principal, role
 from app.api.routes.auth import _slug
 from app.core.config import settings
 from app.core.crypto import encrypt, mask
-from app.core.errors import Conflict, Forbidden, NotFound, QuotaExceeded
+from app.core.errors import AppError, Conflict, Forbidden, NotFound, QuotaExceeded
+from app.core.netguard import check_url_shape, private_model_urls_allowed
 from app.core.security import new_api_key, new_invite_token
 from app.db.base import utcnow
 from app.db.session import get_session
@@ -176,10 +177,38 @@ async def providers(p: Principal = Depends(principal), s: AsyncSession = Depends
                        "voice_model": res.settings.voice_model, "report_model": res.settings.report_model, "metered": res.metered}}
 
 
-async def _upsert_provider(s: AsyncSession, org_id: str | None, body: ProviderIn) -> ProviderConfig:
+def checked_provider(body: ProviderIn) -> ProviderIn:
+    """Hosted presets always use their official address; other addresses must be public unless this install allows local models."""
     preset = PRESETS.get(body.preset)
     if not preset:
         raise Conflict(f"Unknown preset '{body.preset}'.")
+    if preset["provider"] == "dryrun":
+        return body.model_copy(update={"base_url": ""})
+    if preset["local"] and not private_model_urls_allowed():
+        raise AppError("Local model servers are only available on self-hosted Kruvim. Choose a hosted provider.",
+                       code="local_models_disabled")
+    if preset["base_url"] and not preset["local"]:
+        return body.model_copy(update={"base_url": preset["base_url"]})
+    if body.base_url:
+        try:
+            check_url_shape(body.base_url, require_https=not private_model_urls_allowed())
+        except ValueError as exc:
+            raise AppError(f"Base URL: {exc}", code="bad_base_url")
+    return body
+
+
+def safe_error(exc: Exception, *secrets: str, limit: int = 300) -> str:
+    """Provider errors are shown to the user: never echo a key, and keep them short."""
+    text = str(exc)
+    for secret in secrets:
+        if secret and len(secret) > 4:
+            text = text.replace(secret, mask(secret))
+    return text[:limit]
+
+
+async def _upsert_provider(s: AsyncSession, org_id: str | None, body: ProviderIn) -> ProviderConfig:
+    body = checked_provider(body)
+    preset = PRESETS[body.preset]
     c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id.is_(None) if org_id is None else ProviderConfig.org_id == org_id,
                                                            ProviderConfig.is_default.is_(True))))).scalars().first()
     if c is None:
@@ -224,9 +253,11 @@ def _settings_from(body: ProviderIn, existing: ProviderConfig | None) -> Provide
 @router.post("/providers/test")
 async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
+    body = checked_provider(body)
+    settings_ = _settings_from(body, existing)
     llm = None
     try:
-        llm = make_llm(_settings_from(body, existing))
+        llm = make_llm(settings_)
         if llm.is_dry:
             return {"ok": True, "message": "Dry run needs no model. Output is formula-driven and labelled [dry run]."}
         u = Usage()
@@ -236,7 +267,7 @@ async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")),
                                       role="voice", max_tokens=60, usage=u)
         return {"ok": True, "message": f"Model replied in {time.time() - t0:.1f}s: {str(out)[:120]}", "usage": u.as_dict()}
     except Exception as exc:
-        return {"ok": False, "message": str(exc)[:500]}
+        return {"ok": False, "message": safe_error(exc, settings_.api_key)}
     finally:
         if llm:
             await llm.aclose()
@@ -245,12 +276,14 @@ async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")),
 @router.post("/providers/models")
 async def provider_models(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
+    body = checked_provider(body)
+    settings_ = _settings_from(body, existing)
     llm = None
     try:
-        llm = make_llm(_settings_from(body, existing))
+        llm = make_llm(settings_)
         return {"models": await llm.list_models()}
     except Exception as exc:
-        return {"models": [], "error": str(exc)[:300]}
+        return {"models": [], "error": safe_error(exc, settings_.api_key)}
     finally:
         if llm:
             await llm.aclose()

@@ -83,7 +83,8 @@ async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
     if settings.embedding_model and not llm.is_dry and llm.s.provider in ("openai", "openai_compatible") and llm.s.base_url and candidates:
         start = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            from app.core.netguard import model_client
+            async with model_client(timeout=15) as client:
                 response = await client.post(llm.s.base_url.rstrip('/') + "/embeddings", headers={"Authorization": f"Bearer {llm.s.api_key}"},
                     json={"model": settings.embedding_model, "input": texts, "dimensions": 128})
                 response.raise_for_status()

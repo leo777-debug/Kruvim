@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     llm_report_model: str = ""
     llm_vision_model: str = ""
     llm_concurrency: int = 8
+    # Model servers on private/local addresses (Ollama, LM Studio, vLLM, the compose `ollama` service).
+    # Unset = allowed outside production. A hosted multi-tenant install must leave this false (SSRF).
+    allow_private_model_urls: bool | None = None
 
     # Data pool connector credentials (all optional)
     reddit_client_id: str = ""

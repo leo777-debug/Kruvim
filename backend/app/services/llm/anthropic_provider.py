@@ -24,7 +24,13 @@ class AnthropicLLM(BaseLLM):
         if s.api_key:
             kw["api_key"] = s.api_key
         if s.base_url:
+            from app.core.netguard import check_url_shape, model_client, private_model_urls_allowed
+            try:
+                check_url_shape(s.base_url, require_https=not private_model_urls_allowed())
+            except ValueError as exc:
+                raise LLMAuthError(f"Invalid provider address: {exc}")
             kw["base_url"] = s.base_url
+            kw["http_client"] = model_client(timeout=float(s.timeout or 120))
         try:
             self.client = anthropic.AsyncAnthropic(**kw)
         except Exception as exc:

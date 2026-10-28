@@ -11,7 +11,6 @@ from datetime import timedelta
 from html import unescape
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from sqlalchemy import and_, or_, select
 
 from app.core.errors import AppError
@@ -47,7 +46,9 @@ def check_public_url(url: str) -> str:
 
 
 async def fetch(url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=15, follow_redirects=False, headers={"User-Agent": "KruvimMonitor/1.0"}) as client:
+    from app.core.netguard import public_client
+    # The connect-time check also covers DNS answers that change after check_public_url (rebinding).
+    async with public_client(timeout=15, follow_redirects=False, headers={"User-Agent": "KruvimMonitor/1.0"}) as client:
         for _ in range(4):
             check_public_url(url)
             async with client.stream("GET", url) as r:

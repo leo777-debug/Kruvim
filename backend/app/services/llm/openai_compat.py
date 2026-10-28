@@ -9,6 +9,8 @@ import time
 
 import httpx
 
+from app.core.netguard import check_url_shape, model_client, private_model_urls_allowed
+
 from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
 
 
@@ -20,6 +22,10 @@ class OpenAICompatLLM(BaseLLM):
         base = (s.base_url or "").rstrip("/")
         if not base:
             raise LLMAuthError("No base URL configured for this provider.")
+        try:
+            check_url_shape(base, require_https=not private_model_urls_allowed())
+        except ValueError as exc:
+            raise LLMAuthError(f"Invalid provider address: {exc}")
         self.base = base
         headers = {"Content-Type": "application/json"}
         if s.api_key:
@@ -27,7 +33,7 @@ class OpenAICompatLLM(BaseLLM):
         if "openrouter.ai" in base:
             headers["HTTP-Referer"] = "https://kruvim.app"
             headers["X-Title"] = "Kruvim"
-        self.client = httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(float(s.timeout or 120), connect=10),
+        self.client = model_client(headers=headers, timeout=httpx.Timeout(float(s.timeout or 120), connect=10),
                                         limits=httpx.Limits(max_connections=max(8, s.concurrency * 2)))
         self.json_ok = bool(s.json_mode)
         self.temp_ok = True
