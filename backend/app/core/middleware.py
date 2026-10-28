@@ -16,6 +16,7 @@ SECURITY_HEADERS = [
     (b"x-frame-options", b"DENY"),
     (b"referrer-policy", b"strict-origin-when-cross-origin"),
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+    (b"content-security-policy", b"default-src 'none'; frame-ancestors 'none'"),   # API responses are data, never pages
 ]
 
 

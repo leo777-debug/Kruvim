@@ -142,8 +142,9 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Kruvim API", version="1.0.0", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json",
-                  redoc_url=None)
+    docs = not settings.is_prod   # the schema maps every endpoint; keep it off public production hosts
+    app = FastAPI(title="Kruvim API", version="1.0.0", lifespan=lifespan, docs_url="/api/docs" if docs else None,
+                  openapi_url="/api/openapi.json" if docs else None, redoc_url=None)
     app.add_middleware(GZipMiddleware, minimum_size=2048)
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"],
                        allow_headers=["*"], expose_headers=["x-request-id"])
