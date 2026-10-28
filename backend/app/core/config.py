@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     app_name: str = "Kruvim"
     secret_key: str = "dev-insecure-change-me"     # JWT signing + secret encryption (derive per purpose)
     public_url: str = "http://localhost:5173"
+    previous_secret_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)   # still accepted for decryption
 
     database_url: str = f"sqlite+aiosqlite:///{os.path.join(_BACKEND_ROOT, 'data', 'kruvim.db')}"
     db_pool_size: int = 10
@@ -34,12 +35,24 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])
     access_token_minutes: int = 30
     refresh_token_days: int = 14
-    allow_registration: bool = True
+    allow_registration: bool | None = None          # unset = open outside production, closed (invite-only) in production
     first_superuser_email: str | None = None
     first_superuser_password: str | None = None
 
     rate_limit_per_minute: int = 240               # per user / API key / IP
     rate_limit_auth_per_minute: int = 20
+    forwarded_hops: int = Field(default=0, ge=0, le=5)   # reverse proxies in front of the API (compose nginx = 1)
+
+    # Spending limits (hard stops before each model call). 0 = no limit.
+    platform_daily_call_limit: int = Field(default=20_000, ge=0)   # all workspaces together, on Kruvim's own key
+    org_daily_call_limit: int = Field(default=3_000, ge=0)         # one workspace, on Kruvim's own key
+    job_max_llm_calls: int = Field(default=20_000, ge=1)           # any single job, any key (runaway protection)
+    run_call_cap_factor: float = Field(default=1.5, ge=1)          # a run may use this multiple of its estimate
+
+    # Request limits per user (or API key) on expensive endpoints.
+    rate_limit_expensive_per_minute: int = 20                      # chats, surveys, provider tests, exports
+    rate_limit_runs_per_hour: int = 30                             # starting, retrying or cloning simulation steps
+    rate_limit_uploads_per_hour: int = 60
 
     population_size: int = 1_000_000
     population_seed: int = 7
@@ -90,7 +103,7 @@ class Settings(BaseSettings):
     signal_max_age_hours: dict[str, float] = Field(default_factory=lambda: {
         "weather": 1, "headline": 3, "tone": 3, "trend": 6, "social_trend": 6, "event": 24, "economy": 24})
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "previous_secret_keys", mode="before")
     @classmethod
     def _split(cls, v):
         if isinstance(v, str):
@@ -109,6 +122,10 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.env == "production"
+
+    @property
+    def registration_open(self) -> bool:
+        return (not self.is_prod) if self.allow_registration is None else self.allow_registration
 
 
 @lru_cache

@@ -14,6 +14,8 @@ x-backend: &backend
     KRUVIM_DATA_DIR: /data
     KRUVIM_POPULATION_SIZE: ${KRUVIM_POPULATION_SIZE:-1000000}
     KRUVIM_SECRET_KEY: ${KRUVIM_SECRET_KEY:-local-compose-only-change-this-secret-before-deploying}
+    KRUVIM_ALLOW_REGISTRATION: ${KRUVIM_ALLOW_REGISTRATION:-false}   # invite-only beta
+    KRUVIM_FORWARDED_HOPS: ${KRUVIM_FORWARDED_HOPS:-1}   # the bundled nginx; add one per load balancer in front of it
   volumes:
     - kruvim-data:/data
   depends_on:
@@ -94,7 +96,8 @@ services:
     restart: unless-stopped
 
   # Optional local model server:  docker compose --profile local-llm up -d
-  # then in Kruvim choose the "Ollama (local)" preset with base URL http://ollama:11434/v1
+  # then set KRUVIM_ALLOW_PRIVATE_MODEL_URLS=true (self-hosted only) and choose the "Ollama (local)" preset
+  # with base URL http://ollama:11434/v1
   ollama:
     image: ollama/ollama:latest
     profiles: ["local-llm"]

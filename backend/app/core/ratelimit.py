@@ -24,3 +24,28 @@ async def hit(key: str, limit: int, window: int = 60) -> None:
         _local[key] = (bucket, n)
     if n > limit:
         raise RateLimited(f"Too many requests. Limit is {limit} per {window}s.")
+
+
+async def count(key: str, window: int, amount: int = 1) -> int:
+    """Add to a fixed-window counter and return the new total (shared across replicas when Redis is configured)."""
+    bucket = int(time.time() // window)
+    r = get_redis()
+    if r is not None:
+        k = f"ct:{key}:{bucket}"
+        n = await r.incrby(k, amount)
+        if n == amount:
+            await r.expire(k, window + 60)
+        return int(n)
+    b, n = _local[f"ct:{key}"]
+    n = n + amount if b == bucket else amount
+    _local[f"ct:{key}"] = (bucket, n)
+    return n
+
+
+async def peek(key: str, window: int) -> int:
+    bucket = int(time.time() // window)
+    r = get_redis()
+    if r is not None:
+        return int(await r.get(f"ct:{key}:{bucket}") or 0)
+    b, n = _local[f"ct:{key}"]
+    return n if b == bucket else 0

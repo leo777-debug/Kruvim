@@ -1,7 +1,7 @@
 """LLM providers. Every model call in Kruvim goes through `make_llm(...)`."""
 from __future__ import annotations
 
-from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage, extract_json  # noqa: F401
+from .base import BaseLLM, BudgetExceeded, LLMAuthError, LLMError, ProviderSettings, Usage, extract_json  # noqa: F401
 
 PRESETS = {
     "dryrun": {"label": "Dry run (no model)", "provider": "dryrun", "base_url": "", "local": True,

@@ -13,8 +13,8 @@ from app.core.config import settings
 from app.core.errors import QuotaExceeded
 from app.core.metrics import JOBS_RUNNING, SIMULATIONS
 from app.db.session import session_scope
-from app.models import Asset, PopulationVersion, Report, Simulation, Survey
-from app.services import datapool, jobs, knowledge, lifecycle, metering, monitoring, storage
+from app.models import Asset, Organization, PopulationVersion, Report, Simulation, Survey
+from app.services import datapool, jobs, knowledge, lifecycle, metering, monitoring, spend, storage
 from app.services.content import ContentError, build_card, document_text, prepare
 from app.services.events import bus
 from app.services.interaction import survey as run_survey_fn
@@ -38,10 +38,27 @@ async def _set(sim_id: str, **values):
         await s.execute(update(Simulation).where(Simulation.id == sim_id).values(**values))
 
 
-async def _llm_for(org_id: str):
+async def _llm_for(org_id: str, usage: Usage | None = None, cap: int | None = None, *, use_balance: bool = True):
+    """The workspace's model, with this job's spending limits attached to `usage`."""
+    balance = None
     async with session_scope() as s:
         res = await resolve(s, org_id)
+        if res.metered and use_balance:
+            org = await s.get(Organization, org_id)
+            balance = int(org.credits_balance or 0) if org else 0
+    if usage is not None:
+        spend.guard(usage, org_id, res, cap=cap, balance=balance)
     return res, make_llm(res.settings)
+
+
+async def _settle(org_id: str | None, sim_id: str, kind: str, usage: Usage, res, recorded: bool) -> None:
+    """Calls made by a job that stopped early (error, spending limit, cancellation) are still logged and charged."""
+    if res is None or recorded or not org_id or not (usage.calls or usage.failed):
+        return
+    try:
+        await asyncio.shield(metering.record(org_id, sim_id, f"{kind}_partial", usage, res))
+    except Exception:
+        log.exception("could not record usage of a stopped job", extra={"simulation_id": sim_id, "job": kind})
 
 
 async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed"):
@@ -101,12 +118,13 @@ async def _asset_files(sim: Simulation, kinds: tuple[str, ...]) -> tuple[dict, l
 async def build_graph(ctx, sim_id: str):
     JOBS_RUNNING.labels("graph").inc()
     usage = Usage()
-    res = llm = None
+    res = llm = org_id = None
+    recorded = False
     try:
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
-        res, llm = await _llm_for(org_id)
+        res, llm = await _llm_for(org_id, usage)
         await _set(sim_id, status="building_graph", error=None)
 
         async def progress(msg, frac):
@@ -146,6 +164,7 @@ async def build_graph(ctx, sim_id: str):
         ontology = await knowledge.build(sim_id, sim.requirement, cards, seeds, snaps, llm, usage, progress)
         await _set(sim_id, ontology=ontology, status="graph_ready", step=2, usage={"graph": usage.as_dict(res.settings)})
         await metering.record(org_id, sim_id, "graph", usage, res)
+        recorded = True
         await bus.publish(sim_id, "graph.completed", {"ontology": ontology, "usage": usage.as_dict(res.settings)})
         # All stage writes are committed. Transfer ownership before the next job
         # can claim its token; the parent's queue transaction may finish later.
@@ -154,6 +173,7 @@ async def build_graph(ctx, sim_id: str):
     except Exception as exc:
         await _fail(sim_id, "graph", exc)
     finally:
+        await _settle(org_id, sim_id, "graph", usage, res, recorded)
         JOBS_RUNNING.labels("graph").dec()
         if llm:
             await llm.aclose()
@@ -164,12 +184,13 @@ async def build_graph(ctx, sim_id: str):
 async def prepare_environment(ctx, sim_id: str):
     JOBS_RUNNING.labels("environment").inc()
     usage = Usage()
-    llm = None
+    res = llm = org_id = None
+    recorded = False
     try:
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
-        res, llm = await _llm_for(org_id)
+        res, llm = await _llm_for(org_id, usage)
         await _set(sim_id, status="preparing", error=None)
 
         async def progress(msg, frac):
@@ -181,12 +202,14 @@ async def prepare_environment(ctx, sim_id: str):
             sim.status, sim.step = "ready", 2
             sim.usage = {**(sim.usage or {}), "environment": usage.as_dict(res.settings)}
         await metering.record(org_id, sim_id, "environment", usage, res)
+        recorded = True
         await bus.publish(sim_id, "env.completed", {"config": {k: v for k, v in cfg.items() if k != "context"}})
         job_lease.set(None)
         await _autopilot(sim_id, "run")
     except Exception as exc:
         await _fail(sim_id, "env", exc)
     finally:
+        await _settle(org_id, sim_id, "environment", usage, res, recorded)
         JOBS_RUNNING.labels("environment").dec()
         if llm:
             await llm.aclose()
@@ -197,13 +220,15 @@ async def prepare_environment(ctx, sim_id: str):
 async def run_simulation(ctx, sim_id: str):
     JOBS_RUNNING.labels("simulation").inc()
     usage = Usage()
-    llm = None
+    res = llm = org_id = None
+    recorded = False
     try:
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
             sim.status, sim.step, sim.started_at, sim.error = "running", 3, _now(), None
-        res, llm = await _llm_for(org_id)
+            estimate = sim.credits_estimate
+        res, llm = await _llm_for(org_id, usage, spend.run_cap(estimate))
         await bus.publish(sim_id, "simulation.started", {"rounds": sim.config["time"]["rounds"], "provider": res.settings.provider,
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
         engine = Engine(sim_id, llm, usage)
@@ -227,6 +252,7 @@ async def run_simulation(ctx, sim_id: str):
         await write_run(org_id, sim_id, llm, usage)
         results["usage"] = usage.as_dict(res.settings)
         credits = await metering.record(org_id, sim_id, "simulation", usage, res)
+        recorded = True
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             sim.results = results
@@ -245,6 +271,7 @@ async def run_simulation(ctx, sim_id: str):
         SIMULATIONS.labels("failed").inc()
         await _fail(sim_id, "simulation", exc)
     finally:
+        await _settle(org_id, sim_id, "simulation", usage, res, recorded)
         JOBS_RUNNING.labels("simulation").dec()
         if llm:
             await llm.aclose()
@@ -255,15 +282,17 @@ async def run_simulation(ctx, sim_id: str):
 async def generate_report(ctx, sim_id: str):
     JOBS_RUNNING.labels("report").inc()
     usage = Usage()
-    llm = None
+    res = llm = org_id = None
+    recorded = False
     try:
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
             sim.report_status = "running"
-        res, llm = await _llm_for(org_id)
+        res, llm = await _llm_for(org_id, usage)
         await generate_report_fn(sim_id, llm, usage)
         await metering.record(org_id, sim_id, "report", usage, res)
+        recorded = True
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             sim.report_status, sim.step = "done", 5
@@ -279,6 +308,7 @@ async def generate_report(ctx, sim_id: str):
                 rep.status, rep.error = "failed", msg[:2000]
         await bus.publish(sim_id, "report.failed", {"message": msg[:2000]})
     finally:
+        await _settle(org_id, sim_id, "report", usage, res, recorded)
         JOBS_RUNNING.labels("report").dec()
         if llm:
             await llm.aclose()
@@ -296,7 +326,8 @@ async def run_survey(ctx, survey_id: str):
         sv = await s.get(Survey, survey_id)
         sim = await s.get(Simulation, sv.simulation_id)
     try:
-        res, llm = await _llm_for(sim.org_id)
+        reserved_cap = int((sv.filters or {}).get("reserved_credits") or 0) or None
+        res, llm = await _llm_for(sim.org_id, usage, reserved_cap, use_balance=False)
         from app.models import SimAgent
         async with session_scope() as s:
             rows = (await s.execute(select(SimAgent).where(SimAgent.simulation_id == sim.id))).scalars().all()

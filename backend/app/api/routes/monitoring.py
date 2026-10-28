@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, get_project, get_sim, principal, role
+from app.api.deps import Principal, get_project, get_sim, principal, role, throttle
 from app.api.routes.projects import sim_summary
 from app.core.errors import AppError, Conflict, Forbidden, NotFound
 from app.db.base import utcnow
@@ -93,7 +93,7 @@ async def delete_watch(watch_id: str, p: Principal = Depends(role("admin")), s: 
     return {"ok": True}
 
 
-@router.post("/watches/{watch_id}/check")
+@router.post("/watches/{watch_id}/check", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def check_now(watch_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     await _own(s, p, watch_id)
     return await monitoring.check_watch(watch_id)
@@ -152,7 +152,7 @@ async def _autopilot(s: AsyncSession, sim: Simulation, user_id: str | None) -> s
     return "graph queued"
 
 
-@router.post("/simulations/{sim_id}/autopilot")
+@router.post("/simulations/{sim_id}/autopilot", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def autopilot(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     return {"ok": True, "status": await _autopilot(s, sim, p.user_id)}
@@ -162,7 +162,7 @@ class BatchIn(BaseModel):
     simulation_ids: list[str] = Field(min_length=1, max_length=50)
 
 
-@router.post("/projects/{project_id}/batch")
+@router.post("/projects/{project_id}/batch", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def batch(project_id: str, body: BatchIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     """Batch testing: run several simulations end to end. Each still counts against plan concurrency and credits."""
     await get_project(s, p, project_id)

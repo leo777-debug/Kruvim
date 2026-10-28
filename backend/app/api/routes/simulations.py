@@ -12,7 +12,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.deps import Principal, get_project, get_sim, principal, role
+from app.api.deps import Principal, get_project, get_sim, principal, role, throttle
 from app.api.routes.projects import sim_summary
 from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import utcnow
@@ -40,7 +40,7 @@ from app.schemas.simulation import (
     SurveyIn,
 )
 from app.schemas.workspace import PerformanceIn
-from app.services import audit, jobs, knowledge, lifecycle, metering
+from app.services import audit, jobs, knowledge, lifecycle, metering, spend
 from app.services.events import bus
 from app.services.interaction import ask
 from app.services.interaction.selection import select_respondents, survey_estimate
@@ -90,7 +90,7 @@ async def _check_assets(s: AsyncSession, p: Principal, project_id: str, content:
             raise AppError("One of the referenced files does not belong to this project.")
 
 
-@router.post("/projects/{project_id}/simulations")
+@router.post("/projects/{project_id}/simulations", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def create_sim(project_id: str, body: SimulationCreate, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     await get_project(s, p, project_id)
     content = body.content.model_dump()
@@ -109,7 +109,7 @@ async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: Async
     return full(await get_sim(s, p, sim_id))
 
 
-@router.post("/simulations/{sim_id}/retry")
+@router.post("/simulations/{sim_id}/retry", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if sim.status != "failed" and sim.report_status != "failed":
@@ -172,7 +172,7 @@ async def delete_sim(sim_id: str, p: Principal = Depends(role("member")), s: Asy
     return {"ok": True}
 
 
-@router.post("/simulations/{sim_id}/clone")
+@router.post("/simulations/{sim_id}/clone", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def clone_sim(sim_id: str, body: CloneIn | None = None, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     """Re-test a simulation.
     mode "edit":  new draft whose version B is an editable copy of A, with `changes` (e.g. an applied suggestion) already in B.
@@ -190,7 +190,7 @@ async def _start_graph(s: AsyncSession, sim: Simulation) -> str:
     return await lifecycle.queue_graph(s, sim)
 
 
-@router.post("/simulations/{sim_id}/graph")
+@router.post("/simulations/{sim_id}/graph", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def build_graph(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     return {"ok": True, "job_id": await _start_graph(s, sim)}
@@ -209,7 +209,7 @@ async def graph_search(sim_id: str, q: str, p: Principal = Depends(principal), s
 
 
 # ---- Step 2 · environment ------------------------------------------------------------------------------------
-@router.post("/simulations/{sim_id}/environment")
+@router.post("/simulations/{sim_id}/environment", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def prepare_environment(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     return {"ok": True, "job_id": await lifecycle.queue_environment(s, sim)}
@@ -265,7 +265,7 @@ async def agents(sim_id: str, p: Principal = Depends(principal), s: AsyncSession
 
 
 # ---- Step 3 · run ---------------------------------------------------------------------------------------------
-@router.post("/simulations/{sim_id}/start")
+@router.post("/simulations/{sim_id}/start", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def start(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     return {"ok": True, "job_id": await lifecycle.queue_run(s, sim, p.user_id)}
@@ -351,7 +351,7 @@ async def get_report(sim_id: str, p: Principal = Depends(principal), s: AsyncSes
             "markdown": r.markdown, "model": r.model, "error": r.error, "created_at": r.created_at, "log": [x.payload for x in logs]}
 
 
-@router.post("/simulations/{sim_id}/report")
+@router.post("/simulations/{sim_id}/report", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
@@ -364,7 +364,7 @@ async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")),
     return {"ok": True}
 
 
-@router.post("/simulations/{sim_id}/report/chat")
+@router.post("/simulations/{sim_id}/report/chat", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def chat_report(sim_id: str, body: ChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     rep = (await s.execute(select(Report).where(and_(Report.simulation_id == sim_id, Report.status == "done")).order_by(desc(Report.created_at)))).scalars().first()
@@ -374,7 +374,7 @@ async def chat_report(sim_id: str, body: ChatIn, p: Principal = Depends(role("me
         ChatMessage.simulation_id == sim_id, ChatMessage.target == "report")).order_by(ChatMessage.id))).scalars()]
     res = await resolve(s, p.org_id)
     llm = make_llm(res.settings)
-    usage = Usage()
+    usage = spend.guard(Usage(), p.org_id, res, cap=40, balance=p.org.credits_balance)
     try:
         out = await asyncio.wait_for(report_chat(sim, rep.markdown, hist, body.message, llm, usage), timeout=240)
     finally:
@@ -403,7 +403,7 @@ async def agent(sim_id: str, ref: str, p: Principal = Depends(principal), s: Asy
     return d
 
 
-@router.post("/simulations/{sim_id}/agents/{ref}/chat")
+@router.post("/simulations/{sim_id}/agents/{ref}/chat", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def chat_agent(sim_id: str, ref: str, body: ChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if not sim.card:
@@ -413,7 +413,7 @@ async def chat_agent(sim_id: str, ref: str, body: ChatIn, p: Principal = Depends
         raise NotFound("Agent not found.")
     res = await resolve(s, p.org_id)
     llm = make_llm(res.settings)
-    usage = Usage()
+    usage = spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance)
     try:
         reply = await asyncio.wait_for(ask(d, sim.card, (sim.content or {}).get("platform"), d.get("chat", []), body.message, llm, usage), timeout=120)
     finally:
@@ -425,7 +425,7 @@ async def chat_agent(sim_id: str, ref: str, body: ChatIn, p: Principal = Depends
     return {"reply": reply, "chat": d.get("chat", []) + [{"role": "user", "content": body.message}, {"role": "assistant", "content": reply}]}
 
 
-@router.post("/simulations/{sim_id}/explore")
+@router.post("/simulations/{sim_id}/explore", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def explore_route(sim_id: str, body: ExploreIn, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     out = await explore(sim, body.model_dump(exclude_none=True))
@@ -434,7 +434,7 @@ async def explore_route(sim_id: str, body: ExploreIn, p: Principal = Depends(pri
     return out
 
 
-@router.post("/simulations/{sim_id}/surveys/estimate")
+@router.post("/simulations/{sim_id}/surveys/estimate", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def estimate_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
@@ -444,7 +444,7 @@ async def estimate_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(pr
     return survey_estimate(len(respondents), eligible, res, p.org.credits_balance)
 
 
-@router.post("/simulations/{sim_id}/surveys")
+@router.post("/simulations/{sim_id}/surveys", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
@@ -518,7 +518,7 @@ async def list_performance(sim_id: str, p: Principal = Depends(principal), s: As
              "engagement_rate": r.engagement_rate, "retention": r.retention, "notes": r.notes, "at": r.created_at} for r in rows]
 
 
-@router.get("/simulations/{sim_id}/export")
+@router.get("/simulations/{sim_id}/export", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def export(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id).order_by(desc(Report.created_at)))).scalars().first()

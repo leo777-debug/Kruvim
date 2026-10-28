@@ -16,6 +16,12 @@ export default function UsagePage() {
   return (
     <Page title="Usage and credits" subtitle="One credit is one LLM agent turn. Runs on your own key or a local model are not metered; runs on the Kruvim platform key draw from your monthly credit grant.">
       {!u.payment.enabled && <Callout tone="info" className="mb-5" title="Credit purchases are not enabled yet">{u.payment.note} Plans and monthly grants are active; upgrades are applied by a platform administrator for now.</Callout>}
+      {u.shared_key_today?.org_limit > 0 && (
+        <Callout tone={u.shared_key_today.org >= u.shared_key_today.org_limit ? "warn" : "info"} className="mb-5" title="Daily limit on Kruvim's shared model key">
+          Your workspace has used {fmt.n(u.shared_key_today.org)} of {fmt.n(u.shared_key_today.org_limit)} model calls today (resets at midnight UTC).
+          Runs stop cleanly when the limit is reached; add your own API key in Settings to run without it.
+        </Callout>
+      )}
       <Card className="grid grid-cols-2 divide-line md:grid-cols-4 md:divide-x">
         <Stat className="p-4" label="Credit balance" value={fmt.n(u.credits_balance)} sub={`${u.limits.label} plan · ${fmt.n(u.limits.monthly_credits)} per month`} />
         <Stat className="p-4" label="Model calls this month" value={fmt.n(calls)} />

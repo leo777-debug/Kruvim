@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, get_sim, principal, role
+from app.api.deps import Principal, get_sim, principal, role, throttle
 from app.core.config import settings
 from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import utcnow
@@ -124,7 +124,7 @@ async def consent(connection_id: str, body: ConsentIn, p: Principal = Depends(ro
     return connection_public(c)
 
 
-@router.post("/social/connections/{connection_id}/sync")
+@router.post("/social/connections/{connection_id}/sync", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def sync(connection_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     c = await own_connection(s, p, connection_id)
     if not c.tokens_enc:

@@ -330,8 +330,8 @@ async def test_agent_failure_falls_back_without_failing_run(client, auth, monkey
         is_dry = False
         async def complete(self, **kw):
             raise LLMError("Temporary model failure")
-    async def failed(org_id):
-        resolved, _ = await original(org_id)
+    async def failed(org_id, *args, **kwargs):
+        resolved, _ = await original(org_id, *args, **kwargs)
         return resolved, FailedVoice(resolved.settings)
     monkeypatch.setattr(tasks, "_llm_for", failed)
     await client.post(f"/simulations/{sim['id']}/start", headers=h)

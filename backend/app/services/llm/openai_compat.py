@@ -11,7 +11,7 @@ import httpx
 
 from app.core.netguard import check_url_shape, model_client, private_model_urls_allowed
 
-from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage, with_data_policy
 
 
 class OpenAICompatLLM(BaseLLM):
@@ -47,7 +47,9 @@ class OpenAICompatLLM(BaseLLM):
         if images:
             content = [{"type": "text", "text": user}] + [
                 {"type": "image_url", "image_url": {"url": f"data:{mt};base64,{b64}"}} for mt, b64 in images]
+        system = with_data_policy(system)
         async with self.sem:
+            await usage.before_call()
             for attempt in range(4):
                 body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
                         self.max_tokens_key: max_tokens, "stream": False}

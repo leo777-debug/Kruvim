@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, current_user, principal, role
+from app.api.deps import Principal, current_user, principal, role, throttle
 from app.api.routes.auth import _slug
 from app.core.config import settings
 from app.core.crypto import encrypt, mask
@@ -18,7 +18,7 @@ from app.db.session import get_session
 from app.models import ApiKey, AuditLog, CreditLedger, Invite, Membership, Organization, ProviderConfig, UsageEvent, User
 from app.models.tenancy import ROLE_RANK
 from app.schemas.workspace import ApiKeyIn, InviteIn, MemberUpdate, OrgCreate, OrgUpdate, ProviderIn
-from app.services import audit
+from app.services import audit, spend
 from app.services.llm import PRESETS, ProviderSettings, Usage, make_llm
 from app.services.providers import resolve, to_settings
 from app.services.quotas import PLANS, ensure_monthly_grant, plan
@@ -31,7 +31,7 @@ def _org(o: Organization, role_: str | None = None) -> dict:
             "max_concurrent": o.max_concurrent, "role": role_, "created_at": o.created_at}
 
 
-@router.post("/orgs")
+@router.post("/orgs", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def create_org(body: OrgCreate, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     org = Organization(name=body.name, slug=_slug(body.name))
     s.add(org)
@@ -70,7 +70,7 @@ async def members(p: Principal = Depends(principal), s: AsyncSession = Depends(g
             "invites": [{"id": i.id, "email": i.email, "role": i.role, "expires_at": i.expires_at} for i in invites]}
 
 
-@router.post("/members/invites")
+@router.post("/members/invites", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def invite(body: InviteIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     if ROLE_RANK[body.role] > ROLE_RANK[p.role]:
         raise Forbidden("You cannot invite someone with a higher role than yours.")
@@ -136,7 +136,7 @@ async def list_keys(p: Principal = Depends(role("admin")), s: AsyncSession = Dep
              "revoked": bool(k.revoked_at)} for k in rows]
 
 
-@router.post("/api-keys")
+@router.post("/api-keys", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def create_key(body: ApiKeyIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     k = new_api_key()
     row = ApiKey(org_id=p.org_id, name=body.name, prefix=k.prefix, key_hash=k.hashed, role=body.role, created_by=p.user_id)
@@ -250,7 +250,7 @@ def _settings_from(body: ProviderIn, existing: ProviderConfig | None) -> Provide
                             concurrency=body.concurrency, temperature=body.temperature, json_mode=body.json_mode, timeout=60)
 
 
-@router.post("/providers/test")
+@router.post("/providers/test", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
     body = checked_provider(body)
@@ -273,7 +273,7 @@ async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")),
             await llm.aclose()
 
 
-@router.post("/providers/models")
+@router.post("/providers/models", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def provider_models(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
     body = checked_provider(body)
@@ -305,7 +305,8 @@ async def usage(p: Principal = Depends(principal), s: AsyncSession = Depends(get
             "provider_source": res.source,
             "month": [{"kind": k, "calls": int(q or 0), "input_tokens": int(i or 0), "output_tokens": int(o or 0), "cost_usd": c} for k, q, i, o, c in by_kind],
             "ledger": [{"delta": x.delta, "balance_after": x.balance_after, "reason": x.reason, "ref": x.ref, "at": x.created_at} for x in ledger],
-            "payment": {"enabled": False, "note": "Credit purchases are not enabled yet."}}
+            "payment": {"enabled": False, "note": "Credit purchases are not enabled yet."},
+            "shared_key_today": await spend.platform_calls_today(p.org_id) if res.metered else None}
 
 
 @router.get("/audit")

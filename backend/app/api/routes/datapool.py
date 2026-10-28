@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, current_user, principal, role
+from app.api.deps import Principal, current_user, principal, role, throttle
 from app.api.routes.sources import router as sources_router
 from app.core.config import settings
 from app.core.errors import AppError, Forbidden, NotFound
@@ -111,7 +111,7 @@ async def update_connector(key: str, body: dict, p: Principal = Depends(role("ad
     return {"ok": True}
 
 
-@router.post("/connectors/{key}/run")
+@router.post("/connectors/{key}/run", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def run_connector(key: str, p: Principal = Depends(role("admin")), user: User = Depends(current_user)):
     if key not in REGISTRY:
         raise NotFound("Unknown connector.")
@@ -186,7 +186,7 @@ async def world(p: Principal = Depends(principal), regions: str = "", at: dateti
             await llm.aclose()
 
 
-@router.post("/listen")
+@router.post("/listen", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def listen_route(body: dict, p: Principal = Depends(role("member"))):
     q = str(body.get("query") or "").strip()
     if len(q) < 2:
@@ -205,13 +205,12 @@ async def datasets(p: Principal = Depends(principal), s: AsyncSession = Depends(
             for d in rows]
 
 
-@router.post("/datasets")
+@router.post("/datasets", dependencies=[Depends(throttle("uploads", "rate_limit_uploads_per_hour", 3600))])
 async def upload_dataset(file: UploadFile = File(...), name: str = Form(""), source: str = Form("custom"),
                          registered_source_id: str = Form(""),
                          p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
-    data = await file.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise AppError("File too large.", status=413)
+    from app.core.uploads import parse_off_loop, read_limited
+    data = await read_limited(file, min(settings.max_upload_mb, 100) * 1024 * 1024)
     registered = None
     if registered_source_id:
         registered = await s.get(DataSource, registered_source_id)
@@ -220,10 +219,12 @@ async def upload_dataset(file: UploadFile = File(...), name: str = Form(""), sou
     try:
         if registered:
             from app.services.sources.adapters import table
-            columns, rows = table(data, file.filename or "data.csv")
+            columns, rows = await parse_off_loop(table, data, file.filename or "data.csv")
             meta = {"columns": columns, "preview": [[r[c] for c in columns] for r in rows[:5]], "rows": len(rows)}
         else:
-            meta = sniff(data)
+            meta = await parse_off_loop(sniff, data)
+    except AppError:
+        raise
     except Exception as exc:
         raise AppError(f"Could not read the table: {exc}", status=422)
     suffix = ".xlsx" if (file.filename or "").lower().endswith(".xlsx") else ".csv"
@@ -332,7 +333,7 @@ async def population(p: Principal = Depends(principal), s: AsyncSession = Depend
                           "regions": list((x.priors or {}).keys()), "error": x.error} for x in versions]}
 
 
-@router.post("/population/rebuild")
+@router.post("/population/rebuild", dependencies=[Depends(throttle("runs", "rate_limit_runs_per_hour", 3600))])
 async def rebuild_population(body: dict, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     from app.api.routes.sources import admin
     from app.services.population.uae import reconcile
@@ -395,7 +396,7 @@ async def audience_count(body: AudienceIn, p: Principal = Depends(principal)):
     return {"n": int(idx.size), "share": round(float(idx.size / pop.n), 5), "regions": {REGION_CODES[k]: int(v) for k, v in enumerate(by_region) if v}}
 
 
-@router.post("/population/crowd")
+@router.post("/population/crowd", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def crowd_chat(body: CrowdChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     """One turn of the crowd builder: the creator describes who should see the content; filters and brief come back."""
     import asyncio
@@ -405,7 +406,8 @@ async def crowd_chat(body: CrowdChatIn, p: Principal = Depends(role("member")), 
     from app.services.providers import resolve
     current = body.audience.model_dump()
     res = await resolve(s, p.org_id)
-    llm, usage = make_llm(res.settings), Usage()
+    from app.services import spend
+    llm, usage = make_llm(res.settings), spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance)
     try:
         out = await asyncio.wait_for(crowd.interpret(body.message, current, llm, usage), timeout=60)
     except (LLMError, TimeoutError):

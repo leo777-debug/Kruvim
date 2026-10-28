@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage, with_data_policy
 
 _FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 _LIGHT_ROLES = {"voice", "action", "debate", "chat", "brief", "survey", "persona"}
@@ -39,6 +39,7 @@ class AnthropicLLM(BaseLLM):
 
     async def complete(self, *, system, user, role, max_tokens, usage: Usage, json_out=True, images=None, temperature=None):
         a = self._a
+        system = with_data_policy(system)
         model = self.model_for("vision" if images else role)
         if not model:
             raise LLMAuthError(f"No model configured for '{role}'.")
@@ -55,6 +56,7 @@ class AnthropicLLM(BaseLLM):
         if "haiku" not in model:
             params["output_config"] = {"effort": "low" if role in _LIGHT_ROLES else "high"}
         async with self.sem:
+            await usage.before_call()
             t0 = time.time()
             try:
                 if model in _FALLBACK_MODELS and not self.custom_base:
