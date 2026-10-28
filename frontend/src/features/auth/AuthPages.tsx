@@ -99,7 +99,7 @@ export function InvitePage() {
     }
   }
   return (
-    <Shell title="Join workspace" subtitle="Set a password to accept the invitation (or enter your existing one).">
+    <Shell title="Join workspace" subtitle="New to Kruvim? Choose a password. Already have an account? Enter its password, or sign in first.">
       <form onSubmit={submit} className="space-y-4">
         <Field label="Your name"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
         <Field label="Password"><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>

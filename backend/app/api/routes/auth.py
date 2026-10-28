@@ -121,8 +121,20 @@ async def change_password(body: ChangePasswordIn, user: User = Depends(current_u
     return {"ok": True}
 
 
+async def _signed_in_user(request: Request, s: AsyncSession) -> User | None:
+    """The browser session's user, if the request carries a valid access token (invites may be accepted while signed in)."""
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        return None
+    try:
+        return await current_user(request, s, authorization)
+    except Unauthorized:
+        return None
+
+
 @router.post("/invites/accept", response_model=SessionOut)
 async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession = Depends(get_session)):
+    await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
     inv = (await s.execute(select(Invite).where(Invite.token_hash == sha256(body.token)))).scalar_one_or_none()
     now = utcnow()
     if not inv or inv.accepted_at or (inv.expires_at.replace(tzinfo=now.tzinfo) if inv.expires_at.tzinfo is None else inv.expires_at) < now:
@@ -134,8 +146,17 @@ async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession 
         user = User(email=inv.email, name=body.name or inv.email.split("@")[0], password_hash=hash_password(body.password))
         s.add(user)
         await s.flush()
-    elif body.password and not verify_password(body.password, user.password_hash):
-        raise Unauthorized("Wrong password for the existing account.")
+    else:
+        # The invite token is shown to whoever sent the invite, so it never proves ownership of an existing account.
+        signed_in = await _signed_in_user(request, s)
+        owns = (signed_in is not None and signed_in.id == user.id) or \
+            (body.password is not None and verify_password(body.password, user.password_hash))
+        if not owns:
+            await hit(f"auth:{inv.email}", settings.rate_limit_auth_per_minute)
+            raise Unauthorized("This email already has an account. Enter its password, or sign in first, to join.",
+                               code="password_required")
+        if not user.is_active:
+            raise Unauthorized("Account disabled.")
     exists = (await s.execute(select(Membership).where(and_(Membership.org_id == inv.org_id, Membership.user_id == user.id)))).scalar_one_or_none()
     if not exists:
         s.add(Membership(org_id=inv.org_id, user_id=user.id, role=inv.role))
