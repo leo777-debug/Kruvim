@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, get_sim, principal, role
+from app.api.deps import Principal, client_ip, get_sim, principal, role, throttle
 from app.core.config import settings
 from app.core.errors import Conflict, NotFound
 from app.core.ratelimit import hit
@@ -47,7 +47,7 @@ async def ready_report(s, sim):
     return report
 
 
-@router.get("/simulations/{sim_id}/report/download")
+@router.get("/simulations/{sim_id}/report/download", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def download(sim_id: str, format: Literal["pdf", "docx", "md"] = "pdf", p: Principal = Depends(principal),
                    s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
@@ -73,7 +73,7 @@ async def download(sim_id: str, format: Literal["pdf", "docx", "md"] = "pdf", p:
     return Response(data, media_type=media, headers={**PRIVATE_HEADERS, "Content-Disposition": f'attachment; filename="report-{sim.id}.{format}"'})
 
 
-@router.post("/simulations/{sim_id}/shares")
+@router.post("/simulations/{sim_id}/shares", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def create_share(sim_id: str, body: ShareIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     await ready_report(s, sim)
@@ -108,7 +108,7 @@ async def revoke_share(sim_id: str, share_id: str, p: Principal = Depends(role("
 
 @router.get("/shared-results/{token}")
 async def public_results(token: str, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
-    await hit("result-share:" + (request.client.host if request.client else "unknown"), 120)
+    await hit("result-share:" + client_ip(request), 120)
     if len(token) != 43:
         raise NotFound("This share link is unavailable or expired.")
     row = (await s.execute(select(ResultShare).where(ResultShare.token_hash == sha256(token),

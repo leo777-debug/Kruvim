@@ -4,7 +4,7 @@ import re
 import secrets
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,36 @@ async def _orgs(s: AsyncSession, user: User) -> list[OrgOut]:
     return [OrgOut(id=o.id, name=o.name, slug=o.slug, plan=o.plan, role=m.role, credits_balance=o.credits_balance) for m, o in rows]
 
 
+REFRESH_COOKIE = "kruvim_rt"
+COOKIE_PATH = "/api/v1/auth"
+
+
+def _cookie_mode(request: Request) -> bool:
+    """The web app asks for cookie sessions with a custom header. Browsers cannot send custom headers cross-site
+    without a CORS preflight, which together with SameSite=Strict keeps the cookie-authenticated refresh CSRF-safe."""
+    return request.headers.get("x-session-mode") == "cookie"
+
+
+def _set_refresh_cookie(response: Response, raw: str) -> None:
+    response.set_cookie(REFRESH_COOKIE, raw, max_age=settings.refresh_token_days * 86_400, path=COOKIE_PATH, httponly=True,
+                        secure=settings.is_prod or settings.public_url.startswith("https://"), samesite="strict")
+
+
+def _refresh_token_from(request: Request, body: RefreshIn) -> str:
+    if body.refresh_token:
+        return body.refresh_token
+    return (request.cookies.get(REFRESH_COOKIE) or "") if _cookie_mode(request) else ""
+
+
+async def _deliver(s: AsyncSession, user: User, request: Request, response: Response, org_id: str | None = None) -> SessionOut:
+    """A new session. In cookie mode the long-lived refresh token never reaches page JavaScript."""
+    out = await _session(s, user, request, org_id)
+    if _cookie_mode(request):
+        _set_refresh_cookie(response, out.refresh_token)
+        out.refresh_token = ""
+    return out
+
+
 async def _session(s: AsyncSession, user: User, request: Request, org_id: str | None = None) -> SessionOut:
     orgs = await _orgs(s, user)
     raw, hashed = new_refresh_token()
@@ -47,15 +77,17 @@ async def _session(s: AsyncSession, user: User, request: Request, org_id: str | 
 
 
 @router.post("/register", response_model=SessionOut)
-async def register(body: RegisterIn, request: Request, s: AsyncSession = Depends(get_session)):
+async def register(body: RegisterIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
     await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
     n_users = (await s.execute(select(func.count()).select_from(User))).scalar()
-    if not settings.allow_registration and n_users > 0:
-        raise Forbidden("Registration is closed. Ask an administrator for an invite.")
+    if not settings.registration_open and (n_users > 0 or settings.is_prod):
+        raise Forbidden("Kruvim is invite-only right now. Ask a workspace admin for an invite link.", code="registration_closed")
     email = body.email.lower()
     if (await s.execute(select(User).where(User.email == email))).scalar_one_or_none():
         raise Conflict("An account with this email already exists.")
-    user = User(email=email, name=body.name or email.split("@")[0], password_hash=hash_password(body.password), is_superuser=n_users == 0)
+    # Production administrators come only from KRUVIM_FIRST_SUPERUSER_*; a race to sign up first must not grant them.
+    user = User(email=email, name=body.name or email.split("@")[0], password_hash=hash_password(body.password),
+                is_superuser=n_users == 0 and not settings.is_prod)
     org = Organization(name=body.org_name or f"{user.name}'s workspace", slug=_slug(body.org_name or user.name))
     s.add_all([user, org])
     await s.flush()
@@ -63,23 +95,27 @@ async def register(body: RegisterIn, request: Request, s: AsyncSession = Depends
     s.add(Membership(org_id=org.id, user_id=user.id, role="owner"))
     await ensure_monthly_grant(s, org)
     audit.record(s, "user.register", org_id=org.id, user_id=user.id, ip=client_ip(request))
-    return await _session(s, user, request, org.id)
+    return await _deliver(s, user, request, response, org.id)
 
 
 @router.post("/login", response_model=SessionOut)
-async def login(body: LoginIn, request: Request, s: AsyncSession = Depends(get_session)):
+async def login(body: LoginIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
     await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
     await hit(f"auth:{body.email.lower()}", settings.rate_limit_auth_per_minute)
     user = (await s.execute(select(User).where(User.email == body.email.lower()))).scalar_one_or_none()
     if not user or not verify_password(body.password, user.password_hash) or not user.is_active:
         raise Unauthorized("Wrong email or password.")
     audit.record(s, "user.login", user_id=user.id, ip=client_ip(request))
-    return await _session(s, user, request)
+    return await _deliver(s, user, request, response)
 
 
 @router.post("/refresh", response_model=SessionOut)
-async def refresh(body: RefreshIn, request: Request, s: AsyncSession = Depends(get_session)):
-    row = (await s.execute(select(RefreshToken).where(RefreshToken.token_hash == sha256(body.refresh_token)))).scalar_one_or_none()
+async def refresh(body: RefreshIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
+    await hit(f"refresh:{client_ip(request)}", settings.rate_limit_auth_per_minute * 3)
+    token = _refresh_token_from(request, body)
+    if not token:
+        raise Unauthorized("Session expired. Sign in again.", code="refresh_invalid")
+    row = (await s.execute(select(RefreshToken).where(RefreshToken.token_hash == sha256(token)))).scalar_one_or_none()
     now = utcnow()
     if not row or row.revoked_at or (row.expires_at.replace(tzinfo=now.tzinfo) if row.expires_at.tzinfo is None else row.expires_at) < now:
         if row and row.revoked_at:   # reuse of a rotated token: revoke the whole family for this user
@@ -91,15 +127,17 @@ async def refresh(body: RefreshIn, request: Request, s: AsyncSession = Depends(g
     user = await s.get(User, row.user_id)
     if not user or not user.is_active:
         raise Unauthorized("Account disabled.")
-    return await _session(s, user, request)
+    return await _deliver(s, user, request, response)
 
 
 @router.post("/logout")
-async def logout(body: RefreshIn, s: AsyncSession = Depends(get_session)):
-    row = (await s.execute(select(RefreshToken).where(RefreshToken.token_hash == sha256(body.refresh_token)))).scalar_one_or_none()
+async def logout(body: RefreshIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
+    token = _refresh_token_from(request, body)
+    row = (await s.execute(select(RefreshToken).where(RefreshToken.token_hash == sha256(token)))).scalar_one_or_none() if token else None
     if row and not row.revoked_at:
         row.revoked_at = utcnow()
         await s.commit()
+    response.delete_cookie(REFRESH_COOKIE, path=COOKIE_PATH)
     return {"ok": True}
 
 
@@ -133,7 +171,7 @@ async def _signed_in_user(request: Request, s: AsyncSession) -> User | None:
 
 
 @router.post("/invites/accept", response_model=SessionOut)
-async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession = Depends(get_session)):
+async def accept_invite(body: AcceptInviteIn, request: Request, response: Response, s: AsyncSession = Depends(get_session)):
     await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
     inv = (await s.execute(select(Invite).where(Invite.token_hash == sha256(body.token)))).scalar_one_or_none()
     now = utcnow()
@@ -162,4 +200,4 @@ async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession 
         s.add(Membership(org_id=inv.org_id, user_id=user.id, role=inv.role))
     inv.accepted_at = now
     audit.record(s, "invite.accepted", org_id=inv.org_id, user_id=user.id, target=inv.email)
-    return await _session(s, user, request, inv.org_id)
+    return await _deliver(s, user, request, response, inv.org_id)

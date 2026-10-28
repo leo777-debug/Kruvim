@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import type { Org, Session, User } from "./types";
 
-const RT = "kruvim.rt";
+// The refresh token lives in an httpOnly cookie the page cannot read; this flag only says a session may exist.
+const SIGNED_IN = "kruvim.signed-in";
 const ORG = "kruvim.org";
+try { localStorage.removeItem("kruvim.rt"); } catch { /* tokens from older versions */ }
 
 interface AuthState {
   accessToken: string | null;
@@ -24,7 +26,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   orgId: localStorage.getItem(ORG),
   ready: false,
   setSession: (s) => {
-    localStorage.setItem(RT, s.refresh_token);
+    localStorage.setItem(SIGNED_IN, "1");
     const keep = get().orgId && s.orgs.some((o) => o.id === get().orgId) ? get().orgId : s.orgs[0]?.id ?? null;
     if (keep) localStorage.setItem(ORG, keep);
     set({ accessToken: s.access_token, user: s.user, orgs: s.orgs, orgId: keep });
@@ -38,13 +40,13 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ orgId: id });
   },
   clear: () => {
-    localStorage.removeItem(RT);
+    localStorage.removeItem(SIGNED_IN);
     set({ accessToken: null, user: null, orgs: [] });
   },
   markReady: () => set({ ready: true }),
 }));
 
-export const refreshToken = () => localStorage.getItem(RT);
+export const maySignIn = () => localStorage.getItem(SIGNED_IN) === "1";
 
 export function currentOrg(): Org | undefined {
   const { orgs, orgId } = useAuth.getState();

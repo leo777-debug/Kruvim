@@ -49,8 +49,15 @@ class Principal:
 
 
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "")) or "unknown"
+    """The caller's IP. Only the X-Forwarded-For entries appended by our own proxies are trusted: a client can put
+    anything at the front of that header, so the real address is `forwarded_hops` entries from the end."""
+    peer = request.client.host if request.client else ""
+    hops = settings.forwarded_hops
+    if hops > 0:
+        chain = [x.strip() for x in (request.headers.get("x-forwarded-for") or "").split(",") if x.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
+    return peer or "unknown"
 
 
 async def current_user(request: Request, s: AsyncSession = Depends(get_session), authorization: str | None = Header(None)) -> User:
@@ -105,6 +112,16 @@ async def principal(request: Request, s: AsyncSession = Depends(get_session), au
     await hit(f"p:{p.api_key_id or p.user_id}", settings.rate_limit_per_minute)
     request.state.principal = p
     return p
+
+
+def throttle(name: str, limit: int | str, window: int = 60):
+    """Per-user (or per-API-key) limit on an expensive endpoint. `limit` may name a setting."""
+    async def dep(request: Request, p: Principal = Depends(principal)) -> Principal:
+        n = getattr(settings, limit) if isinstance(limit, str) else limit
+        await hit(f"{name}:{p.api_key_id or p.user_id}", n, window)
+        await hit(f"{name}:org:{p.org_id}", n * 3, window)
+        return p
+    return dep
 
 
 def role(min_role: str):

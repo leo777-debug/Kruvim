@@ -34,7 +34,7 @@ class LoginIn(BaseModel):
 
 
 class RefreshIn(BaseModel):
-    refresh_token: str
+    refresh_token: str = ""          # API clients send it here; browsers use the httpOnly cookie instead
 
 
 class AcceptInviteIn(BaseModel):

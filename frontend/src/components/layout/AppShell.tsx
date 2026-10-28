@@ -6,7 +6,7 @@ import {
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { refreshToken, useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { cn, fmt, initials } from "@/lib/utils";
 import { Logo } from "./Logo";
 import { Menu } from "../ui/overlay";
@@ -93,8 +93,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
   const navigationId = useId();
 
   async function logout() {
-    const rt = refreshToken();
-    if (rt) await api("/auth/logout", { json: { refresh_token: rt } }).catch(() => null);
+    await api("/auth/logout", { json: {} }).catch(() => null);
     clear();
     qc.clear();
     nav("/login");

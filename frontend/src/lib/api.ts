@@ -1,4 +1,4 @@
-import { refreshToken, useAuth } from "./auth";
+import { maySignIn, useAuth } from "./auth";
 import type { Session, SimEvent } from "./types";
 
 export const API = "/api/v1";
@@ -18,12 +18,12 @@ export class ApiError extends Error {
 let refreshing: Promise<boolean> | null = null;
 
 export async function refreshSession(): Promise<boolean> {
-  const rt = refreshToken();
-  if (!rt) return false;
+  if (!maySignIn()) return false;
   if (!refreshing) {
     refreshing = (async () => {
       try {
-        const r = await fetch(`${API}/auth/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: rt }) });
+        const r = await fetch(`${API}/auth/refresh`, { method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-Session-Mode": "cookie" }, body: "{}" });
         if (!r.ok) {
           useAuth.getState().clear();
           return false;
@@ -45,6 +45,7 @@ function headers(extra?: HeadersInit, json = true): Headers {
   const { accessToken, orgId } = useAuth.getState();
   if (accessToken) h.set("Authorization", `Bearer ${accessToken}`);
   if (orgId) h.set("X-Org-Id", orgId);
+  h.set("X-Session-Mode", "cookie");
   if (json && !h.has("Content-Type")) h.set("Content-Type", "application/json");
   return h;
 }
