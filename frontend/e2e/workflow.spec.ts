@@ -37,7 +37,7 @@ test("short video completes, report opens and an interview is selected", async (
   await expect(page.getByLabel("Verdict")).toBeVisible();
   await page.getByRole("button", { name: "Details", exact: true }).first().click();
   await page.getByRole("button", { name: /^.*Results/ }).first().click();
-  await page.getByRole("button", { name: "Analyst report", exact: true }).click();
+  await page.getByRole("tab", { name: "Analyst report", exact: true }).click();
   await expect(page.locator(".prose-report h1")).toBeVisible();
   await expect(page.locator(".prose-report")).not.toContainText(/node:|edge:/);
   await noOverflow(page);

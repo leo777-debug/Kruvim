@@ -21,6 +21,8 @@ const Calibration = lazy(() => import("./features/calibration/CalibrationPage"))
 const LaunchForecasts = lazy(() => import("./features/launches/LaunchForecastsPage"));
 const TrackRecord = lazy(() => import("./features/launches/TrackRecordPage"));
 const PublicRecord = lazy(() => import("./features/launches/PublicRecordPage"));
+const Privacy = lazy(() => import("./features/legal/LegalPages").then((m) => ({ default: m.PrivacyPage })));
+const Terms = lazy(() => import("./features/legal/LegalPages").then((m) => ({ default: m.TermsPage })));
 const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
 const PublicResults = lazy(() => import("./features/simulations/PublicResultsPage"));
 const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
@@ -71,6 +73,8 @@ export default function App() {
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/share/:token" element={<PublicResults />} />
         <Route path="/record" element={<PublicRecord />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         <Route path="/accuracy" element={signedIn ? <AppShell /> : <PublicAccuracy />}>
           <Route index element={<PublicAccuracy />} />
         </Route>

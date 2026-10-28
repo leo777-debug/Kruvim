@@ -32,7 +32,7 @@ test("every screen meets WCAG 2.1 AA basics and fits the screen", async ({ page,
   const share = await (await request.post(`${API}/simulations/${sim}/shares`, { headers: h, data: { days: 1 } })).json();
 
   const report = [];
-  for (const [name, url] of [["login", "/login"], ["register", "/register"], ["shared-results", new URL(share.url).pathname], ["public-record", "/record"]] as const) {
+  for (const [name, url] of [["login", "/login"], ["register", "/register"], ["shared-results", new URL(share.url).pathname], ["public-record", "/record"], ["privacy", "/privacy"], ["terms", "/terms"]] as const) {
     await page.goto(url);
     report.push(await audit(page, name, info.project.name));
   }

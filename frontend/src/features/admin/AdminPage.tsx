@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
 import { ProviderForm } from "../settings/ProviderForm";
+import { BetaInvites, DataView, Errors, FailedJobs, UsageView, Users } from "./AdminOps";
 
 export default function AdminPage() {
   const user = useAuth((s) => s.user);
@@ -23,8 +24,16 @@ export default function AdminPage() {
   if (!user?.is_superuser) return <Navigate to="/" />;
   const o = ov.data;
   return (
-    <Page title="Platform admin" subtitle="Tenants, plans, credits, the shared model key and system health.">
-      <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[{ key: "overview", label: "Overview" }, { key: "orgs", label: "Organisations" }, { key: "provider", label: "Platform model key" }]} />
+    <Page title="Platform admin" subtitle="Beta access, users, usage, failures, uploaded data, plans and the shared model key.">
+      <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[{ key: "overview", label: "Overview" }, { key: "invites", label: "Beta invites" }, { key: "users", label: "Users" },
+        { key: "usage", label: "Usage" }, { key: "failed", label: "Failed jobs" }, { key: "data", label: "Uploaded data" }, { key: "errors", label: "Errors" },
+        { key: "orgs", label: "Organisations" }, { key: "provider", label: "Platform model key" }]} />
+      {tab === "invites" && <BetaInvites />}
+      {tab === "users" && <Users />}
+      {tab === "usage" && <UsageView />}
+      {tab === "failed" && <FailedJobs />}
+      {tab === "data" && <DataView />}
+      {tab === "errors" && <Errors />}
       {tab === "overview" && o && (
         <div className="space-y-5">
           <Card className="grid grid-cols-2 divide-line md:grid-cols-4 md:divide-x">
@@ -44,9 +53,9 @@ export default function AdminPage() {
             <tbody>{(orgs.data || []).map((g) => (
               <tr key={g.id}>
                 <td><div className="font-medium">{g.name}</div><div className="text-xs text-muted">Created {fmt.day(g.created_at)}</div></td>
-                <td className="w-40"><Select value={g.plan} onChange={(v) => upd.mutate({ id: g.id, body: { plan: v } })} options={["free", "pro", "business", "enterprise"].map((p) => ({ value: p, label: p[0].toUpperCase() + p.slice(1) }))} /></td>
+                <td className="w-40"><Select ariaLabel={`Plan for ${g.name}`} value={g.plan} onChange={(v) => upd.mutate({ id: g.id, body: { plan: v } })} options={["free", "pro", "business", "enterprise"].map((p) => ({ value: p, label: p[0].toUpperCase() + p.slice(1) }))} /></td>
                 <td className="r">{fmt.n(g.credits_balance)}</td><td className="r">{fmt.n(g.simulations)}</td>
-                <td><div className="flex gap-1.5"><Input className="w-28" placeholder="+5000" value={delta[g.id] || ""} onChange={(e) => setDelta({ ...delta, [g.id]: e.target.value })} />
+                <td><div className="flex gap-1.5"><Input aria-label={`Credits to add to ${g.name}`} className="w-28" placeholder="+5000" value={delta[g.id] || ""} onChange={(e) => setDelta({ ...delta, [g.id]: e.target.value })} />
                   <Button size="sm" disabled={!Number(delta[g.id])} onClick={() => { upd.mutate({ id: g.id, body: { credits_delta: Number(delta[g.id]) } }); setDelta({ ...delta, [g.id]: "" }); }}>Apply</Button></div></td>
               </tr>
             ))}</tbody>

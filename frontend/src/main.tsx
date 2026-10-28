@@ -10,6 +10,9 @@ import { Toaster, toast } from "sonner";
 import App from "./App";
 import { ApiError } from "./lib/api";
 import { errorText } from "./components/ui/states";
+import { installErrorReporter } from "./lib/errorReporter";
+
+installErrorReporter();
 
 const qc = new QueryClient({
   // Safety net: a failed load the screen does not handle itself still tells the user (once per query, never a stack trace).

@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { reportError } from "@/lib/errorReporter";
 
 /** A page that throws while rendering shows a recoverable message instead of a blank app. Resets when `resetKey` changes. */
 export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { failed: boolean }> {
@@ -11,6 +12,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Page failed to render", error, info.componentStack);
+    reportError(`Page failed to render: ${error.message}`, `${error.stack || ""}
+${info.componentStack || ""}`);
   }
 
   componentDidUpdate(prev: { resetKey?: string }) {

@@ -27,5 +27,6 @@ export default function PublicResultsPage() {
     <article className="card prose-report min-w-0 break-words p-5 sm:p-8"><ReportFootnotes content={report.markdown} /></article>
     <p className="text-xs text-muted">Simulated prediction from synthetic people, not a measurement. Not financial, legal or political advice.</p>
     {branding.report_footer && <footer className="text-xs text-muted">{branding.report_footer}</footer>}
+    <p className="text-xs text-muted">Made with Kruvim · <a className="text-brand" href="/privacy">Privacy</a> · <a className="text-brand" href="/terms">Terms</a></p>
   </main>;
 }

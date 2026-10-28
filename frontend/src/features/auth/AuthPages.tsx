@@ -1,5 +1,5 @@
 ﻿import { useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ function Shell({ children, title, subtitle }: { children: React.ReactNode; title
         </div>
       </div>
       <footer className="flex justify-center gap-4 px-6 py-5 text-xs text-faint">
-        <span>Kruvim audience simulation</span><span>·</span><span>Data stays in your workspace</span>
+        <span>Kruvim audience simulation</span><span aria-hidden>·</span><Link className="hover:text-fg" to="/privacy">Privacy</Link><span aria-hidden>·</span><Link className="hover:text-fg" to="/terms">Terms</Link>
       </footer>
     </div>
   );
@@ -33,7 +33,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const nav = useNavigate();
   const loc = useLocation() as { state?: { from?: string } };
   const setSession = useAuth((s) => s.setSession);
-  const [f, setF] = useState({ email: "", password: "", name: "", org_name: "" });
+  const [params] = useSearchParams();
+  const [f, setF] = useState({ email: "", password: "", name: "", org_name: "", invite_code: params.get("code") || "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -67,8 +68,15 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
           <Input type="password" required minLength={mode === "register" ? 10 : undefined} value={f.password} onChange={set("password")}
             autoComplete={mode === "login" ? "current-password" : "new-password"} />
         </Field>
-        {err && <div className="rounded-md border border-neg/25 bg-neg/[0.06] px-3 py-2 text-[13px] text-neg">{err}</div>}
+        {mode === "register" && (
+          <Field label="Invite code" hint="Kruvim is invite-only during the beta">
+            <Input value={f.invite_code} onChange={set("invite_code")} autoComplete="off" spellCheck={false} placeholder="KRV-…" />
+          </Field>
+        )}
+        {err && <div role="alert" className="rounded-md border border-neg/25 bg-neg/[0.06] px-3 py-2 text-[13px] text-neg">{err}</div>}
         <Button variant="primary" size="lg" className="w-full" loading={busy}>{mode === "login" ? "Sign in" : "Create account"}</Button>
+        {mode === "register" && <p className="text-xs text-muted">By creating an account you agree to the <Link className="text-brand" to="/terms">Terms of use</Link> and
+          the <Link className="text-brand" to="/privacy">Privacy policy</Link>. Results are simulations, not financial, legal or political advice.</p>}
       </form>
       <div className="mt-6 border-t border-line pt-4 text-center text-[13px] text-muted">
         {mode === "login" ? <>New to Kruvim? <Link className="text-brand hover:underline" to="/register">Create an account</Link></>

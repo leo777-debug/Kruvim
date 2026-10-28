@@ -191,9 +191,19 @@ export const TabsContent = RTabs.Content;
 
 export function UnderlineTabs({ tabs, value, onChange, className }: { tabs: { key: string; label: ReactNode; badge?: ReactNode }[]; value: string; onChange: (k: string) => void; className?: string }) {
   return (
-    <div className={cn("flex items-center gap-6 overflow-x-auto border-b border-line", className)}>
+    // WAI-ARIA tabs: one tab stop, arrow keys / Home / End move between tabs.
+    <div role="tablist" className={cn("flex items-center gap-6 overflow-x-auto border-b border-line", className)}
+      onKeyDown={(e) => {
+        const i = tabs.findIndex((t) => t.key === value);
+        const next = e.key === "ArrowRight" ? (i + 1) % tabs.length : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+          : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+        if (next < 0) return;
+        e.preventDefault();
+        onChange(tabs[next].key);
+        (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
+      }}>
       {tabs.map((t) => (
-        <button key={t.key} onClick={() => onChange(t.key)}
+        <button key={t.key} type="button" role="tab" aria-selected={value === t.key} tabIndex={value === t.key ? 0 : -1} onClick={() => onChange(t.key)}
           className={cn("relative -mb-px flex shrink-0 items-center gap-1.5 border-b-2 py-2.5 text-[13px] font-medium transition-colors",
             value === t.key ? "border-brand text-fg" : "border-transparent text-muted hover:text-fg")}>
           {t.label}
