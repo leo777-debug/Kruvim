@@ -13,6 +13,7 @@ import { useReference } from "@/lib/queries";
 import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
 import { cn, fmt } from "@/lib/utils";
 import { CROWD_DEFAULTS, CrowdChat } from "./CrowdChat";
+import { GettingStarted } from "./GettingStarted";
 
 const DEPTH = {
   quick: { label: "Quick", voice: 40, crowd: 1500, stakeholders: 3, hours: 12, minutes_per_round: 60 },
@@ -182,6 +183,13 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   return (
     <Page title={home ? "Home" : edit ? "Edit test" : "New test"} wide
       breadcrumb={home ? undefined : <><Link to="/projects" className="hover:text-fg">Projects</Link> / {pid ? <Link to={`/projects/${pid}`} className="hover:text-fg">{project.data?.name || "…"}</Link> : "…"}</>}>
+      {home && <GettingStarted recent={recent.data} onExample={() => {
+        pickFormat("short_video");
+        setA({ ...blank(), title: "3-minute apartment workout",
+          transcript: "Stop paying for gym memberships you never use. Here is the three minute routine I do every morning before work. Forty squats, no equipment. Thirty seconds of plank while the coffee brews. Most people quit because they think fitness needs an hour. It does not. Consistency beats intensity. Follow for part two." });
+        setReq("How will young working professionals react, and what would make them share it?");
+        toast.success("Example filled in. Press Test it when you're ready.");
+      }} />}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">{home ? "Test something" : "What would you like to test?"}</h2><Button aria-expanded={more} onClick={() => setMore(!more)}>More options</Button></div>
       {!edit && more && (
         <ol className="mb-5 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
