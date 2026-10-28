@@ -84,7 +84,7 @@ export function OverviewPanel({ sim, onTab }: { sim: Simulation; onTab: (t: stri
         {!!r.creator.language_fit?.flags?.length && <table className="dt"><thead><tr><th>Agent</th><th>Language evidence</th></tr></thead><tbody>{r.creator.language_fit.flags.map((x: any) =>
           <tr key={x.agent}><td>{x.agent}</td><td className="whitespace-normal">{x.evidence} · “{x.quote}”</td></tr>)}</tbody></table>}
         <h3 className="text-sm font-medium">Trend fit</h3><p className="text-xs text-muted">{r.trend?.recommendation}</p>
-        {!!r.trend?.matches?.length ? <table className="dt"><thead><tr><th>Matching signal</th><th>Phase</th><th>Observed</th></tr></thead><tbody>{r.trend.matches.map((x: any, i: number) =>
+        {r.trend?.matches?.length ? <table className="dt"><thead><tr><th>Matching signal</th><th>Phase</th><th>Observed</th></tr></thead><tbody>{r.trend.matches.map((x: any, i: number) =>
           <tr key={i}><td className="whitespace-normal">{x.title}</td><td>{x.phase || "unknown"}</td><td>{x.at ? new Date(x.at).toLocaleDateString() : "Unavailable"}</td></tr>)}</tbody></table> : <p className="text-sm text-muted">No matching regional trends were found for this content.</p>}
       </Card>}
       <Card className="p-5">

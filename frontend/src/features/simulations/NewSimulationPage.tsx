@@ -46,7 +46,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   const edit = !!simId;
   const existing = useQuery({ queryKey: [orgId, "sim", simId], queryFn: () => api<Simulation>(`/simulations/${simId}`), enabled: edit });
   const pid = projectId || existing.data?.project_id;
-  const formats = ref.data?.formats || [];
+  const formats = useMemo(() => ref.data?.formats || [], [ref.data?.formats]);
   const [name, setName] = useState("");
   const [req, setReq] = useState("");
   const [format, setFormat] = useState("short_video");

@@ -92,6 +92,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit -p .
+      - run: npm run lint
       - run: npm run test:navigation
       - run: node tools/test-retest.mjs
       - run: npx vite build

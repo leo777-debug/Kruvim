@@ -319,7 +319,7 @@ export const LiveGraph = forwardRef<GraphHandle, Props>(function LiveGraph(
       </div>
       <div className="flex flex-wrap items-center gap-1">
         {KINDS.filter((k) => nodes.some((n) => n.kind === k.key)).map((k) => (
-          <button key={k.key} onClick={() => setHidden((h) => { const s = new Set(h); s.has(k.key) ? s.delete(k.key) : s.add(k.key); return s; })}
+          <button key={k.key} onClick={() => setHidden((h) => { const s = new Set(h); if (s.has(k.key)) s.delete(k.key); else s.add(k.key); return s; })}
             title={hidden.has(k.key) ? `Show ${k.label.toLowerCase()}` : `Hide ${k.label.toLowerCase()}`}
             className={cn("flex items-center gap-1 rounded px-1.5 py-0.5 text-xs hover:bg-raised", hidden.has(k.key) ? "text-faint line-through" : "text-muted hover:text-fg")}>
             {hidden.has(k.key) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}{k.label}

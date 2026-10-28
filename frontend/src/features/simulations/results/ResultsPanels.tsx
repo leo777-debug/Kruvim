@@ -97,7 +97,7 @@ function Verdict({ r }: { r: any }) {
   );
 }
 
-function Attention({ r, sim, onComment }: { r: any; sim: Simulation; onComment?: (anchor: string) => void }) {
+function Attention({ r, onComment }: { r: any; sim: Simulation; onComment?: (anchor: string) => void }) {
   const hm = r.heatmap;
   const [sel, setSel] = useState<number>(hm.worst ?? 0);
   const total = hm.segments.reduce((a: number, s: any) => a + (hm.timed && s.end != null ? Math.max(0.5, s.end - s.start) : 1), 0);
