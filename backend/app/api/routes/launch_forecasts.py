@@ -191,6 +191,8 @@ async def lock(forecast_id: str, p: Principal = Depends(role('member')), s: Asyn
     f.prediction = service.snapshot_prediction(sim)
     f.locked_at = utcnow()
     f.prediction_hash = service.digest(f)
+    from app.services import track_record
+    await track_record.append(s, 'lock', 'launch', f.id, p.org_id, f.prediction_hash)
     audit.record(s, 'launch_forecast.lock', org_id=p.org_id, user_id=p.user_id, target=f.id, meta={'hash': f.prediction_hash})
     await s.commit()
     return public(f, await rows_of(s, p.org_id))
@@ -228,6 +230,10 @@ async def outcome(forecast_id: str, p: Principal = Depends(role('member')), s: A
                        code='no_outcome', details={'collected': result['collected']})
     f = await own(s, p.org_id, forecast_id, lock=True)
     f.outcome, f.scored_at = result, utcnow()
+    from app.services import track_record
+    if f.locked_at:
+        await track_record.append(s, 'resolve', 'launch', f.id, p.org_id, track_record.sha(
+            {'launch': f.id, 'prediction_hash': f.prediction_hash, 'outcome': result, 'scored_at': f.scored_at.isoformat()}))
     audit.record(s, 'launch_forecast.score', org_id=p.org_id, user_id=p.user_id, target=f.id, meta={'n': result['n']})
     await s.commit()
     return public(f, await rows_of(s, p.org_id))
