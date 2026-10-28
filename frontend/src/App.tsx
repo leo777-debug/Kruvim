@@ -14,6 +14,7 @@ const Project = lazy(() => import("./features/projects/ProjectPage"));
 const NewSimulation = lazy(() => import("./features/simulations/NewSimulationPage"));
 const Simulation = lazy(() => import("./features/simulations/SimulationPage"));
 const DataPool = lazy(() => import("./features/datapool/DataPoolPage"));
+const Barometers = lazy(() => import("./features/datapool/BarometersPage"));
 const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="simulations/:simId" element={<Simulation />} />
           <Route path="simulations/:simId/edit" element={<NewSimulation />} />
           <Route path="data-pool" element={<DataPool />} />
+          <Route path="barometers" element={<Barometers />} />
           <Route path="population" element={<Population />} />
           <Route path="saved-audiences" element={<Audiences />} />
           <Route path="audiences" element={<LegacyAudiences />} />

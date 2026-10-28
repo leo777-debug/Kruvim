@@ -28,6 +28,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     { to: "/projects", label: "Projects", icon: "FolderKanban", description: "Projects: group your tests by campaign, client or channel" },
     { to: "/runs", label: "All runs", icon: "FolderKanban", description: "All runs: search and filter runs across every project" },
     { to: "/saved-audiences", label: "Saved audiences", icon: "Contact", description: "Saved audiences: reusable audience definitions for any test" },
+    { to: "/barometers", label: "Barometers", icon: "Database", description: "Barometers: public country data that agents draw on, kept as published" },
     { to: "/population", label: "Population", icon: "Users2", description: "Population: the synthetic people behind every simulation" },
     { to: "/monitoring", label: "Monitoring", icon: "Gauge", description: "Monitoring: watch feeds and test new posts automatically" },
     { to: "/calibration", label: "Calibration", icon: "Gauge", description: "Calibration: compare predicted and actual post outcomes" },

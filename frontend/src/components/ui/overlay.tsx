@@ -76,7 +76,7 @@ export function Select({ value, onChange, options, placeholder, className }: {
   return (
     <RSelect.Root value={value || undefined} onValueChange={onChange}>
       <RSelect.Trigger aria-labelledby={labelId} className={cn("inline-flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-line-strong bg-panel px-2.5 text-[13px] text-left shadow-[inset_0_1px_1px_rgb(16_24_40/0.03)] focus:outline-none focus:border-brand focus:ring-[3px] focus:ring-brand/15 data-[placeholder]:text-faint", className)}>
-        <RSelect.Value placeholder={placeholder || "Selectâ€¦"} />
+        <RSelect.Value placeholder={placeholder || "Select…"} />
         <RSelect.Icon><ChevronDown className="h-3.5 w-3.5 text-muted" /></RSelect.Icon>
       </RSelect.Trigger>
       <RSelect.Portal>
