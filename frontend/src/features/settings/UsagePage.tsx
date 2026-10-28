@@ -5,10 +5,12 @@ import { Callout, Card, CardHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn, fmt } from "@/lib/utils";
+import { UsageMeter } from "./ModelKeys";
 
 export default function UsagePage() {
   const orgId = useAuth((s) => s.orgId);
   const q = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
+  const limits = useQuery({ queryKey: [orgId, "limits"], queryFn: () => api("/limits") });
   const u = q.data;
   if (!u) return null;
   const calls = u.month.reduce((a: number, m: any) => a + m.calls, 0);
@@ -28,6 +30,14 @@ export default function UsagePage() {
         <Stat className="p-4" label="Model cost this month" value={cost ? `$${cost.toFixed(2)}` : "–"} sub="From the provider prices you set" />
         <Stat className="p-4" label="Metering" value={u.metered ? "On" : "Off"} sub={u.provider_source === "org" ? "Your own key" : u.provider_source === "dryrun" ? "Dry run" : "Platform key"} />
       </Card>
+      {limits.data && (
+        <Card className="mt-5 grid gap-4 p-4 md:grid-cols-3">
+          <UsageMeter label="Model calls this month" used={limits.data.used.month_calls} limit={limits.data.limits.monthly_calls} />
+          <UsageMeter label="Spend this month" used={limits.data.used.month_usd} limit={limits.data.limits.monthly_usd} money />
+          <UsageMeter label="Your model calls today" used={limits.data.used.member_today_calls ?? 0} limit={limits.data.limits.member_daily_calls} />
+          <p className="text-xs text-muted md:col-span-3">Limits apply to every key, your own included. Admins set them under <a className="text-brand hover:underline" href="/settings?tab=limits">Settings, Spending limits</a>.</p>
+        </Card>
+      )}
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <Card className="overflow-hidden">
           <CardHeader title="This month by activity" divider />

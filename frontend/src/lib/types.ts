@@ -23,7 +23,7 @@ export interface Reference {
   incomes: string[];
 }
 export interface Format { key: string; label: string; hint: string; type: "video" | "audio" | "image" | "text"; platform: string; group: string; multi?: boolean; poll?: boolean }
-export interface Preset { label: string; provider: string; base_url: string; local: boolean; voice_model: string; report_model: string; vision_model: string }
+export interface Preset { label: string; provider: string; base_url: string; local: boolean; key_provider?: string | null; voice_model: string; report_model: string; vision_model: string }
 export interface Plan { label: string; monthly_credits: number; max_voice: number; max_crowd: number; max_hours: number; max_concurrent: number; max_members: number }
 
 export interface Project { id: string; name: string; description: string; archived: boolean; created_at: string; simulations: number | SimSummary[]; last_activity?: string; assets?: Asset[] }

@@ -1,16 +1,19 @@
-﻿import { useMutation } from "@tanstack/react-query";
+﻿import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout, Field, Input, Switch } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { Preset } from "@/lib/types";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 /** Shared by organisation settings (BYO key) and platform admin (shared metered key). */
-export function ProviderForm({ presets, current, endpoint, onSaved, canClear }: {
-  presets: Record<string, Preset>; current: any | null; endpoint: { save: string; test: string; models: string; clear?: string }; onSaved: () => void; canClear?: boolean;
+/** `vault`: the workspace form, whose keys live under Settings, Model keys (the platform form keeps its own key field). */
+export function ProviderForm({ presets, current, endpoint, onSaved, canClear, vault }: {
+  presets: Record<string, Preset>; current: any | null; endpoint: { save: string; test: string; models: string; clear?: string }; onSaved: () => void; canClear?: boolean; vault?: boolean;
 }) {
   const [f, setF] = useState<any>(() => ({
     name: "Default", preset: "dryrun", base_url: "", api_key: null, voice_model: "", report_model: "", vision_model: "", concurrency: 6, temperature: 0.9,
@@ -20,13 +23,16 @@ export function ProviderForm({ presets, current, endpoint, onSaved, canClear }: 
   const [models, setModels] = useState<string[]>([]);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const p = presets[f.preset] || presets.custom;
-  const body = () => { const { api_key_input, api_key_set, api_key_hint, id, scope, provider, is_default, ...rest } = f; return { ...rest, api_key: api_key_input ? api_key_input : null }; };
+  const body = () => { const { api_key_input, api_key_set, api_key_hint, id, scope, provider, is_default, key_status, key_provider, ...rest } = f; return { ...rest, api_key: !vault && api_key_input ? api_key_input : null }; };
+  const orgId = useAuth((s) => s.orgId);
+  const keys = useQuery({ queryKey: [orgId, "model-keys"], queryFn: () => api("/model-keys"), enabled: !!vault });
+  const vaultKey = vault ? (keys.data?.keys || []).find((k: any) => k.provider === p.key_provider) : null;
   const save = useMutation({ mutationFn: () => api(endpoint.save, { method: "PUT", json: body() }), onSuccess: () => { toast.success("Model provider saved"); onSaved(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed") });
   const test = useMutation({ mutationFn: () => api(endpoint.test, { json: body() }), onSuccess: (r) => setResult(r) });
   const list = useMutation({ mutationFn: () => api(endpoint.models, { json: body() }), onSuccess: (r) => { setModels(r.models || []); if (r.error) toast.error(r.error); else toast.success(`${r.models.length} models found`); } });
   const groups = [
-    { label: "Cloud APIs", keys: ["deepseek", "openrouter", "openai", "anthropic", "groq", "together", "custom"] },
+    { label: "Cloud APIs", keys: ["openai", "anthropic", "openrouter", "gemini", "deepseek", "groq", "together", "custom"] },
     { label: "Local and self-hosted", keys: ["ollama", "lmstudio", "llamacpp", "vllm"] },
     { label: "No model", keys: ["dryrun"] },
   ];
@@ -62,9 +68,19 @@ export function ProviderForm({ presets, current, endpoint, onSaved, canClear }: 
         <div className="grid gap-x-5 gap-y-4 rounded-md border border-line p-4 md:grid-cols-2">
           <Field label={p.provider === "anthropic" ? "Base URL (optional)" : "Base URL"} help={p.local ? "The model server must be reachable from the Kruvim workers (in Docker use http://host.docker.internal:11434/v1 or the ollama service)." : undefined}>
             <Input value={f.base_url} onChange={(e) => setF({ ...f, base_url: e.target.value })} placeholder="https://…/v1" /></Field>
+          {vault ? (
+            <Field label="API key">
+              <div className={cn("flex min-h-8 items-center rounded-md border px-2.5 text-[13px]", p.local || vaultKey ? "border-line" : "border-warn/40 bg-warn/[0.05]")}>
+                {p.local ? <span className="text-muted">Not needed for a local server</span>
+                  : vaultKey ? <span>Using the saved key <span className="mono">{vaultKey.hint}</span>{vaultKey.status !== "valid" ? " (needs checking)" : ""}</span>
+                  : <span>No key yet. <Link className="text-brand hover:underline" to="/settings?tab=model-keys">Add one under Model keys</Link>, then save here.</span>}
+              </div>
+            </Field>
+          ) : (
           <Field label="API key" hint={f.api_key_set ? `Saved ${f.api_key_hint}` : p.local ? "Usually not needed" : "Required"}
             help="Stored encrypted. Leave blank to keep the saved key.">
             <Input type="password" autoComplete="off" value={f.api_key_input} onChange={(e) => setF({ ...f, api_key_input: e.target.value })} placeholder={f.api_key_set ? "••••••••" : ""} /></Field>
+          )}
           <Field label="Voice agent model" help="Called for every agent turn. A fast, inexpensive model works well."><Input list="mlist" value={f.voice_model} onChange={(e) => setF({ ...f, voice_model: e.target.value })} placeholder={p.local ? "qwen3:8b" : ""} /></Field>
           <Field label="Analyst and content model" help="Reads content, builds the graph and writes the report. Use your strongest model."><Input list="mlist" value={f.report_model} onChange={(e) => setF({ ...f, report_model: e.target.value })} /></Field>
           <Field label="Vision model (optional)" help="Analyses images and video frames."><Input list="mlist" value={f.vision_model} onChange={(e) => setF({ ...f, vision_model: e.target.value })} /></Field>

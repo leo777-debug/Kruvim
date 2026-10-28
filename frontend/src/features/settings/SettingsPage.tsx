@@ -10,6 +10,7 @@ import { Callout, Card, CardHeader, Field, Input, KV, Status, UnderlineTabs } fr
 import { api, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
+import { ModelKeys, SpendingLimits } from "./ModelKeys";
 import { ProviderForm } from "./ProviderForm";
 
 export default function SettingsPage() {
@@ -18,10 +19,12 @@ export default function SettingsPage() {
   return (
     <Page title="Settings" subtitle="Workspace, team, access and the model that powers your agents.">
       <UnderlineTabs value={tab} onChange={(t) => setSp({ tab: t })} className="mb-5" tabs={[
-        { key: "provider", label: "Model provider" }, { key: "org", label: "Workspace" }, { key: "members", label: "Members" },
-        { key: "keys", label: "API keys" }, { key: "audit", label: "Audit log" }, { key: "branding", label: "Branding" }, { key: "profile", label: "Profile" },
+        { key: "provider", label: "Model provider" }, { key: "model-keys", label: "Model keys" }, { key: "limits", label: "Spending limits" },
+        { key: "org", label: "Workspace" }, { key: "members", label: "Members" }, { key: "keys", label: "Developer API keys" }, { key: "audit", label: "Audit log" }, { key: "branding", label: "Branding" }, { key: "profile", label: "Profile" },
       ]} />
       {tab === "provider" && <Provider />}
+      {tab === "model-keys" && <ModelKeys />}
+      {tab === "limits" && <SpendingLimits />}
       {tab === "org" && <Org openNew={!!sp.get("new")} />}
       {tab === "members" && <Members />}
       {tab === "keys" && <Keys />}
@@ -42,7 +45,7 @@ function Provider() {
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <Card className="p-5">
         {!can("admin") && <Callout tone="info" className="mb-4">Only workspace admins can change the model provider.</Callout>}
-        <ProviderForm presets={q.data.presets} current={q.data.configs[0] || null} canClear
+        <ProviderForm presets={q.data.presets} current={q.data.configs[0] || null} canClear vault
           endpoint={{ save: "/providers", test: "/providers/test", models: "/providers/models", clear: "/providers" }}
           onSaved={() => { qc.invalidateQueries({ queryKey: [orgId, "providers"] }); qc.invalidateQueries({ queryKey: [orgId, "usage"] }); }} />
       </Card>
@@ -53,7 +56,7 @@ function Provider() {
             ["Source", a.source === "org" ? "Workspace key" : a.source === "platform" ? "Kruvim platform key" : a.source === "env" ? "Server environment" : "None (dry run)"],
             ["Voice model", a.voice_model || "–"], ["Analyst model", a.report_model || "–"], ["Metering", a.metered ? "Credits charged" : "Not metered"]]} />
         </Card>
-        <Callout tone="info" title="Your own key or a local model">Your key is used only for your workspace's jobs and never shown again after saving.
+        <Callout tone="info" title="Your own key or a local model">Keys are kept under Model keys: checked before saving, encrypted, and used only for your workspace's jobs.
           Local servers (Ollama, LM Studio, llama.cpp, vLLM) keep content on your hardware.</Callout>
       </div>
     </div>
@@ -149,7 +152,7 @@ function Keys() {
   if (!can("admin")) return <Callout tone="info">Only admins can manage API keys.</Callout>;
   return (
     <Card className="overflow-hidden">
-      <CardHeader title="API keys" divider subtitle={<>Programmatic access to everything in the UI: <code className="mono">Authorization: Bearer krv_…</code> against <code className="mono">/api/v1</code>. Reference at <a className="text-brand hover:underline" href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</>}
+      <CardHeader title="Developer API keys" divider subtitle={<>Programmatic access to everything in the UI: <code className="mono">Authorization: Bearer krv_…</code> against <code className="mono">/api/v1</code>. Reference at <a className="text-brand hover:underline" href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</>}
         actions={<Button size="sm" variant="primary" onClick={() => { setOpen(true); setRaw(null); }}>Create key</Button>} />
       {(q.data || []).length === 0 ? <div className="px-4 py-6 text-[13px] text-muted">No API keys yet.</div> : (
       <div className="overflow-x-auto"><table className="dt min-w-[680px]">
