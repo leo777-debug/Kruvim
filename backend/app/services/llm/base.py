@@ -61,7 +61,8 @@ class Usage:
     by_role: dict = field(default_factory=dict)
     max_calls: int | None = None           # hard stop for this job (calls attempted, including failures)
     limit_message: str = ""
-    before_call_hook: object = None         # async () -> None; may raise BudgetExceeded (shared daily limits)
+    before_call_hook: object = None         # async () -> None; may raise BudgetExceeded (shared and workspace limits)
+    billed_usd: float = 0.0                 # dollars already added to the workspace's monthly total
 
     async def before_call(self) -> None:
         """Every provider calls this before sending a request, so a limit stops spending before it happens."""

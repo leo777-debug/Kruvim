@@ -407,7 +407,7 @@ async def crowd_chat(body: CrowdChatIn, p: Principal = Depends(role("member")), 
     current = body.audience.model_dump()
     res = await resolve(s, p.org_id)
     from app.services import spend
-    llm, usage = make_llm(res.settings), spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance)
+    llm, usage = make_llm(res.settings), spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance, limits=spend.org_limits(p.org), user_id=p.user_id)
     try:
         out = await asyncio.wait_for(crowd.interpret(body.message, current, llm, usage), timeout=60)
     except (LLMError, TimeoutError):

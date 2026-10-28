@@ -45,7 +45,7 @@ async def test_invite_accepted_by_owner_with_password_or_session(client, auth):
 
 
 # ---- H1/M6: server-side requests to user-supplied addresses ---------------------------------------------------------
-async def test_provider_addresses_cannot_reach_internal_network(client, auth, monkeypatch):
+async def test_provider_addresses_cannot_reach_internal_network(client, auth, monkeypatch, accept_keys):
     from app.core.config import settings
     monkeypatch.setattr(settings, "allow_private_model_urls", False)
     headers, _ = auth
@@ -138,7 +138,7 @@ async def test_own_key_has_runaway_cap_but_no_daily_cap(monkeypatch):
     from app.services.llm import Usage
     monkeypatch.setattr(settings, "org_daily_call_limit", 1)
     usage = spend.guard(Usage(), "org-4", _resolved("org"), cap=spend.run_cap(100), balance=0)
-    assert usage.max_calls == 200 and usage.before_call_hook is None
+    assert usage.max_calls == 200          # workspace limits still apply through the hook, but no shared-key cap
     for _ in range(3):
         await usage.before_call()
 

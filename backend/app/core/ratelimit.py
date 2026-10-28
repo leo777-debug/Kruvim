@@ -49,3 +49,23 @@ async def peek(key: str, window: int) -> int:
         return int(await r.get(f"ct:{key}:{bucket}") or 0)
     b, n = _local[f"ct:{key}"]
     return n if b == bucket else 0
+
+
+async def add(key: str, amount: int, ttl: int) -> int:
+    """Add to a named counter (the caller puts the period, e.g. the month, in the key) and return the new total."""
+    r = get_redis()
+    if r is not None:
+        n = await r.incrby(f"sum:{key}", amount)
+        if n == amount:
+            await r.expire(f"sum:{key}", ttl)
+        return int(n)
+    _, n = _local[f"sum:{key}"]
+    _local[f"sum:{key}"] = (0, n + amount)
+    return n + amount
+
+
+async def total(key: str) -> int:
+    r = get_redis()
+    if r is not None:
+        return int(await r.get(f"sum:{key}") or 0)
+    return _local[f"sum:{key}"][1]

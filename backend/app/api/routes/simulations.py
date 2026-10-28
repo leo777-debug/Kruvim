@@ -374,7 +374,7 @@ async def chat_report(sim_id: str, body: ChatIn, p: Principal = Depends(role("me
         ChatMessage.simulation_id == sim_id, ChatMessage.target == "report")).order_by(ChatMessage.id))).scalars()]
     res = await resolve(s, p.org_id)
     llm = make_llm(res.settings)
-    usage = spend.guard(Usage(), p.org_id, res, cap=40, balance=p.org.credits_balance)
+    usage = spend.guard(Usage(), p.org_id, res, cap=40, balance=p.org.credits_balance, limits=spend.org_limits(p.org), user_id=p.user_id)
     try:
         out = await asyncio.wait_for(report_chat(sim, rep.markdown, hist, body.message, llm, usage), timeout=240)
     finally:
@@ -413,7 +413,7 @@ async def chat_agent(sim_id: str, ref: str, body: ChatIn, p: Principal = Depends
         raise NotFound("Agent not found.")
     res = await resolve(s, p.org_id)
     llm = make_llm(res.settings)
-    usage = spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance)
+    usage = spend.guard(Usage(), p.org_id, res, cap=8, balance=p.org.credits_balance, limits=spend.org_limits(p.org), user_id=p.user_id)
     try:
         reply = await asyncio.wait_for(ask(d, sim.card, (sim.content or {}).get("platform"), d.get("chat", []), body.message, llm, usage), timeout=120)
     finally:

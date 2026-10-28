@@ -38,16 +38,17 @@ async def _set(sim_id: str, **values):
         await s.execute(update(Simulation).where(Simulation.id == sim_id).values(**values))
 
 
-async def _llm_for(org_id: str, usage: Usage | None = None, cap: int | None = None, *, use_balance: bool = True):
-    """The workspace's model, with this job's spending limits attached to `usage`."""
+async def _llm_for(org_id: str, usage: Usage | None = None, cap: int | None = None, *, use_balance: bool = True,
+                   user_id: str | None = None):
+    """The workspace's model, with this job's spending limits attached to `usage` (counted against `user_id`)."""
     balance = None
     async with session_scope() as s:
         res = await resolve(s, org_id)
+        org = await s.get(Organization, org_id)
         if res.metered and use_balance:
-            org = await s.get(Organization, org_id)
             balance = int(org.credits_balance or 0) if org else 0
     if usage is not None:
-        spend.guard(usage, org_id, res, cap=cap, balance=balance)
+        spend.guard(usage, org_id, res, cap=cap, balance=balance, limits=spend.org_limits(org), user_id=user_id)
     return res, make_llm(res.settings)
 
 
@@ -124,7 +125,7 @@ async def build_graph(ctx, sim_id: str):
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
-        res, llm = await _llm_for(org_id, usage)
+        res, llm = await _llm_for(org_id, usage, user_id=sim.created_by)
         await _set(sim_id, status="building_graph", error=None)
 
         async def progress(msg, frac):
@@ -196,7 +197,7 @@ async def prepare_environment(ctx, sim_id: str):
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
-        res, llm = await _llm_for(org_id, usage)
+        res, llm = await _llm_for(org_id, usage, user_id=sim.created_by)
         await _set(sim_id, status="preparing", error=None)
 
         async def progress(msg, frac):
@@ -234,7 +235,7 @@ async def run_simulation(ctx, sim_id: str):
             org_id = sim.org_id
             sim.status, sim.step, sim.started_at, sim.error = "running", 3, _now(), None
             estimate = sim.credits_estimate
-        res, llm = await _llm_for(org_id, usage, spend.run_cap(estimate))
+        res, llm = await _llm_for(org_id, usage, spend.run_cap(estimate), user_id=sim.created_by)
         await bus.publish(sim_id, "simulation.started", {"rounds": sim.config["time"]["rounds"], "provider": res.settings.provider,
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
         engine = Engine(sim_id, llm, usage)
@@ -295,7 +296,7 @@ async def generate_report(ctx, sim_id: str):
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
             sim.report_status = "running"
-        res, llm = await _llm_for(org_id, usage)
+        res, llm = await _llm_for(org_id, usage, user_id=sim.created_by)
         await generate_report_fn(sim_id, llm, usage)
         await metering.record(org_id, sim_id, "report", usage, res)
         recorded = True

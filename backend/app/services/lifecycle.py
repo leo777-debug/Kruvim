@@ -58,7 +58,10 @@ async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = Non
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
     res = await resolve(s, sim.org_id)
-    await check_start(s, org, sim.config, res.metered)
+    need = await check_start(s, org, sim.config, res.metered)
+    if not res.settings.provider == "dryrun":
+        from app.services.spend import check_room
+        await check_room(org, user_id or sim.created_by, need)
     for model in (Action, Post):
         await s.execute(delete(model).where(model.simulation_id == sim.id))
     await s.execute(delete(GraphNode).where(and_(GraphNode.simulation_id == sim.id, GraphNode.round >= 0)))

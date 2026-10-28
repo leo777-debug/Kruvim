@@ -47,11 +47,11 @@ async def test_requests_without_a_valid_session_are_refused(client, auth):
         assert r.status_code == 401, (headers, r.text)
 
 
-async def test_provider_key_is_encrypted_masked_and_never_logged(client, auth, caplog):
+async def test_provider_key_is_encrypted_masked_and_never_logged(client, auth, caplog, accept_keys):
     from sqlalchemy import select
 
     from app.db.session import session_scope
-    from app.models import ProviderConfig
+    from app.models import ProviderConfig, ProviderKey
     h, _ = auth
     caplog.set_level(logging.DEBUG)
     r = await client.put("/providers", headers=h, json={"preset": "openai", "api_key": SECRET, "voice_model": "gpt-x"})
@@ -61,7 +61,8 @@ async def test_provider_key_is_encrypted_masked_and_never_logged(client, auth, c
     assert r.json()["api_key_hint"].endswith(SECRET[-4:]) and r.json()["api_key_set"] is True
 
     async with session_scope() as s:
-        stored = (await s.execute(select(ProviderConfig))).scalar_one().api_key_enc
+        stored = (await s.execute(select(ProviderKey))).scalar_one().api_key_enc
+        assert (await s.execute(select(ProviderConfig))).scalar_one().api_key_enc is None   # only the vault holds it
     assert stored and SECRET not in stored
 
     # Saving without a key keeps the stored one; an empty string clears it.
@@ -70,7 +71,7 @@ async def test_provider_key_is_encrypted_masked_and_never_logged(client, auth, c
     assert SECRET not in caplog.text
 
 
-async def test_only_admins_change_provider_keys(client, auth):
+async def test_only_admins_change_provider_keys(client, auth, accept_keys):
     h, _ = auth
     inv = (await client.post("/members/invites", headers=h, json={"email": "member@example.com", "role": "member"})).json()
     token = inv["accept_url"].rsplit("/", 1)[-1]

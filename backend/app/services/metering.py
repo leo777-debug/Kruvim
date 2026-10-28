@@ -9,6 +9,8 @@ from app.services.quotas import ledger
 
 
 async def record(org_id: str, sim_id: str | None, kind: str, usage: Usage, res: Resolved) -> int:
+    from app.services.spend import flush
+    await flush(org_id, usage, res)       # the last call's cost counts toward the monthly dollar limit
     credits = int(usage.calls) if res.metered else 0
     async with session_scope() as s:
         s.add(UsageEvent(org_id=org_id, simulation_id=sim_id, kind=kind, quantity=usage.calls, unit="llm_calls",
