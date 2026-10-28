@@ -95,6 +95,22 @@ services:
     depends_on: [api]
     restart: unless-stopped
 
+  # Daily database dump + uploaded-file archive into the `backups` volume (pruned after KRUVIM_BACKUP_KEEP_DAYS).
+  backup:
+    image: pgvector/pgvector:pg16
+    entrypoint: ["sh", "/ops/backup.sh"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-kruvim}
+      INTERVAL_HOURS: ${KRUVIM_BACKUP_INTERVAL_HOURS:-24}
+      KEEP_DAYS: ${KRUVIM_BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - backups:/backups
+      - kruvim-data:/data:ro
+      - ./ops/backup.sh:/ops/backup.sh:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
   # Optional local model server:  docker compose --profile local-llm up -d
   # then set KRUVIM_ALLOW_PRIVATE_MODEL_URLS=true (self-hosted only) and choose the "Ollama (local)" preset
   # with base URL http://ollama:11434/v1
@@ -105,6 +121,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  backups:
   pgdata:
   redisdata:
   kruvim-data:

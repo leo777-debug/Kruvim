@@ -191,6 +191,9 @@ To exercise the real provider path without spending credits, run `python tools/m
 
 ## Production (Docker Compose)
 
+**Deploying the beta?** Follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): configuration, HTTPS, invite codes, backups
+and restore, monitoring, and every setting.
+
 For a local disposable stack, `docker compose up --build` needs no `.env`: it runs a dedicated migration
 service before API/Redis workers start. Set a unique `KRUVIM_SECRET_KEY` and `POSTGRES_PASSWORD` before
 deploying outside your computer; the supplied Compose secret is explicitly a local-only default.
