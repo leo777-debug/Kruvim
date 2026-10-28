@@ -39,6 +39,7 @@ def mock_llm():
         pytest.fail("mock model server did not start")
     yield base
     proc.kill()
+    proc.wait(timeout=10)
 
 
 @pytest.mark.asyncio
