@@ -3,6 +3,8 @@
 An adapter is not a reuse permission. Dataset-specific rights still need platform-admin approval.
 Cadences describe intended imports; the imported observation always retains its native period.
 """
+# Kruvim's own derived estimates are explained in the app (Help, methodology), never by linking to source code.
+METHODOLOGY_URL = "/help#methodology"
 PULSE_TERMS = "https://www.dubaipulse.gov.ae/docs/DDE%20_%20DRAFT_Open_Data%20Licence_LONG_Form_English%203.pdf"
 CONFIRM = "licence to confirm — public access alone does not establish commercial reuse rights"
 
@@ -108,7 +110,7 @@ CATALOG = [
     source("sa_gastat", "Saudi GASTAT census and statistics", "General Authority for Statistics Saudi Arabia", "https://www.stats.gov.sa/",
         ["population", "labour", "cpi"], country="SA", terms="https://www.stats.gov.sa/en/microdata",
         notes="Register now for the later KSA rebuild. Download 2022 census, labour and CPI aggregate tables; verify specific open-data licence and distinguish census from current estimates."),
-    source("placeholder_priors", "Kruvim placeholder model priors", "Kruvim", "https://github.com/leo777-debug/Kruvim/tree/kruvim/backend/app/services/population",
+    source("placeholder_priors", "Kruvim placeholder model priors", "Kruvim", METHODOLOGY_URL,
         ["all_unloaded_population_attributes", "salary_cycle", "synthetic_behavior"], method="manual", status="placeholder",
         licence="Synthetic model configuration, not measured statistics or official demographic data.",
         notes="Estimate, source pending. All unsupported numeric model priors and heuristic correlations trace here; these are explicitly not observations of real UAE people."),
@@ -136,7 +138,7 @@ CORE = [
     ("open_meteo_geocoding", "Open-Meteo / GeoNames coordinates", "https://open-meteo.com/en/docs/geocoding-api", "GeoNames data attribution and Open-Meteo service terms apply; confirm commercial service entitlement.", ["weather_coordinates"]),
     ("google_news", "Google News RSS", "https://news.google.com/", CONFIRM + "; publisher rights still apply", ["regional_headlines"]),
     ("gdelt", "GDELT DOC news tone", "https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/", CONFIRM, ["news_tone"]),
-    ("headline_tone", "Kruvim headline tone scorer", "https://github.com/leo777-debug/Kruvim/tree/kruvim/backend/app/services/datapool/tone.py", "Derived model estimate; use only licensed upstream headlines and retain their provenance.", ["news_tone"]),
+    ("headline_tone", "Kruvim headline tone scorer", METHODOLOGY_URL, "Derived model estimate; use only licensed upstream headlines and retain their provenance.", ["news_tone"]),
     ("wikipedia", "Wikimedia pageviews and discovery", "https://wikimediafoundation.org/our-work/open-data/", CONFIRM + "; check pageview data terms separately from article text", ["most_read"]),
     ("calendar", "Nager.Date public holidays", "https://date.nager.at/", CONFIRM, ["public_holidays"]),
     ("fx_rates", "ExchangeRate-API open rates", "https://www.exchangerate-api.com/docs/free", CONFIRM + "; attribution and redistribution restrictions need review", ["exchange_rates"]),

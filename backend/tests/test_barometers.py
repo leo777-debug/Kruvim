@@ -150,6 +150,13 @@ async def test_simulations_receive_relevant_excerpts_with_sources(client, auth):
     block = world_lines(used)
     assert "[Dubai Sports Council, AE" in block and "unedited" in block
 
+    # The finished report says what the agents saw and what the results are (and are not).
+    await client.post(f"/simulations/{sid}/start", headers=h)
+    await wait_for(client, h, sid, "report_status", {"done"})
+    md = (await client.get(f"/simulations/{sid}/report/download?format=md", headers=h)).text
+    assert "## Public data the agents saw" in md and "**Dubai Sports Council** (AE" in md
+    assert "not financial, legal or political advice" in md
+
 
 async def test_deleting_removes_the_document_and_its_index(client, auth):
     from sqlalchemy import func, select

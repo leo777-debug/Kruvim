@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout, Card } from "@/components/ui/primitives";
@@ -72,7 +72,27 @@ export function SimpleResults({ sim, stream, onDetails, onAgent, refetch }: {
       <CrowdSegments segments={r.described_segments} brief={sim.audience?.brief} onAgent={onAgent} />
       <Card className="p-5"><h2 className="mb-3 font-semibold">What people said</h2><p className="mb-3 text-xs text-muted">Simulated reactions, not real follower feedback.</p>{[...(r.winners || []), ...(r.losers || [])].filter((g) => g.evidence).slice(0, 4).map((g) => <blockquote className="mb-4 border-l-2 border-line pl-3 text-sm" key={g.key}><p>“{g.evidence.quote}”</p><button className="mt-1 text-xs text-brand" onClick={() => onAgent(g.evidence.agent)}>{g.evidence.name} · {g.label}</button></blockquote>)}</Card>
       <Card className="p-5"><h2 className="mb-3 font-semibold">Who it reaches</h2><div className="grid gap-3 sm:grid-cols-3">{(r.groups?.region || []).map((g: any) => <div key={g.key} className="rounded border border-line p-3 text-sm"><strong>{g.label}</strong><p className="mt-1">{g.score.toFixed(1)} / 10</p><p className="text-xs text-muted">{fmt.pct(g.share_of_audience)} of your chosen audience</p></div>)}</div></Card>
+      <SourcesSeen excerpts={sim.config?.barometers} />
       <Card className="p-5"><h2 className="mb-3 font-semibold">Fixes</h2>{(r.recommendations || []).slice(1, 4).map((x: any) => <div key={x.id} className="mb-4 text-sm"><h3 className="font-medium">{x.title}</h3><p className="mt-1 text-muted">{x.detail}</p></div>)}<Button onClick={onDetails}>Details</Button><p className="mt-2 text-xs text-muted">Full report, charts, transcript, graph and method.</p></Card>
+      <p className="px-1 text-xs text-muted">Simulated prediction from synthetic people, not a measurement. Not financial, legal or political advice. <Link className="text-brand" to="/help#limits">What predictions can and can't tell you</Link></p>
     </>}
   </div>;
+}
+
+/** Explainability: the public data (barometer library) the agents had in front of them, verbatim, with its source. */
+function SourcesSeen({ excerpts }: { excerpts?: { chunk_id: string; publisher: string; country: string; published_on: string | null; title: string; location: string; text: string }[] }) {
+  if (!excerpts?.length) return null;
+  return (
+    <Card className="p-5">
+      <h2 className="mb-1 font-semibold">Public data the agents saw</h2>
+      <p className="mb-3 text-xs text-muted">The most relevant passages from your barometer library, shown to every simulated person exactly as published.</p>
+      <ul className="space-y-3">{excerpts.map((x) => (
+        <li key={x.chunk_id} className="rounded-md border border-line p-3">
+          <div className="mb-1 text-xs text-muted">{x.publisher} · {x.country}{x.published_on ? ` · ${fmt.day(x.published_on)}` : ""} · {x.title} · {x.location}</div>
+          <details><summary className="cursor-pointer text-sm">{x.text.trim().slice(0, 140)}{x.text.trim().length > 140 ? "…" : ""}</summary>
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed" tabIndex={0} data-scroll-region>{x.text}</pre></details>
+        </li>
+      ))}</ul>
+    </Card>
+  );
 }

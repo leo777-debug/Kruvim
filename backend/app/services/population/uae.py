@@ -31,7 +31,7 @@ LABEL = "estimate, source pending"
 
 def placeholder_provenance():
     return {"status": "placeholder", "label": LABEL, "source_ids": [PLACEHOLDER_ID], "observation_ids": [],
-            "sources": [{"name": "Synthetic placeholder configuration", "url": "https://github.com/leo777-debug/Kruvim/tree/kruvim/backend/app/services/population", "status": "placeholder"}],
+            "sources": [{"name": "Synthetic placeholder configuration", "url": "/help#methodology", "status": "placeholder"}],
             "attribute_confidence": {k: {"status": "placeholder", "label": LABEL, "confidence": 0,
                 "source_ids": [PLACEHOLDER_ID], "observation_ids": []} for k in [*DOMAINS, "remittance_share", "platform_habits", "salary_cycle"]},
             "conflicts": [], "coverage_gaps": [{"attribute": k, "reason": "No approved native observations loaded"} for k in DOMAINS]}

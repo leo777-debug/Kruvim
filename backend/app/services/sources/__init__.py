@@ -23,6 +23,9 @@ async def ensure_sources(s):
     if values:
         insert = sqlite_insert if s.bind.dialect.name == "sqlite" else pg_insert
         await s.execute(insert(DataSource).values(values).on_conflict_do_nothing(index_elements=["key"]))
+    # Earlier versions linked Kruvim's own estimates to the source repository; point them at the in-app methodology.
+    from .catalog import METHODOLOGY_URL
+    await s.execute(update(DataSource).where(DataSource.url.like("https://github.com/leo777-debug/%")).values(url=METHODOLOGY_URL))
     # Existing observations retain original URLs/times. Unknown legacy sources are explicitly placeholders.
     mapping = dict((await s.execute(select(DataSource.key, DataSource.id))).all())
     await s.execute(update(Signal).where(Signal.source_id.is_(None)).values(

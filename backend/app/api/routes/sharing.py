@@ -47,6 +47,23 @@ async def ready_report(s, sim):
     return report
 
 
+DISCLAIMER = ("These results are a simulation: synthetic people reacting to the content, guided by data and a language model. "
+              "They are not a poll or a measurement of real people, they can be wrong, and they are not financial, legal or "
+              "political advice.")
+
+
+def export_appendix(sim) -> str:
+    """Every exported report says what it is and lists the public data the agents saw (with sources)."""
+    out = ""
+    excerpts = (sim.config or {}).get("barometers") or []
+    if excerpts:
+        out += "\n\n## Public data the agents saw\n\n"
+        for x in excerpts:
+            when = f", {x['published_on']}" if x.get("published_on") else ""
+            out += f"- **{x['publisher']}** ({x['country']}{when}), {x['title']}, {x['location']}\n"
+    return out + "\n\n## About these results\n\n" + DISCLAIMER + "\n"
+
+
 @router.get("/simulations/{sim_id}/report/download", dependencies=[Depends(throttle("expensive", "rate_limit_expensive_per_minute"))])
 async def download(sim_id: str, format: Literal["pdf", "docx", "md"] = "pdf", p: Principal = Depends(principal),
                    s: AsyncSession = Depends(get_session)):
@@ -68,7 +85,7 @@ async def download(sim_id: str, format: Literal["pdf", "docx", "md"] = "pdf", p:
             # A broken remote logo must not prevent a branded report download.
             logo = None
     readable = await present_report(s, report, p.org_id, private=False)
-    data = await asyncio.to_thread(export_report, readable["rendered_markdown"], sim.results or {}, branding, format, logo)
+    data = await asyncio.to_thread(export_report, readable["rendered_markdown"] + export_appendix(sim), sim.results or {}, branding, format, logo)
     media = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "md": "text/markdown; charset=utf-8"}[format]
     return Response(data, media_type=media, headers={**PRIVATE_HEADERS, "Content-Disposition": f'attachment; filename="report-{sim.id}.{format}"'})
 

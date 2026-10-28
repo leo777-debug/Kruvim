@@ -275,7 +275,7 @@ async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), 
     if not d.registered_source_id:
         # Legacy respondent imports must receive the same explicit licence review as native tables.
         source = DataSource(key="survey_" + d.id, name=d.name[:240], publisher=d.source[:240], country="*",
-            geography_level="country", url="https://github.com/leo777-debug/Kruvim/tree/kruvim",
+            geography_level="country", url="/help#methodology",
             access_method="manual", licence="licence to confirm — uploader must provide the original publisher's commercial reuse grant",
             attribution="Uploaded survey; cite original publisher, survey wave and retained upload", cadence="irregular", reliability=.5,
             notes="Original file retained as asset:" + d.id + ". Respondent summary cannot weight the shared population until reuse approval.",

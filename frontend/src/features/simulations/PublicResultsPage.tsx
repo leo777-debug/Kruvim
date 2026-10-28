@@ -25,6 +25,7 @@ export default function PublicResultsPage() {
     <Card className="p-5"><h2 className="mb-3 font-medium">Attention heatmap</h2><BarList max={1} valueFmt={fmt.pct} colorFor={() => accent} rows={(r.heatmap?.segments || []).map((s:any) => ({label:s.label,value:s.retention || 0}))} /></Card>
     <Card className="p-5"><h2 className="mb-3 font-medium">Audience segments</h2><BarList colorFor={() => accent} rows={(r.groups?.region || []).map((s:any) => ({label:s.label,value:s.score}))} /></Card>
     <article className="card prose-report min-w-0 break-words p-5 sm:p-8"><ReportFootnotes content={report.markdown} /></article>
+    <p className="text-xs text-muted">Simulated prediction from synthetic people, not a measurement. Not financial, legal or political advice.</p>
     {branding.report_footer && <footer className="text-xs text-muted">{branding.report_footer}</footer>}
   </main>;
 }
