@@ -1,16 +1,24 @@
 import "@fontsource-variable/inter";
 import "@fontsource/ibm-plex-mono/400.css";
 import "./index.css";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as RTooltip from "@radix-ui/react-tooltip";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import App from "./App";
 import { ApiError } from "./lib/api";
+import { errorText } from "./components/ui/states";
 
 const qc = new QueryClient({
+  // Safety net: a failed load the screen does not handle itself still tells the user (once per query, never a stack trace).
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      if (query.meta?.silent || (error instanceof ApiError && (error.status === 401 || error.status === 404))) return;
+      toast.error(errorText(error, "some data"), { id: JSON.stringify(query.queryKey) });
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 15_000,

@@ -5,6 +5,7 @@ import { Callout, Card, CardHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn, fmt } from "@/lib/utils";
+import { LoadError, LoadingBlock } from "@/components/ui/states";
 import { UsageMeter } from "./ModelKeys";
 
 export default function UsagePage() {
@@ -12,7 +13,11 @@ export default function UsagePage() {
   const q = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
   const limits = useQuery({ queryKey: [orgId, "limits"], queryFn: () => api("/limits") });
   const u = q.data;
-  if (!u) return null;
+  if (!u) return (
+    <Page title="Usage and credits">
+      {q.isError ? <LoadError error={q.error} what="your usage" onRetry={() => q.refetch()} /> : <LoadingBlock label="Loading usage" />}
+    </Page>
+  );
   const calls = u.month.reduce((a: number, m: any) => a + m.calls, 0);
   const cost = u.month.reduce((a: number, m: any) => a + (m.cost_usd || 0), 0);
   return (

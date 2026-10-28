@@ -7,6 +7,8 @@ import { LiveGraph, type GraphHandle } from "@/components/graph/LiveGraph";
 import { Button } from "@/components/ui/button";
 import { Menu } from "@/components/ui/overlay";
 import { Badge, Switch } from "@/components/ui/primitives";
+import { LoadError } from "@/components/ui/states";
+import { Page } from "@/components/layout/AppShell";
 import { api, API, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { GEdge, GNode, Simulation } from "@/lib/types";
@@ -92,7 +94,13 @@ export default function SimulationPage() {
     }
   }, [sim, step, searchParams]);
 
-  if (q.isLoading || !sim) return <div className="flex h-full items-center justify-center text-muted"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+  if (q.isError && !sim) return (
+    <Page title="Test">
+      <LoadError error={q.error} what="this test" onRetry={() => q.refetch()} />
+      <p className="mt-4 text-[13px]"><Link className="text-brand" to="/tests">Back to my tests</Link></p>
+    </Page>
+  );
+  if (q.isLoading || !sim) return <div role="status" className="flex h-full items-center justify-center text-muted"><Loader2 className="h-5 w-5 animate-spin" aria-hidden /><span className="sr-only">Loading the test…</span></div>;
   const reach = reachable(sim);
   const cur = step ?? 1;
   const busy = ["building_graph", "preparing", "queued", "running", "paused"].includes(sim.status);
