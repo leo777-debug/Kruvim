@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn, fmt, initials } from "@/lib/utils";
@@ -75,7 +76,9 @@ function ShellContent({ userId }: { userId?: string }) {
           <AlertsBell />
         </div>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
+          <ErrorBoundary resetKey={loc.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
