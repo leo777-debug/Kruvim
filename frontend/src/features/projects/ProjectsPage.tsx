@@ -42,7 +42,7 @@ export default function ProjectsPage() {
                 </div>
                 <span className="ml-auto text-xs text-muted">{rows.length} of {q.data!.length}</span>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
                 <table className="dt min-w-[640px]">
                   <thead><tr><th>Project</th><th className="!text-right">Simulations</th><th className="!text-right">Last activity</th><th className="!text-right">Created</th></tr></thead>
                   <tbody>{rows.map((p) => (

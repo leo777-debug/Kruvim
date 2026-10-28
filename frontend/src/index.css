@@ -23,13 +23,13 @@
     --line-strong: 206 210 217;
     --fg: 17 24 39;
     --muted: 82 91 107;
-    --faint: 132 140 154;
+    --faint: 104 112 126;       /* 4.5:1 on every light surface (WCAG AA) */
     --brand: 33 85 205;
     --brand-fg: 255 255 255;
     --brand-soft: 234 240 253;
-    --pos: 22 128 74;
+    --pos: 18 112 63;
     --neg: 196 50 38;
-    --warn: 176 104 12;
+    --warn: 150 86 8;
     --info: 33 85 205;
     --graph-bg: #fbfbfc;
     --graph-grid: rgba(17, 24, 39, 0.045);
@@ -46,7 +46,7 @@
     --line-strong: 60 63 70;
     --fg: 234 235 238;
     --muted: 158 163 172;
-    --faint: 110 115 124;
+    --faint: 140 145 154;       /* 4.5:1 on every dark surface (WCAG AA) */
     --brand: 99 141 242;
     --brand-fg: 255 255 255;
     --brand-soft: 30 40 64;
@@ -112,3 +112,9 @@
   .prose-report th { @apply text-left text-muted font-medium bg-raised border-b border-line px-3 py-1.5; }
   .prose-report td { @apply border-b border-line px-3 py-1.5; }
 }
+
+/* Links must not rely on colour alone (WCAG 1.4.1): brand-coloured links carry a soft underline. */
+a.text-brand { text-decoration-line: underline; text-decoration-color: rgb(var(--brand) / 0.35); text-underline-offset: 2px; }
+a.text-brand:hover { text-decoration-color: rgb(var(--brand)); }
+/* Scrollable tables can be focused and scrolled with the keyboard (WCAG 2.1.1). */
+[data-scroll-region]:focus-visible { outline: 2px solid rgb(var(--brand) / 0.6); outline-offset: 2px; }

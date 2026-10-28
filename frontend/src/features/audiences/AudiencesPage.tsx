@@ -43,7 +43,7 @@ export default function AudiencesPage() {
       <Card className="overflow-hidden">
         {q.isLoading ? <div className="space-y-2 p-4"><Skeleton /><Skeleton /></div>
           : (q.data || []).length === 0 ? <Empty title="No saved audiences">Build an audience in a new simulation and choose “Save this audience”.</Empty> : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
               <table className="dt min-w-[820px]">
                 <thead><tr><th>Audience</th><th>Filters</th><th>Source</th><th className="!text-right">Uses</th><th className="!text-right">Accuracy</th><th>Shared</th><th className="w-10" /></tr></thead>
                 <tbody>{q.data!.map((t) => (

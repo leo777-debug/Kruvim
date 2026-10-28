@@ -112,7 +112,7 @@ export function LineSimple({ points, height = 150, yMax, color = SERIES.a, xFmt,
 
 export function HeatGrid({ rows, columns }: { rows: { label: string; values: number[]; n?: number }[]; columns: string[] }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
       <div className="grid gap-[2px]" style={{ gridTemplateColumns: `170px repeat(${columns.length}, minmax(34px, 1fr))` }}>
         <div />
         {columns.map((c, i) => <div key={i} className="truncate text-center text-2xs text-muted" title={c}>{i + 1}</div>)}

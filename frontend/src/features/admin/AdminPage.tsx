@@ -38,7 +38,7 @@ export default function AdminPage() {
         </div>
       )}
       {tab === "orgs" && (
-        <Card className="overflow-x-auto">
+        <Card className="overflow-x-auto" tabIndex={0} data-scroll-region>
           <table className="dt min-w-[760px]">
             <thead><tr><th>Organisation</th><th>Plan</th><th className="!text-right">Credits</th><th className="!text-right">Simulations</th><th>Adjust credits</th></tr></thead>
             <tbody>{(orgs.data || []).map((g) => (

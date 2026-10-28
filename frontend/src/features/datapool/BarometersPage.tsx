@@ -84,7 +84,7 @@ export default function BarometersPage() {
               : list.isError ? <div className="p-4"><Callout tone="neg" title="The library could not be loaded">Refresh the page to try again.</Callout></div>
               : !docs.length ? <Empty icon={<FileText className="h-5 w-5" />} title="No barometer data yet">Add a national statistics table, a survey or a report. Every simulation will draw on the most relevant passages for its countries.</Empty>
               : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
                   <table className="dt">
                     <thead><tr><th>Document</th><th>Country</th><th>Published</th><th>Status</th><th className="!text-right"><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>{docs.map((d) => (

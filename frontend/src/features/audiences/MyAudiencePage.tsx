@@ -56,7 +56,7 @@ export default function MyAudiencePage() {
     <AnalyticsImports key={orgId} />
     {params.get("connection") && <Card className="mb-4 p-4" role="status">{params.get("connection") === "connected" ? "Account connected. Sync analytics to load its breakdown." : "Account connection failed. Check permissions and try again."}</Card>}
     {(accounts.isError || profile.isError) && <Card className="mb-4 p-4" role="alert">Could not load audience data. <Button onClick={() => { accounts.refetch(); profile.refetch(); }}>Retry</Button></Card>}
-    {(capabilities.data?.oauth_enabled || accounts.data?.connections.some((c) => c.connected)) && <details className="mt-5"><summary className="cursor-pointer text-sm font-medium">Automatic platform connections (advanced)</summary><Card className="mt-3 overflow-x-auto">
+    {(capabilities.data?.oauth_enabled || accounts.data?.connections.some((c) => c.connected)) && <details className="mt-5"><summary className="cursor-pointer text-sm font-medium">Automatic platform connections (advanced)</summary><Card className="mt-3 overflow-x-auto" tabIndex={0} data-scroll-region>
       <table className="dt account-table"><thead><tr><th>Platform</th><th>Account</th><th>Available analytics</th><th>Actions</th></tr></thead><tbody>
         {accounts.data?.providers.map((provider) => {
           const c = accounts.data.connections.find((x) => x.platform === provider.platform);

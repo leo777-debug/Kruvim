@@ -10,6 +10,7 @@ import { Callout, Card, CardHeader, Field, Input, KV, Status, UnderlineTabs } fr
 import { api, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
+import { LoadError, LoadingBlock } from "@/components/ui/states";
 import { ModelKeys, SpendingLimits } from "./ModelKeys";
 import { ProviderForm } from "./ProviderForm";
 
@@ -39,7 +40,7 @@ function Provider() {
   const orgId = useAuth((s) => s.orgId);
   const qc = useQueryClient();
   const q = useQuery({ queryKey: [orgId, "providers"], queryFn: () => api("/providers") });
-  if (!q.data) return null;
+  if (!q.data) return q.isError ? <LoadError error={q.error} what="the model provider" onRetry={() => q.refetch()} /> : <LoadingBlock label="Loading the model provider" />;
   const a = q.data.active;
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -110,14 +111,14 @@ function Members() {
     <Card className="overflow-hidden">
       <CardHeader title="Members" subtitle="Owners and admins manage billing, keys and members. Members run simulations. Viewers read results." divider
         actions={can("admin") && <Button size="sm" variant="primary" onClick={() => { setOpen(true); setLink(null); }}>Invite member</Button>} />
-      <div className="overflow-x-auto"><table className="dt min-w-[680px]">
+      <div className="overflow-x-auto" tabIndex={0} data-scroll-region><table className="dt min-w-[680px]">
         <thead><tr><th>Name</th><th>Status</th><th className="w-40">Role</th><th className="w-12" /></tr></thead>
         <tbody>
         {(q.data?.members || []).map((m: any) => (
           <tr key={m.id}>
             <td><div className="font-medium">{m.name}</div><div className="text-xs text-muted">{m.email}</div></td>
             <td className="text-xs text-muted">Joined {fmt.day(m.joined_at)} · last active {fmt.ago(m.last_login_at)}</td>
-            <td>{can("admin") ? <Select value={m.role} onChange={(v) => role.mutate({ id: m.id, role: v })} options={["owner", "admin", "member", "viewer"].map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))} /> : <span className="capitalize">{m.role}</span>}</td>
+            <td>{can("admin") ? <Select ariaLabel={`Role for ${m.email}`} value={m.role} onChange={(v) => role.mutate({ id: m.id, role: v })} options={["owner", "admin", "member", "viewer"].map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))} /> : <span className="capitalize">{m.role}</span>}</td>
             <td>{can("admin") && m.role !== "owner" && <Button size="icon-sm" variant="ghost" aria-label={`Remove ${m.email}`} onClick={() => confirm(`Remove ${m.email}?`) && remove.mutate(m.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}</td>
           </tr>
         ))}
@@ -155,7 +156,7 @@ function Keys() {
       <CardHeader title="Developer API keys" divider subtitle={<>Programmatic access to everything in the UI: <code className="mono">Authorization: Bearer krv_…</code> against <code className="mono">/api/v1</code>. Reference at <a className="text-brand hover:underline" href="/api/docs" target="_blank" rel="noreferrer">/api/docs</a>.</>}
         actions={<Button size="sm" variant="primary" onClick={() => { setOpen(true); setRaw(null); }}>Create key</Button>} />
       {(q.data || []).length === 0 ? <div className="px-4 py-6 text-[13px] text-muted">No API keys yet.</div> : (
-      <div className="overflow-x-auto"><table className="dt min-w-[680px]">
+      <div className="overflow-x-auto" tabIndex={0} data-scroll-region><table className="dt min-w-[680px]">
         <thead><tr><th>Name</th><th>Key</th><th>Role</th><th>Activity</th><th className="w-28" /></tr></thead>
         <tbody>
         {(q.data || []).map((k) => (
@@ -182,7 +183,7 @@ function Audit() {
   const q = useQuery({ queryKey: [orgId, "audit"], queryFn: () => api<any[]>("/audit?limit=300"), enabled: can("admin") });
   if (!can("admin")) return <Callout tone="info">Only admins can view the audit log.</Callout>;
   return (
-    <Card className="max-h-[70vh] overflow-auto">
+    <Card className="max-h-[70vh] overflow-auto" tabIndex={0} data-scroll-region aria-label="Audit log">
       <table className="dt min-w-[760px]">
         <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>IP address</th></tr></thead>
         <tbody>{(q.data || []).map((a, i) => (

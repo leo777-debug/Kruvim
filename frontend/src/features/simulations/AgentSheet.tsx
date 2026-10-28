@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose } from "@/components/ui/overlay";
 import { Badge, Bar, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
-import { ACTION_COLORS, engColor, scoreColor, STANCE_COLORS } from "@/lib/colors";
+import { ACTION_COLORS, engColor, scoreColor, scoreText, STANCE_COLORS } from "@/lib/colors";
 import { fmt, initials, platformName } from "@/lib/utils";
 import { AgentMemories } from "./AgentMemories";
 
@@ -34,7 +34,7 @@ export function AgentSheet({ simId, agentRef, onClose, onChat }: { simId: string
             </>
           )}
         </div>
-        {score != null && <div className="text-right"><div className="num text-lg font-semibold leading-tight" style={{ color: scoreColor(score) }}>{fmt.s1(score)}</div><div className="text-[11px] text-muted">opinion</div></div>}
+        {score != null && <div className="text-right"><div className="num text-lg font-semibold leading-tight" style={{ color: scoreText(score) }}>{fmt.s1(score)}</div><div className="text-[11px] text-muted">opinion</div></div>}
         <SheetClose className="rounded p-1 text-muted hover:bg-raised hover:text-fg"><X className="h-4 w-4" /></SheetClose>
       </div>
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-[13px]">

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/overlay";
 import { Badge, Bar, Callout, Card, CardHeader, Field, Input, KV, Segmented, Stat } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
-import { engColor, REGION_COLORS, scoreColor, STANCE_COLORS } from "@/lib/colors";
+import { engColor, REGION_COLORS, scoreColor, scoreText, STANCE_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import type { Simulation } from "@/lib/types";
 import { cn, fmt, platformName } from "@/lib/utils";
@@ -162,7 +162,7 @@ function GroupCard({ title, list, onAgent, tone }: { title: string; list: any[];
         {list.length === 0 && <div className="py-4 text-xs text-muted">No group stands out here.</div>}
         {list.map((g) => (
           <div key={g.key} className="py-3">
-            <div className="flex items-baseline justify-between"><span className="text-[13px] font-medium">{g.label}</span><span className="num text-lg" style={{ color: scoreColor(g.score) }}>{g.score.toFixed(1)}</span></div>
+            <div className="flex items-baseline justify-between"><span className="text-[13px] font-medium">{g.label}</span><span className="num text-lg" style={{ color: scoreText(g.score) }}>{g.score.toFixed(1)}</span></div>
             <div className="text-2xs text-muted">{fmt.pct(g.share_of_audience, 1)} of audience · {g.voice_n} interviewed · share {fmt.pct(g.would_share)}{g.gap ? ` · ${g.gap} below average despite topic interest ×${g.topic_interest}` : ""}</div>
             {g.objection && <div className="mt-1 text-2xs"><span className="text-faint">Objection:</span> {g.objection}</div>}
             {g.evidence && <button onClick={() => onAgent(g.evidence.agent)} className="mt-1.5 block border-l-2 border-line-strong pl-2.5 text-left text-xs text-muted hover:text-fg">“{g.evidence.quote}” <span className="text-[11px] text-faint">· {g.evidence.name}</span></button>}
@@ -272,7 +272,7 @@ function Dynamics({ r, onAgent }: { r: any; onAgent: (r: string) => void }) {
                 <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{l.name} <span className="font-normal text-muted">@{l.handle}</span></span>
                   <span className="block text-xs capitalize text-muted">{l.kind} · {l.region} · {fmt.n(l.followers)} followers</span></span>
                 <span className="num text-xs">{fmt.k(l.engagement)}</span>
-                <span className="num w-8 text-right text-xs" style={{ color: scoreColor(l.opinion) }}>{fmt.s1(l.opinion)}</span>
+                <span className="num w-8 text-right text-xs" style={{ color: scoreText(l.opinion) }}>{fmt.s1(l.opinion)}</span>
               </button>
             ))}
           </div>
@@ -322,7 +322,7 @@ function Platforms({ r }: { r: any }) {
   const pl = r.platforms.by_platform;
   return (
     <S id="platforms" title="Platform fit" sub="Projected reactions of audience agents who use each platform weekly.">
-      <Card className="overflow-x-auto">
+      <Card className="overflow-x-auto" tabIndex={0} data-scroll-region>
         <table className="dt min-w-[640px]">
           <thead><tr><th>Platform</th><th className="!text-right">Audience share</th><th>Opinion among its users</th><th className="!text-right">Share intent</th><th className="!text-right">Completion</th></tr></thead>
           <tbody>{pl.map((p: any) => (

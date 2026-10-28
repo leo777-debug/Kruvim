@@ -209,7 +209,7 @@ function PollCard({ p }: { p: any }) {
         ))}
       </div>
       {p.by?.region?.length > 0 && (
-        <div className="overflow-x-auto border-t border-line">
+        <div className="overflow-x-auto border-t border-line" tabIndex={0} data-scroll-region>
           <table className="dt">
             <thead><tr><th>Region</th>{p.options.map((o: string, i: number) => <th key={i} className="!text-right">{o.length > 14 ? `${o.slice(0, 13)}…` : o}</th>)}</tr></thead>
             <tbody>{p.by.region.map((row: any) => <tr key={row.label}><td>{row.label} <span className="text-xs text-muted">n={row.n}</span></td>{row.shares.map((s: number, i: number) => <td key={i} className="r">{fmt.pct(s)}</td>)}</tr>)}</tbody>

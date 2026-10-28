@@ -23,7 +23,7 @@ export default function CalibrationPage() {
       <Card className="mb-5 space-y-3 p-5"><h2 className="font-semibold">Does simulated memory improve accuracy?</h2>
         <p className="text-xs text-muted">{c?.memory_comparison?.method || "Compare first-impression predictions from memory and Fresh audience tests against linked real outcomes. This comparison stays within your workspace."}</p>
         {!c?.memory_comparison?.available ? <p className="text-sm text-muted">Not enough comparable outcomes yet. Complete at least three live-model tests with memory and three with Fresh audience on, on the same platform and format, then link their real outcomes.</p> :
-          <div className="overflow-x-auto"><table className="dt"><thead><tr><th>Platform / format</th><th>Outcome</th><th>Memory error</th><th>Fresh error</th><th>Tests</th></tr></thead>
+          <div className="overflow-x-auto" tabIndex={0} data-scroll-region><table className="dt"><thead><tr><th>Platform / format</th><th>Outcome</th><th>Memory error</th><th>Fresh error</th><th>Tests</th></tr></thead>
             <tbody>{c.memory_comparison.comparisons.map((row: any) => <tr key={`${row.platform}:${row.format}:${row.metric}`}>
               <td>{platformName(row.platform)} · {row.format?.replaceAll("_", " ")}</td><td>{row.metric.replaceAll("_", " ")} ({row.unit})</td>
               <td>{row.memory_error.toFixed(3)}</td><td>{row.fresh_error.toFixed(3)}</td><td>{row.memory_n} memory / {row.fresh_n} fresh</td>
@@ -45,7 +45,7 @@ export default function CalibrationPage() {
                 accent={v.rho > 0.3 ? "rgb(var(--pos))" : v.rho < 0 ? "rgb(var(--neg))" : undefined} sub={`n = ${v.n}`} /></Card>;
             })}
           </div>
-          <Card className="mt-5 overflow-x-auto">
+          <Card className="mt-5 overflow-x-auto" tabIndex={0} data-scroll-region>
             <table className="dt min-w-[760px]">
               <thead><tr><th>Simulation</th><th>Platform</th><th className="!text-right">Predicted opinion</th><th className="!text-right">Predicted virality</th>
                 <th className="!text-right">Views</th><th className="!text-right">Engagement</th><th className="!text-right">Watched</th></tr></thead>

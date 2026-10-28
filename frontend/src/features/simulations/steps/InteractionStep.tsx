@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, Select } from "@/components/ui/overlay";
 import { Badge, Callout, Empty, Field, Input, Segmented, Status, Textarea, UnderlineTabs } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
-import { REGION_COLORS, scoreColor, STANCE_COLORS } from "@/lib/colors";
+import { REGION_COLORS, scoreColor, scoreText, STANCE_COLORS } from "@/lib/colors";
 import type { Simulation } from "@/lib/types";
 import { cn, fmt, initials } from "@/lib/utils";
 import type { StreamState } from "../useSimulationStream";
@@ -82,7 +82,7 @@ function Agents({ sim }: { sim: Simulation }) {
                 <div className="truncate text-[13px] font-medium">{a.name}</div>
                 <div className="truncate text-xs text-muted">{a.kind === "stakeholder" ? a.persona.role : `${a.persona.age} · ${a.persona.city} · ${a.persona.stance}`}</div>
               </div>
-              {a.opinion != null && <span className="num text-xs" style={{ color: scoreColor(a.opinion) }}>{fmt.s1(a.opinion)}</span>}
+              {a.opinion != null && <span className="num text-xs" style={{ color: scoreText(a.opinion) }}>{fmt.s1(a.opinion)}</span>}
             </button>
           ))}
         </div>
@@ -121,7 +121,7 @@ function Chat({ sim, target }: { sim: Simulation; target: string }) {
         </div>
         {p.stance && <Badge><span className="h-1.5 w-1.5 rounded-full" style={{ background: STANCE_COLORS[p.stance] }} />{p.stance}</Badge>}
         {d.data?.kind === "population" && <Badge tone="outline">Projected</Badge>}
-        {op != null && <span className="num text-lg font-semibold" style={{ color: scoreColor(op) }}>{fmt.s1(op)}</span>}
+        {op != null && <span className="num text-lg font-semibold" style={{ color: scoreText(op) }}>{fmt.s1(op)}</span>}
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <AgentMemories data={d.data.long_term_memory} />

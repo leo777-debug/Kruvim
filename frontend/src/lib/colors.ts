@@ -18,6 +18,11 @@ export function scoreColor(s?: number | null, a = 1): string {
   return a === 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${a})`;
 }
 
+/** Score colour for text: blended with the theme's text colour so it stays readable (WCAG AA) in light and dark mode. */
+export function scoreText(s?: number | null): string {
+  return `color-mix(in srgb, ${scoreColor(s)} 60%, rgb(var(--fg)))`;
+}
+
 // Attention hold rate: 0.85 is "normal" for a segment
 export function engColor(e: number, a = 1) {
   return scoreColor(Math.max(0, Math.min(10, 5 + (e - 0.85) * 40)), a);

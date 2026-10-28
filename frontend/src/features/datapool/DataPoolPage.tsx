@@ -129,7 +129,7 @@ function Connectors() {
     <div className="space-y-4">
       {!user?.is_superuser && <Callout tone="info">Shared connectors are managed by platform administrators. You can add your organisation's own social credentials for live listening; they are encrypted and used only for your simulations.</Callout>}
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
           <table className="dt min-w-[980px]">
             <thead><tr>{user?.is_superuser && <th className="w-12">On</th>}<th>Connector</th><th>Category</th><th>Status</th><th>Schedule</th><th className="!text-right">Last run</th><th className="!text-right">Items (last / total)</th><th className="w-48" /></tr></thead>
             <tbody>{rows.map((c) => {
@@ -260,7 +260,7 @@ function Barometers() {
           <CardHeader title="Datasets" divider actions={<Button size="sm" variant="primary" onClick={() => input.current?.click()}><Upload className="h-3.5 w-3.5" />Upload table</Button>} />
           <input ref={input} type="file" accept={registered ? ".csv,.tsv,.xlsx" : ".csv,.tsv,.txt"} className="hidden" onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0]); e.target.value = ""; }} />
           {(list.data || []).length === 0 ? <Empty title="No datasets yet">Upload a CSV to start.</Empty> : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" tabIndex={0} data-scroll-region>
               <table className="dt min-w-[720px]">
                 <thead><tr><th>Dataset</th><th>Countries</th><th className="!text-right">Rows</th><th>Status</th><th className="w-44" /></tr></thead>
                 <tbody>{list.data!.map((d) => (
@@ -343,14 +343,14 @@ function MappingDialog({ d, onClose }: { d: any; onClose: () => void }) {
         </table>
       </div>
       <div className="mb-2 mt-5 text-[13px] font-medium">Preview</div>
-      <div className="overflow-x-auto rounded-md border border-line">
+      <div className="overflow-x-auto rounded-md border border-line" tabIndex={0} data-scroll-region>
         <table className="dt"><thead><tr>{cols.slice(0, 12).map((c) => <th key={c}>{c}</th>)}</tr></thead>
           <tbody>{(d.preview || []).slice(0, 4).map((r: string[], i: number) => <tr key={i}>{r.slice(0, 12).map((v, j) => <td key={j} className="text-xs">{v}</td>)}</tr>)}</tbody></table>
       </div>
       {summary && (
         <>
           <div className="mb-2 mt-5 text-[13px] font-medium">Computed marginals</div>
-          <div className="overflow-x-auto rounded-md border border-line">
+          <div className="overflow-x-auto rounded-md border border-line" tabIndex={0} data-scroll-region>
             <table className="dt">
               <thead><tr><th>Country</th><th className="!text-right">Respondents</th><th className="!text-right">Male</th><th>Age bands</th><th>Education</th><th>Attitudes</th></tr></thead>
               <tbody>{Object.entries(summary.regions).map(([k, v]: any) => (
