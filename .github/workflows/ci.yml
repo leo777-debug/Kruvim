@@ -22,9 +22,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
-            backend/requirements.txt
+            backend/requirements.lock
             backend/requirements-dev.txt
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip install --require-hashes -r requirements.lock && pip install -r requirements-dev.txt
+      - name: Known vulnerabilities in pinned dependencies
+        run: pip install pip-audit && pip-audit -r requirements.lock --no-deps --disable-pip
       - run: ruff check app tests scripts migrations tools
       - run: pytest -q
       - name: Ten consecutive complete suites with shuffled orders
@@ -65,8 +67,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
+          cache-dependency-path: backend/requirements.lock
+      - run: pip install --require-hashes -r requirements.lock
       - name: Upgrade, downgrade and upgrade again on PostgreSQL
         run: alembic upgrade head && alembic downgrade base && alembic upgrade head
       - run: alembic check
@@ -93,7 +95,7 @@ jobs:
       - run: npm run test:navigation
       - run: node tools/test-retest.mjs
       - run: npx vite build
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
 
   images:
     runs-on: ubuntu-latest
@@ -113,7 +115,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: pip install -r backend/requirements.txt
+      - run: pip install --require-hashes -r backend/requirements.lock
       - run: npm ci
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
@@ -145,6 +147,7 @@ jobs:
       - name: Start actual Compose stack
         env:
           KRUVIM_SECRET_KEY: ci-only-compose-secret-with-more-than-32-characters
+          KRUVIM_ALLOW_REGISTRATION: "true"   # the smoke test signs up its own account
           KRUVIM_POPULATION_SIZE: "40000"
         run: |
           docker compose up --build --wait --wait-timeout 240

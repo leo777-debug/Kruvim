@@ -3,8 +3,9 @@ FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl tini fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --upgrade "pip>=26.2.1" && pip install -r requirements.txt
+COPY requirements.txt requirements.lock ./
+# Exact, hash-checked versions; refresh with: uv pip compile requirements.txt --python-version 3.12 #   --python-platform x86_64-manylinux_2_28 --generate-hashes -o requirements.lock
+RUN pip install --upgrade "pip>=26.2.1" && pip install --require-hashes -r requirements.lock
 COPY . .
 RUN useradd --create-home --uid 10001 kruvim && mkdir -p /data && chown -R kruvim:kruvim /data /app && chmod +x docker-entrypoint.sh
 USER kruvim

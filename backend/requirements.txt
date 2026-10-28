@@ -21,10 +21,14 @@ pyjwt>=2.8
 cryptography>=42
 prometheus-client>=0.20
 anthropic>=1.0
-pypdf>=4.2
+pypdf>=6.21.2,<7
 
 reportlab>=4.2,<5
 python-docx>=1.1,<2
-Pillow>=11,<13
+Pillow>=13,<14
 openpyxl>=3.1,<4
 tzdata>=2026.5
+
+# Security floors for transitive dependencies (pip-audit, 2026-10-28)
+dnspython>=2.9.0
+opentelemetry-api>=1.45.1
