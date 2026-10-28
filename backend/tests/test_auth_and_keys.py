@@ -90,3 +90,29 @@ async def test_workspace_api_keys_are_shown_once_and_can_be_revoked(client, auth
     assert (await client.get("/projects", headers={"X-API-Key": raw})).status_code == 200
     assert (await client.delete(f"/api-keys/{created['id']}", headers=h)).status_code == 200
     assert (await client.get("/projects", headers={"X-API-Key": raw})).status_code == 401
+
+
+async def test_user_can_stop_a_running_simulation(client, auth):
+    from app.services import jobs
+    from tests.test_e2e_dry import SCRIPT, wait_for
+    h, _ = auth
+    pr = (await client.post("/projects", json={"name": "Stop me"}, headers=h)).json()
+    body = {"name": "Long run", "requirement": "How will people react?",
+            "content": {"type": "video", "title": "Long", "platform": "tiktok", "transcript": SCRIPT}, "audience": {"regions": ["AE"]},
+            "overrides": {"voice": 10, "crowd": 500, "stakeholders": 1, "hours": 24, "minutes_per_round": 60, "listening": False}}
+    sid = (await client.post(f"/projects/{pr['id']}/simulations", json=body, headers=h)).json()["id"]
+    await client.post(f"/simulations/{sid}/graph", headers=h)
+    await wait_for(client, h, sid, "status", {"graph_ready"})
+    await client.post(f"/simulations/{sid}/environment", headers=h)
+    await wait_for(client, h, sid, "status", {"ready"})
+
+    assert (await client.post(f"/simulations/{sid}/start", headers=h)).status_code == 200
+    r = await client.post(f"/simulations/{sid}/control", headers=h, json={"cmd": "stop"})
+    assert r.status_code == 200, r.text
+    await jobs.drain()
+    sim = (await client.get(f"/simulations/{sid}", headers=h)).json()
+    assert sim["status"] in ("completed", "cancelled"), sim.get("error")
+    assert sim["results"].get("stopped_early") is True
+    assert len(sim["results"].get("timeline") or []) < 25          # it did not run all 24 rounds
+    # A finished run cannot be controlled any more.
+    assert (await client.post(f"/simulations/{sid}/control", headers=h, json={"cmd": "pause"})).status_code == 409
