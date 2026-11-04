@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 
 type Folder = { id: string; name: string; project_id: string | null; enabled: boolean; watch_enabled: boolean;
-  rows: number; inbox_path: string | null; storage: string; database_schema: string; supabase_url: string | null; sync_status: { at?: string; errors?: string[] } };
+  rows: number; inbox_path: string | null; storage: string; database_schema: string; supabase_url: string | null; supabase_storage_url: string | null; sync_status: { at?: string; errors?: string[] } };
 type Row = { id: string; title: string; data: string; region: string; language: string; tags: string; filename: string; revision: number };
 type Draft = Pick<Row, "title" | "data" | "region" | "language" | "tags">;
 type Preview = { headers: string[]; sample: Record<string, string>[]; rows: number };
@@ -103,6 +103,7 @@ function FolderTable({ folder, orgId, filter, setFilter, refresh }: { folder: Fo
       {folder.watch_enabled && <div className="space-y-2 rounded-md bg-raised p-3 text-sm">
         <p>{folder.storage === 'supabase' ? 'Upload CSV/XLSX files into this private Supabase Storage folder. Kruvim checks it on the cloud schedule and before preparing simulations.' : 'Place CSV/XLSX files here on the Kruvim server. The scheduler checks about every 10 minutes.'}</p>
         <code className="block break-all">{folder.inbox_path}</code>
+        {folder.supabase_storage_url && <a className="block text-brand underline" href={folder.supabase_storage_url} target="_blank" rel="noreferrer">Open Supabase Storage</a>}
         <p>Use title, data, region, language and tags headers. Other columns are combined as data. Updating a filename replaces its imported rows. Removing a file does not delete saved rows.</p>
         {folder.sync_status.at && <p>Last checked: {new Date(folder.sync_status.at).toLocaleString()}</p>}
         {folder.sync_status.errors?.map(error => <p key={error} role="alert" className="text-neg">{error}</p>)}

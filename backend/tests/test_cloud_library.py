@@ -54,12 +54,15 @@ async def test_cloud_job_is_persisted_authenticated_and_delivered_once(client, m
 async def test_hosted_folder_defaults_to_cloud_and_hides_local_path(client, auth, monkeypatch):
     monkeypatch.setattr(settings, "storage_backend", "supabase")
     monkeypatch.setattr(settings, "supabase_url", "https://fixture.supabase.co")
+    upload = AsyncMock()
+    monkeypatch.setattr(supabase_storage, "put", upload)
     response = await client.post("/library/folders", headers=auth[0], json={"name": "Cloud folder"})
     assert response.status_code == 200
     folder = response.json()
     assert folder["watch_enabled"] is True
     assert folder["inbox_path"].startswith("kruvim-data/library-inbox/")
     assert folder["supabase_url"].startswith("https://supabase.com/dashboard/project/fixture/")
+    assert upload.call_args.args[0].endswith(folder["id"] + "/.keep")
 
 
 async def test_cloud_simulation_controls_are_stored_and_consumed_once(auth, monkeypatch):

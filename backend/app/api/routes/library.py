@@ -33,6 +33,7 @@ def folder_json(row, count=0):
         "watch_enabled": row.watch_enabled, "sync_status": row.sync_status, "rows": count,
         "storage": "supabase" if cloud else "local", "database_schema": settings.database_schema or "public",
         "supabase_url": f"https://supabase.com/dashboard/project/{ref}/editor" if cloud else None,
+        "supabase_storage_url": f"https://supabase.com/dashboard/project/{ref}/storage/buckets" if cloud else None,
         "inbox_path": (settings.supabase_bucket + "/" + cloud_prefix(row) if cloud else str(inbox_path(row))) if row.watch_enabled else None}
 
 
@@ -57,6 +58,9 @@ async def create(body: FolderIn, p: Principal = Depends(role("admin")), s: Async
     row = LibraryFolder(org_id=p.org_id, **values)
     s.add(row)
     await s.flush()
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import put
+        await put(cloud_prefix(row) + "/.keep", b"Kruvim research inbox")
     audit.record(s, "library.folder.create", org_id=p.org_id, user_id=p.user_id, target=row.id)
     await s.commit()
     return folder_json(row)
@@ -65,10 +69,14 @@ async def create(body: FolderIn, p: Principal = Depends(role("admin")), s: Async
 @router.put("/folders/{folder_id}")
 async def edit_folder(folder_id: str, body: FolderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     row = await own_folder(s, p, folder_id)
+    enable_cloud_inbox = settings.storage_backend == "supabase" and body.watch_enabled and not row.watch_enabled
     if body.project_id:
         await get_project(s, p, body.project_id)
     for key, value in body.model_dump().items():
         setattr(row, key, value)
+    if enable_cloud_inbox:
+        from app.services.supabase_storage import put
+        await put(cloud_prefix(row) + "/.keep", b"Kruvim research inbox")
     audit.record(s, "library.folder.update", org_id=p.org_id, user_id=p.user_id, target=row.id)
     await s.commit()
     return folder_json(row)
