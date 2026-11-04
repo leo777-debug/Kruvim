@@ -60,3 +60,39 @@ async def test_hosted_folder_defaults_to_cloud_and_hides_local_path(client, auth
     assert folder["watch_enabled"] is True
     assert folder["inbox_path"].startswith("kruvim-data/library-inbox/")
     assert folder["supabase_url"].startswith("https://supabase.com/dashboard/project/fixture/")
+
+
+async def test_cloud_simulation_controls_are_stored_and_consumed_once(auth, monkeypatch):
+    from app.services import jobs
+    monkeypatch.setattr(settings, "serverless", True)
+    await jobs.send_control("simulation-a", {"type": "pause"})
+    await jobs.send_control("simulation-b", {"type": "stop"})
+    assert await jobs.drain_control("simulation-a") == [{"type": "pause"}]
+    assert await jobs.drain_control("simulation-a") == []
+    assert await jobs.drain_control("simulation-b") == [{"type": "stop"}]
+
+
+async def test_cloud_stream_reads_events_from_another_process(auth, monkeypatch):
+    import asyncio
+    import json
+
+    from app.models import Project, SimEvent, Simulation
+    from app.services.events import EventBus
+    org_id = auth[1]["orgs"][0]["id"]
+    async with session_scope() as s:
+        project = Project(org_id=org_id, name="Cloud stream")
+        s.add(project)
+        await s.flush()
+        sim = Simulation(org_id=org_id, project_id=project.id)
+        s.add(sim)
+        await s.flush()
+        sim_id = sim.id
+    monkeypatch.setattr(settings, "serverless", True)
+    stream = EventBus().stream(sim_id)
+    pending = asyncio.create_task(anext(stream))
+    await asyncio.sleep(.1)
+    async with session_scope() as s:
+        s.add(SimEvent(simulation_id=sim_id, seq=1, type="cloud.progress", payload={"stage": "ready"}))
+    event = json.loads(await asyncio.wait_for(pending, timeout=5))
+    assert event["type"] == "cloud.progress"
+    await stream.aclose()

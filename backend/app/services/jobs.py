@@ -70,6 +70,12 @@ _local_ctl: dict[str, list[dict]] = {}
 
 
 async def send_control(sim_id: str, cmd: dict) -> None:
+    if settings.serverless and not settings.redis_url:
+        from app.db.session import session_scope
+        from app.models import CloudJob
+        async with session_scope() as s:
+            s.add(CloudJob(name="simulation_control", payload={"sim_id": sim_id, "command": cmd}))
+        return
     r = get_redis()
     if r is not None:
         await r.rpush(f"simctl:{sim_id}", json.dumps(cmd))
@@ -79,6 +85,17 @@ async def send_control(sim_id: str, cmd: dict) -> None:
 
 
 async def drain_control(sim_id: str) -> list[dict]:
+    if settings.serverless and not settings.redis_url:
+        from sqlalchemy import select
+
+        from app.db.session import session_scope
+        from app.models import CloudJob
+        async with session_scope() as s:
+            rows = (await s.execute(select(CloudJob).where(CloudJob.name == "simulation_control", CloudJob.status == "pending",
+                CloudJob.payload["sim_id"].as_string() == sim_id).order_by(CloudJob.created_at).with_for_update())).scalars().all()
+            for row in rows:
+                row.status = "done"
+            return [row.payload["command"] for row in rows]
     r = get_redis()
     if r is not None:
         out = []
@@ -91,6 +108,15 @@ async def drain_control(sim_id: str) -> list[dict]:
 
 
 async def queue_depth() -> dict:
+    if settings.serverless and not settings.redis_url:
+        from sqlalchemy import func, select
+
+        from app.db.session import session_scope
+        from app.models import CloudJob
+        async with session_scope() as s:
+            count = (await s.execute(select(func.count()).select_from(CloudJob).where(
+                CloudJob.status == "pending", CloudJob.name != "simulation_control"))).scalar()
+        return {"mode": "supabase", "queued": count}
     r = get_redis()
     if r is None:
         return {"mode": "in-process", "running": len(_local_tasks)}

@@ -73,8 +73,12 @@ async def refresh(request: Request):
     authorize(request)
     from app.services.library import sync_due
     await sync_due()
+    from app.services.token_budget import tick
+    from app.services.watchdog import check
+    await check()
+    await tick()
     async with session_scope() as s:
-        jobs = (await s.execute(select(CloudJob).where(CloudJob.status == "pending", CloudJob.due_at <= utcnow())
+        jobs = (await s.execute(select(CloudJob).where(CloudJob.status == "pending", CloudJob.name != "simulation_control", CloudJob.due_at <= utcnow())
             .order_by(CloudJob.created_at).limit(20).with_for_update(skip_locked=True))).scalars().all()
         for job in jobs:
             await dispatch(s, job)

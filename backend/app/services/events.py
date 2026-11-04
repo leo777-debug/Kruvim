@@ -101,6 +101,17 @@ class EventBus:
                     except TimeoutError:
                         msg = None
                 if msg is None:
+                    from app.core.config import settings
+                    if settings.serverless and r is None:
+                        async with session_scope() as s:
+                            rows = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim_id,
+                                SimEvent.seq > last).order_by(SimEvent.seq).limit(500))).scalars().all()
+                        for row in rows:
+                            last = row.seq
+                            yield json.dumps({"seq": row.seq, "type": row.type, "payload": row.payload}, default=str)
+                        if rows:
+                            idle = 0
+                            continue
                     idle += 1.0
                     if idle >= 15:
                         idle = 0

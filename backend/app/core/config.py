@@ -20,7 +20,7 @@ def _database_url():
         from sqlalchemy.engine import make_url
         url = make_url(value).set(drivername="postgresql+asyncpg")
         # asyncpg accepts TLS through connect_args; remove libpq/Prisma-only options.
-        return url.difference_update_query(["sslmode", "pgbouncer", "connection_limit", "connect_timeout"]).render_as_string(hide_password=False)
+        return url.set(query={}).render_as_string(hide_password=False)
     return f"sqlite+aiosqlite:///{os.path.join(_DATA_ROOT, 'kruvim.db')}"
 
 
