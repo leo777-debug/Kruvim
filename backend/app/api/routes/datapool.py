@@ -28,6 +28,29 @@ router = APIRouter(prefix="/datapool", tags=["data pool"])
 router.include_router(sources_router)
 
 
+@router.get("/health")
+async def signal_health(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
+    from app.services.sources import ensure_sources, signal_source
+    await ensure_sources(s)
+    sources = {r.id: r for r in (await s.execute(select(DataSource))).scalars()}
+    rows = (await s.execute(select(Signal.source, Signal.source_id, func.count(Signal.id)).where(
+        (Signal.org_id.is_(None)) | (Signal.org_id == p.org_id),
+        Signal.fetched_at >= datetime.now(UTC) - timedelta(days=2))
+        .group_by(Signal.source, Signal.source_id))).all()
+    groups = {}
+    for key, source_id, count in rows:
+        item = groups.setdefault(key, {"source": key, "signals": 0, "usable": 0, "reason": "Source registration missing"})
+        item["signals"] += count
+        source = sources.get(source_id)
+        if source:
+            item["usable"] += count if signal_source(source)["source_weight"] > 0 else 0
+            item["reason"] = "Reuse approval pending" if not source.licence_approved else "Source disabled or reliability is zero"
+    await s.commit()
+    return {"warnings": [dict(item, message=f"{item['source']} has {item['signals']} recent signals, but none can be used. {item['reason']}.")
+                         for item in groups.values() if not item["usable"]],
+            "usable_signals": sum(item["usable"] for item in groups.values())}
+
+
 def _spec(key: str) -> dict:
     c = REGISTRY[key].spec
     return {"key": c.key, "name": c.name, "category": c.category, "description": c.description, "secrets": c.secrets,

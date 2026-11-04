@@ -36,7 +36,7 @@ def defaults(sim: Simulation) -> dict:
     o = sim.config.get("overrides", {}) if sim.config else {}
     hours = int(o.get("hours", 24))
     mpr = int(o.get("minutes_per_round", 60))
-    return {"voice": int(o.get("voice", 80)), "crowd": int(o.get("crowd", 3000)), "stakeholders": int(o.get("stakeholders", 5)),
+    return {"voice": int(o.get("voice", 40)), "crowd": int(o.get("crowd", 3000)), "stakeholders": int(o.get("stakeholders", 5)),
             "hours": hours, "minutes_per_round": mpr, "platforms": o.get("platforms") or ["feed", "forum"],
             "listening": bool(o.get("listening", True)), "seed": int(o.get("seed") or 0)}
 
@@ -67,6 +67,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         context = (sim.config or {}).get("context", {})
         publish_at = sim.publish_at or datetime.now(UTC)
         org_id = sim.org_id
+        library_project_id = sim.project_id
         org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
         creator_memory = (org.settings or {}).get("creator_memory", {}).get("summary", "")
         creator_memory += "\n" + (org.settings or {}).get("creator_memory", {}).get("real_summary", "")
@@ -128,6 +129,11 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     personas = [pop.persona(int(i)) for i in voice_idx]
     from app.services.datapool.retrieval import prepare_retrieval
     retrieved, retrieval_usage = await prepare_retrieval(org_id, personas, card, context, llm, usage)
+    from app.services.library import retrieve as retrieve_library
+    library_evidence = await retrieve_library(org_id, library_project_id,
+        requirement + " " + json.dumps(card, ensure_ascii=False), personas)
+    retrieved = [live + private for live, private in zip(retrieved, library_evidence, strict=True)]
+    retrieval_usage["library_rows"] = len({e["id"] for group in library_evidence for e in group})
     regions_in = sorted({p["region"] for p in personas})
     await progress(f"Sampled {len(personas)} voice agents across {len({(p['region'], p['age_band'], p['stance']) for p in personas})} strata", 0.25)
 

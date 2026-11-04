@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from functools import lru_cache
 from typing import Annotated
 
@@ -9,6 +10,23 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ON_VERCEL = os.getenv("VERCEL") == "1"
+_DATA_ROOT = os.path.join(tempfile.gettempdir(), "kruvim") if _ON_VERCEL else os.path.join(_BACKEND_ROOT, "data")
+
+
+def _database_url():
+    value = os.getenv("POSTGRES_URL", "") if _ON_VERCEL else ""
+    if value:
+        from sqlalchemy.engine import make_url
+        url = make_url(value).set(drivername="postgresql+asyncpg")
+        # asyncpg accepts TLS through connect_args; remove libpq/Prisma-only options.
+        return url.difference_update_query(["sslmode", "pgbouncer", "connection_limit", "connect_timeout"]).render_as_string(hide_password=False)
+    return f"sqlite+aiosqlite:///{os.path.join(_DATA_ROOT, 'kruvim.db')}"
+
+
+def _public_url():
+    host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
+    return f"https://{host}" if host else "http://localhost:5173"
 
 
 class Settings(BaseSettings):
@@ -17,15 +35,22 @@ class Settings(BaseSettings):
     env: str = "development"                       # development | production | test
     app_name: str = "Kruvim"
     secret_key: str = "dev-insecure-change-me"     # JWT signing + secret encryption (derive per purpose)
-    public_url: str = "http://localhost:5173"
+    public_url: str = Field(default_factory=_public_url)
+    app_base_path: str = "/app" if _ON_VERCEL else ""
+    serverless: bool = _ON_VERCEL
+    cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
 
-    database_url: str = f"sqlite+aiosqlite:///{os.path.join(_BACKEND_ROOT, 'data', 'kruvim.db')}"
+    database_url: str = Field(default_factory=_database_url)
+    database_schema: str = "kruvim" if _ON_VERCEL else ""
     db_pool_size: int = 10
     db_max_overflow: int = 20
     redis_url: str | None = None                    # unset = single-process dev mode (in-memory queue + events)
 
-    data_dir: str = os.path.join(_BACKEND_ROOT, "data")
-    storage_backend: str = "local"                  # local | s3
+    data_dir: str = _DATA_ROOT
+    storage_backend: str = "supabase" if _ON_VERCEL else "local"
+    supabase_url: str = Field(default_factory=lambda: os.getenv("SUPABASE_URL", ""))
+    supabase_secret_key: str = Field(default_factory=lambda: os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""))
+    supabase_bucket: str = "kruvim-data"
     s3_bucket: str | None = None
     s3_endpoint_url: str | None = None
     s3_region: str | None = None
@@ -45,6 +70,7 @@ class Settings(BaseSettings):
     population_seed: int = 7
 
     worker_max_jobs: int = 4
+    simulation_max_duration_seconds: int = Field(default=7200, ge=30, le=86400)
     org_max_concurrent_default: int = 2
 
     # Platform-wide default model provider (orgs can bring their own). Blank = dry run.
@@ -56,6 +82,23 @@ class Settings(BaseSettings):
     llm_report_model: str = ""
     llm_vision_model: str = ""
     llm_concurrency: int = 8
+
+    # Dodo hosted checkout. Keep keys on the API/worker only.
+    billing_enabled: bool = True
+    dodo_environment: str = "test_mode"
+    dodo_api_key: str = ""
+    dodo_webhook_key: str = ""
+    dodo_business_id: str = ""
+    dodo_subscription_product_id: str = ""
+    dodo_topup_product_id: str = ""
+    billing_monthly_price_aed: int = Field(default=50, ge=1)
+    billing_topup_price_aed: int = Field(default=10, ge=1)
+    billing_monthly_budget_aed: float = Field(default=10, gt=0)
+    billing_topup_budget_aed: float = Field(default=2.5, gt=0)
+    # Per-million USD rates, keyed by model id. Missing rates block platform calls.
+    # Each entry: {"input": ..., "output": ..., "cached": ...}.
+    billing_model_prices: dict[str, dict[str, float]] = Field(default_factory=dict)
+    billing_usd_to_aed: float = Field(default=3.6725, gt=0)
 
     # Data pool connector credentials (all optional)
     reddit_client_id: str = ""
@@ -74,6 +117,7 @@ class Settings(BaseSettings):
     instagram_client_secret: str = ""
     instagram_api_version: str = "v25.0"
     social_sync_minutes: int = Field(default=60, ge=10)
+    analytics_oauth_enabled: bool = False
     accuracy_min_tests: int = Field(default=20, ge=1)
     accuracy_min_workspaces: int = Field(default=3, ge=2)
     source_weight_min_tests: int = Field(default=20, ge=3)
@@ -98,6 +142,10 @@ class Settings(BaseSettings):
         return None if value == "" else value
 
     @property
+    def public_app_url(self) -> str:
+        return self.public_url.rstrip("/") + self.app_base_path.rstrip("/")
+
+    @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
 
@@ -109,6 +157,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    if s.serverless and s.is_sqlite:
+        raise RuntimeError("The hosted app requires its Supabase PostgreSQL connection; SQLite is disabled on Vercel")
     if s.is_prod and (s.secret_key.startswith("dev-") or len(s.secret_key) < 32):
         raise RuntimeError("KRUVIM_SECRET_KEY must contain at least 32 characters in production")
     if s.is_prod and "*" in s.cors_origins:

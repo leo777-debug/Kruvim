@@ -8,7 +8,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, BigID, IdMixin, TimestampMixin, UTCDateTime, utcnow
+from app.db.base import Base, BigID, IdMixin, TimestampMixin, UTCDateTime, new_id, utcnow
 
 # draft -> building_graph -> graph_ready -> preparing -> ready -> queued -> running <-> paused
 #       -> completed | failed | cancelled ; report_status tracks step 4 separately
@@ -40,6 +40,11 @@ class Simulation(IdMixin, TimestampMixin, Base):
     credits_charged: Mapped[int] = mapped_column(Integer, default=0)
     report_status: Mapped[str] = mapped_column(String(24), default="none")   # none | queued | running | done | failed
     job_id: Mapped[str | None] = mapped_column(String(64))
+    job_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
+    execution_token: Mapped[str | None] = mapped_column(String(32))
+    billing_epoch: Mapped[str] = mapped_column(String(32), default=new_id)
+    pause_state: Mapped[dict] = mapped_column(default=dict)
+    checkpoint: Mapped[dict] = mapped_column(default=dict)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -192,6 +197,7 @@ class Survey(IdMixin, TimestampMixin, Base):
     question: Mapped[str] = mapped_column(Text)
     filters: Mapped[dict] = mapped_column(default=dict)
     status: Mapped[str] = mapped_column(String(16), default="running")
+    pause_state: Mapped[dict] = mapped_column(default=dict)
     answers: Mapped[list] = mapped_column(default=list)
     summary: Mapped[str] = mapped_column(Text, default="")
 
@@ -203,6 +209,7 @@ class PerformanceReport(IdMixin, TimestampMixin, Base):
     platform: Mapped[str] = mapped_column(String(32), default="")
     variant: Mapped[str] = mapped_column(String(1), default="A", server_default="A")
     social_post_id: Mapped[str | None] = mapped_column(ForeignKey("social_posts.id", ondelete="SET NULL"), unique=True)
+    analytics_post_id: Mapped[str | None] = mapped_column(ForeignKey('imported_analytics_posts.id', ondelete='SET NULL'), unique=True)
     views: Mapped[int | None] = mapped_column(Integer)
     likes: Mapped[int | None] = mapped_column(Integer)
     shares: Mapped[int | None] = mapped_column(Integer)

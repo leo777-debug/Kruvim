@@ -5,10 +5,13 @@ import { Callout, Card, CardHeader, Stat } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn, fmt } from "@/lib/utils";
+import BillingPanel, { useBilling } from "./BillingPanel";
 
 export default function UsagePage() {
   const orgId = useAuth((s) => s.orgId);
   const q = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
+  const billing = useBilling();
+  if (billing.data?.enabled || billing.isError) return <Page title="Billing and credits" subtitle="Manage your membership, included usage, and extra credits."><BillingPanel /></Page>;
   const u = q.data;
   if (!u) return null;
   const calls = u.month.reduce((a: number, m: any) => a + m.calls, 0);

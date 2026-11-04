@@ -49,6 +49,9 @@ def _body(code: str, message: str, details=None):
     b = {"error": {"code": code, "message": message}}
     if details:
         b["error"]["details"] = details
+        for key in ('reset_at', 'actions', 'estimate_message', 'needed', 'available'):
+            if isinstance(details, dict) and key in details:
+                b['error'][key] = details[key]
     return b
 
 

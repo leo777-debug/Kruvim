@@ -33,8 +33,11 @@ def run_migrations_offline():
 
 
 def do_run(connection):
+    if settings.database_schema and not settings.is_sqlite:
+        connection.exec_driver_sql('SET search_path TO ' + connection.dialect.identifier_preparer.quote(settings.database_schema) + ', public, extensions')
+        connection.commit()
     context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=settings.is_sqlite, compare_type=True,
-                      render_item=render_item, include_object=include_object)
+                      render_item=render_item, include_object=include_object, version_table_schema=settings.database_schema or None)
     with context.begin_transaction():
         context.run_migrations()
 

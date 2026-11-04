@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+backend/build/
 
 # Runtime data (SQLite, population cache, uploads)
 backend/data/
@@ -16,6 +17,7 @@ backend/data/
 # Node
 frontend/node_modules/
 frontend/dist/
+.vercel/
 *.log
 
 # Secrets

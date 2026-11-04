@@ -46,9 +46,10 @@ from app.services.interaction import ask
 from app.services.interaction.selection import select_respondents, survey_estimate
 from app.services.llm import Usage, make_llm
 from app.services.providers import resolve
-from app.services.quotas import ensure_monthly_grant, estimate_credits, reserve
+from app.services.quotas import check_tokens, ensure_monthly_grant, estimate_credits
 from app.services.report import chat as report_chat
 from app.services.simulation import agent_detail, explore
+from app.services.token_budget import interactive_budget
 
 router = APIRouter(tags=["simulations"])
 LOCKED = ("building_graph", "preparing", "queued", "running", "paused")
@@ -58,7 +59,7 @@ def full(sim: Simulation) -> dict:
     out = sim_summary(sim)
     out.update({"requirement": sim.requirement, "content": sim.content, "audience": sim.audience, "publish_at": sim.publish_at,
                 "ontology": sim.ontology, "card": sim.card, "config": sim.config, "usage": sim.usage, "seed": sim.seed,
-                "credits_charged": sim.credits_charged, "started_at": sim.started_at, "finished_at": sim.finished_at})
+                "credits_charged": sim.credits_charged, "pause_state": sim.pause_state, "started_at": sim.started_at, "finished_at": sim.finished_at})
     r = dict(sim.results or {})
     for k in ("models", "topic_vector", "topic_vectors"):
         r.pop(k, None)
@@ -107,6 +108,26 @@ async def create_sim(project_id: str, body: SimulationCreate, p: Principal = Dep
 @router.get("/simulations/{sim_id}")
 async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     return full(await get_sim(s, p, sim_id))
+
+
+@router.post("/simulations/{sim_id}/retry")
+async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    sim = await get_sim(s, p, sim_id)
+    if sim.status != "failed" and sim.report_status != "failed":
+        raise Conflict("Only a failed test can be retried.")
+    sim.config = {**(sim.config or {}), "autopilot": True}
+    if sim.status == "completed":
+        sim.report_status, sim.error = "queued", None
+        await s.commit()
+        sim.job_id = await jobs.enqueue("generate_report", sim_id=sim.id)
+        await s.commit()
+    elif (sim.config or {}).get("agents"):
+        await lifecycle.queue_run(s, sim, p.user_id)
+    elif (sim.ontology or {}).get("entity_types"):
+        await lifecycle.queue_environment(s, sim)
+    else:
+        await lifecycle.queue_graph(s, sim)
+    return {"status": "queued"}
 
 
 @router.patch("/simulations/{sim_id}")
@@ -268,18 +289,23 @@ async def control(sim_id: str, body: ControlIn, p: Principal = Depends(role("mem
 async def events(sim_id: str, request: Request, p: Principal = Depends(principal), s: AsyncSession = Depends(get_session),
                  after: int = 0, follow: bool = True):
     await get_sim(s, p, sim_id)
+    # Authorise once, then release the request transaction before a long-lived
+    # stream. Replay uses short independent sessions, never this connection.
+    await s.close()
     last = request.headers.get("last-event-id")
     start_after = int(last) if last and last.isdigit() else after
 
     async def gen():
-        async for msg in bus.stream(sim_id, start_after, follow=follow):
-            if await request.is_disconnected():
-                return
-            if msg == "":
-                yield ": keep-alive\n\n"
-                continue
-            seq = json.loads(msg)["seq"]
-            yield f"id: {seq}\ndata: {msg}\n\n"
+        from contextlib import aclosing
+        # StreamingResponse already listens for disconnects. A second receive
+        # consumer can cancel middleware work while it is closing DB cursors.
+        async with aclosing(bus.stream(sim_id, start_after, follow=follow)) as stream:
+            async for msg in stream:
+                if msg == "":
+                    yield ": keep-alive\n\n"
+                    continue
+                seq = json.loads(msg)["seq"]
+                yield f"id: {seq}\ndata: {msg}\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -340,6 +366,7 @@ async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")),
 
 
 @router.post("/simulations/{sim_id}/report/chat")
+@interactive_budget(8)
 async def chat_report(sim_id: str, body: ChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     rep = (await s.execute(select(Report).where(and_(Report.simulation_id == sim_id, Report.status == "done")).order_by(desc(Report.created_at)))).scalars().first()
@@ -379,6 +406,7 @@ async def agent(sim_id: str, ref: str, p: Principal = Depends(principal), s: Asy
 
 
 @router.post("/simulations/{sim_id}/agents/{ref}/chat")
+@interactive_budget(1)
 async def chat_agent(sim_id: str, ref: str, body: ChatIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
     if not sim.card:
@@ -440,13 +468,15 @@ async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role
     sv = Survey(simulation_id=sim_id, question=body.question, filters=filters, status="queued")
     s.add(sv)
     await s.flush()
-    await reserve(s, p.org_id, estimate["max_credits"], "survey_reserve", sv.id)
+    if res.metered:
+        await check_tokens(s, p.org, estimate["max_credits"])
+    sv.filters = {**filters, "reserved_credits": 0}
     await s.commit()
     try:
         await jobs.enqueue("run_survey", survey_id=sv.id)
     except Exception:
         from app.services.quotas import ledger
-        await ledger(s, p.org_id, estimate["max_credits"], "survey_refund", sv.id)
+        await ledger(s, p.org_id, 0, "survey_refund", sv.id)
         sv.status, sv.filters = "failed", {**filters, "reserved_credits": 0}
         await s.commit()
         raise
@@ -463,7 +493,7 @@ async def list_surveys(sim_id: str, p: Principal = Depends(principal), s: AsyncS
             summ = json.loads(x.summary) if x.summary and x.summary.startswith("{") else {"takeaway": x.summary}
         except ValueError:
             summ = {"takeaway": x.summary}
-        out.append({"id": x.id, "question": x.question, "filters": x.filters, "status": x.status, "answers": x.answers, "summary": summ,
+        out.append({"id": x.id, "question": x.question, "filters": x.filters, "status": x.status, "pause_state": x.pause_state, "answers": x.answers, "summary": summ,
                     "created_at": x.created_at})
     return out
 

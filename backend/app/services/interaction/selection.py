@@ -64,6 +64,7 @@ async def select_respondents(s, sim_id, filters):
 
 
 def survey_estimate(n, eligible, resolved, balance):
+    from app.core.config import settings
     summaries = summary_calls(n)
     calls = n + summaries
     dry = resolved.settings.provider == "dryrun"
@@ -71,4 +72,6 @@ def survey_estimate(n, eligible, resolved, balance):
     maximum = n + summaries * 2 if resolved.metered else 0
     return {"respondents": n, "eligible": eligible, "model_calls": 0 if dry else calls, "summary_calls": summaries,
             "credits": credits, "max_credits": maximum, "balance": balance, "dry": dry, "metered": resolved.metered,
-            "own_provider": not dry and not resolved.metered, "affordable": balance >= maximum}
+            "own_provider": not dry and not resolved.metered,
+            "cost_metered": settings.billing_enabled,
+            "affordable": settings.billing_enabled or balance >= maximum}

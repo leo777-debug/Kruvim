@@ -22,6 +22,9 @@ def _s3():
 
 
 async def put(key: str, data: bytes) -> None:
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import put as cloud_put
+        return await cloud_put(key, data)
     if settings.storage_backend == "s3":
         await asyncio.to_thread(_s3().put_object, Bucket=settings.s3_bucket, Key=key, Body=data)
         return
@@ -36,6 +39,9 @@ def _write(p: str, data: bytes):
 
 
 async def get(key: str) -> bytes:
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import get as cloud_get
+        return await cloud_get(key)
     if settings.storage_backend == "s3":
         obj = await asyncio.to_thread(_s3().get_object, Bucket=settings.s3_bucket, Key=key)
         return obj["Body"].read()
@@ -45,7 +51,7 @@ async def get(key: str) -> bytes:
 
 async def local_file(key: str, suffix: str = "") -> str:
     """A filesystem path for tools like ffmpeg (downloads from S3 to a temp file when needed)."""
-    if settings.storage_backend != "s3":
+    if settings.storage_backend == "local":
         return _local_path(key)
     data = await get(key)
     fd, path = tempfile.mkstemp(suffix=suffix)
@@ -55,6 +61,9 @@ async def local_file(key: str, suffix: str = "") -> str:
 
 
 async def delete(key: str) -> None:
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import delete as cloud_delete
+        return await cloud_delete(key)
     if settings.storage_backend == "s3":
         await asyncio.to_thread(_s3().delete_object, Bucket=settings.s3_bucket, Key=key)
         return

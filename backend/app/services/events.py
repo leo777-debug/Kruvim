@@ -11,6 +11,7 @@ import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
 
+import anyio
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -61,20 +62,24 @@ class EventBus:
         r = get_redis()
         pubsub = None
         q: asyncio.Queue | None = None
-        if follow:
-            if r is not None:
-                pubsub = r.pubsub()
-                await pubsub.subscribe(f"sim:{sim_id}")
-            else:
-                q = asyncio.Queue()
-                self._local[sim_id].add(q)
         try:
+            if follow:
+                if r is not None:
+                    pubsub = r.pubsub()
+                    await pubsub.subscribe(f"sim:{sim_id}")
+                else:
+                    q = asyncio.Queue()
+                    self._local[sim_id].add(q)
             last = after
             ended = False
             while True:   # replay in pages
-                async with session_scope() as s:
-                    rows = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim_id, SimEvent.seq > last)
-                                            .order_by(SimEvent.seq).limit(500))).scalars().all()
+                # Finish this short read before handling a stream disconnect.
+                # Cancellation inside aiosqlite's cursor invalidates the pooled
+                # connection before session cleanup can shield its rollback.
+                with anyio.CancelScope(shield=True):
+                    async with session_scope() as s:
+                        rows = (await s.execute(select(SimEvent).where(SimEvent.simulation_id == sim_id, SimEvent.seq > last)
+                                                .order_by(SimEvent.seq).limit(500))).scalars().all()
                 for row in rows:
                     last = row.seq
                     ended = ended or row.type in TERMINAL
@@ -109,8 +114,11 @@ class EventBus:
                 yield msg
         finally:
             if pubsub is not None:
-                await pubsub.unsubscribe(f"sim:{sim_id}")
-                await pubsub.aclose()
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await pubsub.unsubscribe(f"sim:{sim_id}")
+                    finally:
+                        await pubsub.aclose()
             if q is not None:
                 self._local[sim_id].discard(q)
 

@@ -1,6 +1,8 @@
 from app.db.base import Base  # noqa: F401
 
 from .agent_memory import AgentCreatorAffinity, AgentMemory  # noqa: F401
+from .analytics import AnalyticsImport, AnalyticsMappingPreset, ImportedAnalyticsPost  # noqa: F401
+from .billing import BillingAccount, BillingEvent, BillingGrant, BillingOrder, SpendReservation  # noqa: F401
 from .collab import Annotation, AudienceTemplate  # noqa: F401
 from .cultural import CulturalMoment  # noqa: F401
 from .datapool import Connector, Dataset, PopulationVersion, RegionSnapshot, Signal, SignalEmbedding  # noqa: F401
@@ -24,4 +26,7 @@ from .simulation import (  # noqa: F401
 from .social import SocialConnection, SocialPost  # noqa: F401
 from .sources import DataSource, SourceObservation  # noqa: F401
 from .tenancy import ApiKey, Invite, Membership, Organization, RefreshToken, User  # noqa: F401
+from .tokens import PlanAllowance, ProviderHealth, ProviderIncident, TokenCall, TokenNotice  # noqa: F401
 from .usage import AuditLog, CreditLedger, UsageEvent  # noqa: F401
+from .library import LibraryEntry, LibraryFolder  # noqa: F401
+from .cloud import CloudJob  # noqa: F401

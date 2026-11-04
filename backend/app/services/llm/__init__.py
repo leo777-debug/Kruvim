@@ -4,6 +4,10 @@ from __future__ import annotations
 from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage, extract_json  # noqa: F401
 
 PRESETS = {
+    "mistral": {"label": "Mistral", "provider": "openai", "base_url": "https://api.mistral.ai/v1", "local": False,
+                "voice_model": "", "report_model": "", "vision_model": ""},
+    "gemini": {"label": "Google Gemini", "provider": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "local": False,
+               "voice_model": "", "report_model": "", "vision_model": ""},
     "dryrun": {"label": "Dry run (no model)", "provider": "dryrun", "base_url": "", "local": True,
                "voice_model": "", "report_model": "", "vision_model": ""},
     "deepseek": {"label": "DeepSeek", "provider": "openai", "base_url": "https://api.deepseek.com/v1", "local": False,

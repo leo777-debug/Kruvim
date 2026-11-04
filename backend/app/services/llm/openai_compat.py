@@ -10,6 +10,7 @@ import time
 import httpx
 
 from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .errors import ProviderFailure, classify, retry_delay
 
 
 class OpenAICompatLLM(BaseLLM):
@@ -42,7 +43,13 @@ class OpenAICompatLLM(BaseLLM):
             content = [{"type": "text", "text": user}] + [
                 {"type": "image_url", "image_url": {"url": f"data:{mt};base64,{b64}"}} for mt, b64 in images]
         async with self.sem:
-            for attempt in range(4):
+            from app.services.llm.errors import BudgetPause
+            from app.services.token_budget import current
+            if current.get() and current.get().paused:
+                raise BudgetPause(current.get().paused)
+            from app.core.config import settings
+            attempts = 1 if settings.billing_enabled and self.s.billing_metered else 4
+            for attempt in range(attempts):
                 body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
                         self.max_tokens_key: max_tokens, "stream": False}
                 if self.temp_ok:
@@ -53,15 +60,25 @@ class OpenAICompatLLM(BaseLLM):
                 try:
                     r = await self.client.post(self.base + "/chat/completions", json=body)
                 except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    if attempt < attempts - 1:
+                        await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
+                        continue
                     usage.fail(self.name, role)
-                    raise LLMAuthError(f"Cannot reach {self.base} ({exc.__class__.__name__}). Is the model server running?")
+                    raise ProviderFailure(classify(None, settings=self.s, network_error=True), exc.__class__.__name__)
                 except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.WriteTimeout) as exc:
-                    if attempt == 3:
+                    if attempt == attempts - 1:
                         usage.fail(self.name, role)
-                        raise LLMError(f"timeout talking to {self.base}: {exc.__class__.__name__}")
+                        raise ProviderFailure(classify(None, settings=self.s, network_error=True), exc.__class__.__name__)
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
                 if r.status_code == 400:
+                    try:
+                        issue = classify(r.status_code, r.json(), settings=self.s)
+                    except ValueError:
+                        issue = classify(r.status_code, settings=self.s)
+                    if issue.category == 'quota_exhausted':
+                        usage.fail(self.name, role)
+                        raise ProviderFailure(issue, r.text[:2000])
                     msg = r.text.lower()
                     changed = False
                     if "response_format" in msg or "json_object" in msg or "json mode" in msg:
@@ -73,28 +90,45 @@ class OpenAICompatLLM(BaseLLM):
                     if changed:
                         continue
                     usage.fail(self.name, role)
-                    raise LLMError(f"400 from provider: {r.text[:300]}")
+                    raise LLMError('The model provider rejected this request. Check the model settings.')
                 if r.status_code in (401, 403):
                     usage.fail(self.name, role)
-                    raise LLMAuthError(f"{r.status_code} from provider: check the API key. {r.text[:200]}")
+                    raise ProviderFailure(classify(r.status_code, settings=self.s), r.text[:2000])
                 if r.status_code == 404:
                     usage.fail(self.name, role)
-                    raise LLMAuthError(f"404 from provider: check the base URL and model '{model}'. {r.text[:200]}")
+                    raise LLMAuthError("The configured model or endpoint could not be found. Check Settings.")
                 if r.status_code == 402:
                     usage.fail(self.name, role)
-                    raise LLMAuthError(f"402 from provider: the provider account is out of credit. {r.text[:200]}")
+                    raise ProviderFailure(classify(402, settings=self.s), r.text[:2000])
                 if r.status_code == 429 or r.status_code >= 500:
-                    if attempt == 3:
+                    try:
+                        issue = classify(r.status_code, r.json(), settings=self.s)
+                    except ValueError:
+                        issue = classify(r.status_code, settings=self.s)
+                    if not issue.retryable:
                         usage.fail(self.name, role)
-                        raise LLMError(f"{r.status_code} from provider after retries: {r.text[:200]}")
-                    ra = r.headers.get("retry-after")
-                    delay = float(ra) if ra and ra.replace(".", "", 1).isdigit() else 1.5 * 2 ** attempt + random.random()
-                    await asyncio.sleep(min(delay, 30))
+                        raise ProviderFailure(issue, r.text[:2000])
+                    if attempt == attempts - 1:
+                        usage.fail(self.name, role)
+                        raise ProviderFailure(issue, r.text[:2000])
+                    delay = retry_delay(r.headers, 1.5 * 2 ** attempt + random.random())
+                    if delay > self.s.timeout * 4:
+                        raise ProviderFailure(issue, 'Provider retry delay exceeds this request deadline')
+                    await asyncio.sleep(delay)
                     continue
                 if r.status_code != 200:
                     usage.fail(self.name, role)
-                    raise LLMError(f"{r.status_code} from provider: {r.text[:300]}")
-                data = r.json()
+                    raise ProviderFailure(classify(r.status_code, settings=self.s), r.text[:2000])
+                try:
+                    data = r.json()
+                    if not isinstance(data, dict):
+                        raise ValueError("expected an object")
+                except ValueError as exc:
+                    if attempt < attempts - 1:
+                        await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
+                        continue
+                    usage.fail(self.name, role)
+                    raise LLMError("The model server returned an unreadable response.") from exc
                 u = data.get("usage") or {}
                 cached = u.get("prompt_cache_hit_tokens") or (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
                 usage.add(self.name, model, role, int(u.get("prompt_tokens") or 0), int(cached or 0),
@@ -102,7 +136,7 @@ class OpenAICompatLLM(BaseLLM):
                 try:
                     msg = data["choices"][0]["message"]
                 except (KeyError, IndexError):
-                    raise LLMError(f"unexpected response shape: {str(data)[:200]}")
+                    raise LLMError("The model provider returned an unexpected response.")
                 return msg.get("content") or msg.get("reasoning_content") or ""
         raise LLMError("unreachable")
 

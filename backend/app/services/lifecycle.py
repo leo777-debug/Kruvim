@@ -13,15 +13,27 @@ from app.models import Action, GraphEdge, GraphNode, Organization, Post, Report,
 from app.services import audit, jobs
 from app.services.events import bus
 from app.services.providers import resolve
-from app.services.quotas import check_start
+from app.services.quotas import check_start, check_tokens, estimate_credits
 
 LOCKED = ("building_graph", "preparing", "queued", "running", "paused")
 _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
+    from app.services.billing import require_access
+    await require_access(s, sim.org_id)
     if sim.status in LOCKED:
         raise Conflict("A step is already running for this simulation.")
+    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+    if res.metered:
+        org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
+        overrides = (sim.config or {}).get('overrides', {})
+        cfg = {'agents': {'voice': overrides.get('voice', 40), 'stakeholders': overrides.get('stakeholders', 5)},
+               'time': {'rounds': int(overrides.get('hours', 24) * 60 / overrides.get('minutes_per_round', 60)), 'mean_activation': .3},
+               'ab': bool((sim.content or {}).get('variant_b'))}
+        await check_tokens(s, org, estimate_credits(cfg)['total'])
+    from app.db.base import new_id
+    sim.billing_epoch, sim.pause_state, sim.checkpoint = new_id(), {}, {}
     c = sim.content or {}
     if c.get("type") == "text" and not (c.get("text") or "").strip() and not c.get("asset_id"):
         raise AppError("Add the text or upload a document before building the graph.")
@@ -36,6 +48,8 @@ async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
 
 
 async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
+    from app.services.billing import require_access
+    await require_access(s, sim.org_id)
     if sim.status not in ("graph_ready", "ready", "completed", "failed", "cancelled"):
         raise Conflict("Build the graph first.")
     sim.status, sim.error = "preparing", None
@@ -54,11 +68,16 @@ async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None
 
 
 async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
+    from app.services.billing import require_access
+    await require_access(s, sim.org_id)
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
-    res = await resolve(s, sim.org_id)
+    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
     await check_start(s, org, sim.config, res.metered)
+    from app.db.base import new_id
+    sim.billing_epoch, sim.pause_state, sim.checkpoint = new_id(), {}, {}
+    sim.finished_at = None
     for model in (Action, Post):
         await s.execute(delete(model).where(model.simulation_id == sim.id))
     await s.execute(delete(GraphNode).where(and_(GraphNode.simulation_id == sim.id, GraphNode.round >= 0)))

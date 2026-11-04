@@ -5,6 +5,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass, field
+from functools import wraps
 
 from app.core.metrics import LLM_CALLS, LLM_TOKENS
 
@@ -33,6 +34,8 @@ class ProviderSettings:
     price_in: float | None = None
     price_cached: float | None = None
     price_out: float | None = None
+    billing_org_id: str | None = None
+    billing_metered: bool = False
 
 
 @dataclass
@@ -131,6 +134,28 @@ class BaseLLM:
     name = "base"
     is_dry = False
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Bound the whole request, including retry/backoff and waiting for capacity.
+        # HTTP timeouts alone do not bound repeated attempts or an SDK stream.
+        if "complete" in cls.__dict__:
+            call = cls.complete
+            @wraps(call)
+            async def bounded(self, **kw):
+                try:
+                    async with asyncio.timeout(max(.01, float(self.s.timeout)) * 4 + 90):
+                        from app.services.token_budget import current
+                        work = current.get()
+                        operation_key = kw.pop('operation_key', None)
+                        if work:
+                            return await work.call(self, call, kw, operation_key)
+                        from app.services.spend_budget import call as paid_call
+                        return await paid_call(self, call, kw)
+                except TimeoutError as exc:
+                    kw["usage"].fail(self.name, kw["role"])
+                    raise LLMError("The model took too long to answer.") from exc
+            cls.complete = bounded
+
     def __init__(self, s: ProviderSettings):
         self.s = s
         self.sem = asyncio.Semaphore(max(1, int(s.concurrency or 1)))
@@ -150,14 +175,18 @@ class BaseLLM:
         raise NotImplementedError
 
     async def complete_json(self, *, system: str, user: str, role: str, max_tokens: int, usage: Usage,
-                            images: list | None = None, temperature: float | None = None):
+                            images: list | None = None, temperature: float | None = None, operation_key=None):
         prompt = user
         last: Exception | None = None
-        for _ in range(2):
+        for attempt in range(2):
             text = await self.complete(system=system, user=prompt, role=role, max_tokens=max_tokens, usage=usage,
-                                       json_out=True, images=images, temperature=temperature)
+                                       json_out=True, images=images, temperature=temperature,
+                                       operation_key=f'{operation_key}:{attempt}' if operation_key else None)
             try:
-                return extract_json(text)
+                result = extract_json(text)
+                if not isinstance(result, dict):
+                    raise ValueError("expected a JSON object")
+                return result
             except Exception as exc:
                 last = exc
                 prompt = user + "\n\nYour previous reply could not be parsed. Reply with ONE valid JSON object and nothing else."

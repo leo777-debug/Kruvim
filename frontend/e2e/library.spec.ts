@@ -1,0 +1,35 @@
+import { test, expect } from "@playwright/test";
+
+test("data library saves typed rows and imports spreadsheet evidence", async ({ page }) => {
+  const folderName = `Cafe research ${test.info().project.name}`;
+  const errors: string[] = [];
+  page.on("pageerror", e => errors.push(e.message));
+  page.on("response", r => { if (r.url().includes("/api/v1/") && r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo@kruvim.local");
+  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).not.toHaveURL(/login/);
+  await page.goto("/data-library");
+  await page.getByLabel("New folder name").fill(folderName);
+  await page.getByLabel("Use for", { exact: true }).selectOption("shared");
+  await page.getByRole("button", { name: "Create folder", exact: true }).click();
+  await expect(page.getByRole("heading", { name: folderName, exact: true })).toBeVisible();
+  await page.getByLabel("Title", { exact: true }).fill("Coffee preferences");
+  await page.getByLabel("Data / observation", { exact: true }).fill("Synthetic test finding: customers prefer iced coffee.");
+  await page.getByRole("button", { name: "Save row", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "Coffee preferences", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Data / observation", { exact: true }).fill("Synthetic updated coffee finding.");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "Synthetic updated coffee finding.", exact: true })).toBeVisible();
+  await page.getByLabel("Import CSV or Excel", { exact: true }).setInputFiles({ name: "weekly.csv", mimeType: "text/csv", buffer: Buffer.from("title,data,region,tags\nCoffee pricing,Synthetic weekly research,AE,coffee\n") });
+  await page.getByRole("button", { name: "Import 1 rows", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "Coffee pricing", exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: new RegExp(folderName) }).click();
+  await expect(page.getByRole("cell", { name: "Coffee pricing", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+  await page.screenshot({ path: test.info().outputPath("data-library.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});

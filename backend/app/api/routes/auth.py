@@ -138,6 +138,12 @@ async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession 
         raise Unauthorized("Wrong password for the existing account.")
     exists = (await s.execute(select(Membership).where(and_(Membership.org_id == inv.org_id, Membership.user_id == user.id)))).scalar_one_or_none()
     if not exists:
+        if settings.billing_enabled:
+            from app.services.billing import account
+            paid = await account(s, inv.org_id, lock=True)
+            count = (await s.execute(select(func.count()).select_from(Membership).where(Membership.org_id == inv.org_id))).scalar()
+            if count >= paid.seats:
+                raise Conflict("This workspace needs another paid seat before accepting this invitation.")
         s.add(Membership(org_id=inv.org_id, user_id=user.id, role=inv.role))
     inv.accepted_at = now
     audit.record(s, "invite.accepted", org_id=inv.org_id, user_id=user.id, target=inv.email)

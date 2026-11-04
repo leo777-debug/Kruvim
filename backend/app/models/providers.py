@@ -1,10 +1,12 @@
 """Model provider configurations. org_id NULL = platform default (managed by superusers)."""
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, IdMixin, TimestampMixin
+from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
 
 
 class ProviderConfig(IdMixin, TimestampMixin, Base):
@@ -25,3 +27,6 @@ class ProviderConfig(IdMixin, TimestampMixin, Base):
     price_cached: Mapped[float | None] = mapped_column(Float)
     price_out: Mapped[float | None] = mapped_column(Float)
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_status: Mapped[str] = mapped_column(String(32), default='unknown')
+    last_status_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)

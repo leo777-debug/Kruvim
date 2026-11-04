@@ -22,6 +22,7 @@ class VariantIn(BaseModel):
 
 
 class ContentIn(VariantIn):
+    source_url: str | None = Field(default=None, max_length=2000)
     type: ContentType = "text"
     format: str | None = Field(default=None, max_length=40)                   # see services/content/formats.py
     platform: str = "tiktok"
@@ -83,7 +84,7 @@ class AudienceIn(BaseModel):
 
 
 class OverridesIn(BaseModel):
-    voice: int = Field(default=80, ge=10, le=2000)
+    voice: int = Field(default=40, ge=10, le=2000)
     crowd: int = Field(default=3000, ge=0, le=250_000)
     stakeholders: int = Field(default=5, ge=0, le=30)
     hours: int = Field(default=24, ge=1, le=336)

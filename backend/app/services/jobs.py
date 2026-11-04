@@ -34,6 +34,9 @@ async def _arq_pool():
 
 
 async def enqueue(name: str, *, delay: float = 0, **kwargs) -> str:
+    if settings.serverless and not settings.redis_url:
+        from app.services.cloud_jobs import enqueue as cloud_enqueue
+        return await cloud_enqueue(name, delay, kwargs)
     job_id = f"{name}:{uuid.uuid4().hex[:12]}"
     if settings.redis_url:
         pool = await _arq_pool()

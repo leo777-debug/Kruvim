@@ -82,7 +82,7 @@ async def create_share(sim_id: str, body: ShareIn, p: Principal = Depends(role("
     s.add(row)
     audit.record(s, "results.share", org_id=p.org_id, user_id=p.user_id, target=sim.id)
     await s.commit()
-    return {**share_summary(row), "url": settings.public_url.rstrip("/") + "/share/" + token}
+    return {**share_summary(row), "url": settings.public_app_url + "/share/" + token}
 
 
 @router.get("/simulations/{sim_id}/shares")

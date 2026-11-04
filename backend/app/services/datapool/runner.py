@@ -21,7 +21,7 @@ from .base import UA, MissingCredentials, SignalItem
 from .connectors import REGISTRY
 
 log = logging.getLogger("kruvim.datapool")
-MEASUREMENT_KINDS = {"weather", "tone", "economy"}
+MEASUREMENT_KINDS = {"weather", "tone", "economy", "natural_hazard"}
 ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key"}
 
 
@@ -159,6 +159,11 @@ async def _run_connector(key: str, regions: list[str] | None = None) -> dict:
 
 async def run_due() -> list[dict]:
     """Scheduler tick: run every enabled platform connector whose interval has elapsed."""
+    from app.services.library import sync_due
+    try:
+        await sync_due()
+    except Exception:
+        log.exception("library inbox refresh failed")
     await ensure_platform_connectors()
     async with session_scope() as s:
         rows = (await s.execute(select(Connector).where(Connector.org_id.is_(None), Connector.enabled.is_(True)))).scalars().all()

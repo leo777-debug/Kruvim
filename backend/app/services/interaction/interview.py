@@ -7,6 +7,7 @@ from collections import defaultdict
 
 from app.services.content import card_block
 from app.services.llm import BaseLLM, LLMAuthError, Usage
+from app.services.llm.errors import BudgetPause
 from app.services.population import persona_text, platform_label
 
 CHAT_SYSTEM = """You are role-playing a specific person (or account) who took part in a social-media simulation run by Kruvim.
@@ -56,21 +57,21 @@ def dry_answer(detail: dict, question: str) -> str:
             f"My take on the content is {op}/10.{remembered} Connect a model in Settings to get real in-character answers.")
 
 
-async def ask(detail: dict, card: dict, platform: str | None, history: list[dict], question: str, llm: BaseLLM, usage: Usage) -> str:
+async def ask(detail: dict, card: dict, platform: str | None, history: list[dict], question: str, llm: BaseLLM, usage: Usage, operation_key=None) -> str:
     if llm.is_dry:
         return dry_answer(detail, question)
     convo = "\n".join(("Creator: " if h["role"] == "user" else "You: ") + h["content"] for h in history[-10:])
     text = await llm.complete(system=CHAT_SYSTEM + "\n\n" + context_for(detail, card, platform), role="chat", max_tokens=600, usage=usage,
-                              json_out=False, user=(convo + "\n" if convo else "") + f"Creator: {question}\nYou:")
+                              json_out=False, user=(convo + "\n" if convo else "") + f"Creator: {question}\nYou:", operation_key=operation_key)
     return text.strip()
 
 
-async def survey(details: list[dict], card: dict, platform: str | None, question: str, llm: BaseLLM, usage: Usage, on_answer=None) -> dict:
+async def survey(details: list[dict], card: dict, platform: str | None, question: str, llm: BaseLLM, usage: Usage, on_answer=None, initial_answers=None) -> dict:
     semaphore = asyncio.Semaphore(max(1, min(32, llm.s.concurrency)))
     async def one(d):
         try:
             async with semaphore:
-                a = await ask(d, card, platform, [], question, llm, usage)
+                a = await ask(d, card, platform, [], question, llm, usage, operation_key=f"survey:{d['ref']}")
         except LLMAuthError:
             raise
         except Exception as exc:
@@ -81,7 +82,16 @@ async def survey(details: list[dict], card: dict, platform: str | None, question
             await on_answer(item)
         return item
 
-    answers = await asyncio.gather(*[one(d) for d in details])
+    previous = {row['agent']: row for row in initial_answers or []}
+    tasks = [asyncio.create_task(one(d)) for d in details if d['ref'] not in previous]
+    new_answers = await asyncio.gather(*tasks, return_exceptions=True)
+    for row in new_answers:
+        if isinstance(row, BudgetPause):
+            raise row
+        if isinstance(row, BaseException):
+            raise row
+        previous[row['agent']] = row
+    answers = [previous[d['ref']] for d in details if d['ref'] in previous]
     if llm.is_dry or not answers:
         return {"answers": answers, "summary": rule_summary(answers, dry=llm.is_dry)}
     batches = []

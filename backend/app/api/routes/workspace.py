@@ -18,7 +18,7 @@ from app.models import ApiKey, AuditLog, CreditLedger, Invite, Membership, Organ
 from app.models.tenancy import ROLE_RANK
 from app.schemas.workspace import ApiKeyIn, InviteIn, MemberUpdate, OrgCreate, OrgUpdate, ProviderIn
 from app.services import audit
-from app.services.llm import PRESETS, ProviderSettings, Usage, make_llm
+from app.services.llm import PRESETS, ProviderSettings, make_llm
 from app.services.providers import resolve, to_settings
 from app.services.quotas import PLANS, ensure_monthly_grant, plan
 
@@ -84,7 +84,7 @@ async def invite(body: InviteIn, p: Principal = Depends(role("admin")), s: Async
     await s.commit()
     # Email delivery is deployment-specific; the link is returned so an admin can share it.
     return {"id": inv.id, "email": inv.email, "role": inv.role, "expires_at": inv.expires_at,
-            "accept_url": f"{settings.public_url}/invite/{raw}"}
+            "accept_url": f"{settings.public_app_url}/invite/{raw}"}
 
 
 @router.delete("/members/invites/{invite_id}")
@@ -164,7 +164,7 @@ def _provider_out(c: ProviderConfig) -> dict:
             "api_key_hint": mask(decrypt(c.api_key_enc)), "voice_model": c.voice_model, "report_model": c.report_model,
             "vision_model": c.vision_model, "concurrency": c.concurrency, "temperature": c.temperature, "json_mode": c.json_mode,
             "price_in": c.price_in, "price_cached": c.price_cached, "price_out": c.price_out, "is_default": c.is_default,
-            "scope": "platform" if c.org_id is None else "org"}
+            "scope": "platform" if c.org_id is None else "org", "last_status": c.last_status, "last_status_at": c.last_status_at}
 
 
 @router.get("/providers")
@@ -224,22 +224,10 @@ def _settings_from(body: ProviderIn, existing: ProviderConfig | None) -> Provide
 @router.post("/providers/test")
 async def test_provider(body: ProviderIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     existing = (await s.execute(select(ProviderConfig).where(ProviderConfig.org_id == p.org_id))).scalars().first()
-    llm = None
-    try:
-        llm = make_llm(_settings_from(body, existing))
-        if llm.is_dry:
-            return {"ok": True, "message": "Dry run needs no model. Output is formula-driven and labelled [dry run]."}
-        u = Usage()
-        import time
-        t0 = time.time()
-        out = await llm.complete_json(system='Reply with exactly this JSON: {"ok": true, "word": "<one random word>"}', user="Test.",
-                                      role="voice", max_tokens=60, usage=u)
-        return {"ok": True, "message": f"Model replied in {time.time() - t0:.1f}s: {str(out)[:120]}", "usage": u.as_dict()}
-    except Exception as exc:
-        return {"ok": False, "message": str(exc)[:500]}
-    finally:
-        if llm:
-            await llm.aclose()
+    from app.api.routes.tokens import key_test
+    from app.services.providers import Resolved
+    res = Resolved(_settings_from(body, existing), 'org', existing.id if existing and not body.api_key else None)
+    return await key_test(res)
 
 
 @router.post("/providers/models")
@@ -259,7 +247,8 @@ async def provider_models(body: ProviderIn, p: Principal = Depends(role("admin")
 # ---- usage & audit ------------------------------------------------------------------------------------------
 @router.get("/usage")
 async def usage(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
-    await ensure_monthly_grant(s, p.org)
+    from app.services.quotas import allowance
+    tokens = await allowance(s, p.org)
     await s.commit()
     month = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     by_kind = (await s.execute(select(UsageEvent.kind, func.sum(UsageEvent.quantity), func.sum(UsageEvent.input_tokens),
@@ -269,10 +258,10 @@ async def usage(p: Principal = Depends(principal), s: AsyncSession = Depends(get
     org = await s.get(Organization, p.org_id)
     res = await resolve(s, p.org_id)
     return {"plan": org.plan, "plans": PLANS, "limits": plan(org), "credits_balance": org.credits_balance, "metered": res.metered,
-            "provider_source": res.source,
+            "provider_source": res.source, "tokens": tokens,
             "month": [{"kind": k, "calls": int(q or 0), "input_tokens": int(i or 0), "output_tokens": int(o or 0), "cost_usd": c} for k, q, i, o, c in by_kind],
             "ledger": [{"delta": x.delta, "balance_after": x.balance_after, "reason": x.reason, "ref": x.ref, "at": x.created_at} for x in ledger],
-            "payment": {"enabled": False, "note": "Credit purchases are not enabled yet."}}
+            "payment": {"enabled": settings.billing_enabled, "note": "Manage your subscription and credits in Billing."}}
 
 
 @router.get("/audit")

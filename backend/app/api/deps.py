@@ -104,6 +104,13 @@ async def principal(request: Request, s: AsyncSession = Depends(get_session), au
         p = Principal(user, org, m.role, "session")
     await hit(f"p:{p.api_key_id or p.user_id}", settings.rate_limit_per_minute)
     request.state.principal = p
+    if settings.billing_enabled and request.method == "POST" and (
+            "/simulations" in request.url.path or request.url.path.endswith("/tokens/resume")):
+        # Keep results/history readable. Subscription checks protect every simulation mutation,
+        # including direct API calls using an organisation API key.
+        from app.services.billing import require_access
+        await require_access(s, p.org_id)
+        await s.commit()  # Release the gate's lock before routes invoke separately-accounted model work.
     return p
 
 

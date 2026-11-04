@@ -10,6 +10,9 @@ from app.services.quotas import ledger
 
 async def record(org_id: str, sim_id: str | None, kind: str, usage: Usage, res: Resolved) -> int:
     credits = int(usage.calls) if res.metered else 0
+    from app.services.token_budget import current
+    if current.get():
+        credits = 0  # Successful calls already have an atomic credit receipt.
     async with session_scope() as s:
         s.add(UsageEvent(org_id=org_id, simulation_id=sim_id, kind=kind, quantity=usage.calls, unit="llm_calls",
                          input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, cost_usd=usage.cost(res.settings),

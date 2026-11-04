@@ -101,7 +101,7 @@ async def callback(platform: Platform, state: str = Query(..., min_length=20, ma
         c.last_error = "Account authorization was declined."
     audit.record(s, "social.connect." + status, org_id=c.org_id, target=platform)
     await s.commit()
-    return RedirectResponse(f"{settings.public_url.rstrip('/')}/my-audience?connection={status}", status_code=303)
+    return RedirectResponse(f"{settings.public_app_url}/my-audience?connection={status}", status_code=303)
 
 
 @router.delete("/social/connections/{connection_id}")

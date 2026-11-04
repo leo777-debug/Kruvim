@@ -53,6 +53,7 @@ async def _latest(s, region_code: str, kinds: list[str], since: datetime, limit:
 
 
 async def build_snapshot_data(code: str, at: datetime) -> dict:
+    from app.services.datapool.connectors.hazards import current_hazards
     from app.services.datapool.retrieval import embed
     async with session_scope() as s:
         from app.services.sources import ensure_sources, signal_source
@@ -67,6 +68,7 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         econ = await _latest(s, code, ["economy"], at - timedelta(hours=36), 2)
         prepared = (await s.execute(licensed(select(Signal).where(Signal.org_id.is_(None), Signal.region.in_([code, "*"]), Signal.fetched_at <= at,
             Signal.observed_at <= at, Signal.fetched_at >= at - timedelta(days=2)).order_by(Signal.fetched_at.desc()).limit(200)))).scalars().all()
+        prepared = current_hazards(prepared, at)
         prepared = [x for x in prepared if safe_title(x.title) and (x.kind != "social_trend" or x.region == code)]
         moment = (await s.execute(select(CulturalMoment).where(CulturalMoment.region == code,
             CulturalMoment.day == at.replace(hour=0, minute=0, second=0, microsecond=0)))).scalar_one_or_none()
@@ -103,11 +105,15 @@ async def build_snapshot_data(code: str, at: datetime) -> dict:
         "social": [{"title": x.title, "platform": x.payload.get("platform"), "value": x.value, "url": x.url, "at": x.observed_at.isoformat(), **metadata(x)} for x in social],
         "events": sorted([{"name": x.title, **x.payload, **metadata(x)} for x in events], key=lambda e: e.get("days_away") if e.get("days_away") is not None else 999),
         "economy": [{"title": x.title, "value": x.value, **metadata(x)} for x in econ],
+        "natural_hazards": [{"title": x.title, "url": x.url, **x.payload, **metadata(x)}
+                            for x in prepared if x.kind == "natural_hazard"],
         "source_weights": {x.source: registered.get(x.source_id, {}).get("source_weight", 0) for x in prepared},
         "signals": [{**metadata(x), "kind": x.kind, "title": x.title,
                      "value": x.value,
                      "embedding": embed(x.title + " " + str(x.payload.get("summary", ""))).tolist(),
-                     "summary": str(x.payload.get("summary", ""))[:500], "at": x.observed_at.isoformat(), "url": x.url} for x in prepared],
+                     "summary": str(x.payload.get("summary", ""))[:500], "at": x.observed_at.isoformat(), "url": x.url,
+                     **({"expires_at": x.payload.get("expires_at"), "event_id": x.payload.get("event_id")}
+                        if x.kind == "natural_hazard" else {})} for x in prepared],
         "freshness": list(freshness.values()), "stale_sources": [x for x in freshness.values() if x["stale"]],
         "cultural_moment": moment.note if moment and safe_title(moment.note) else "Topics on people's minds: " + "; ".join(x.title for x in news[:3]),
         "cultural_moment_by": moment.model if moment else "template",
@@ -155,6 +161,8 @@ def template_brief(d: dict) -> str:
         parts.append("Top stories: " + "; ".join(n["title"] for n in d["news"][:3]) + ".")
     if d.get("trending"):
         parts.append("Most read: " + ", ".join(x["title"] for x in d["trending"][:4]) + ".")
+    if d.get("natural_hazards"):
+        parts.append("Nearby reported natural events: " + "; ".join(x["title"] for x in d["natural_hazards"][:2]) + ".")
     if d.get("events"):
         e = d["events"][0]
         parts.append(e['name'] + "." if e.get("days_away") is None else f"Coming up: {e['name']} in {e['days_away']} days.")
@@ -196,7 +204,7 @@ def aggregate_uae(country: dict, emirates: dict[str, dict]) -> dict:
            "weather_by_emirate": {code: data.get("weather") for code, data in emirates.items()},
            "tone_by_emirate": {code: data.get("tone") for code, data in emirates.items()},
            "emirates": list(emirates), "brief_by": "template"}
-    for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series", "freshness", "stale_sources"):
+    for key in ("signals", "news", "trending", "social", "events", "economy", "natural_hazards", "trend_series", "freshness", "stale_sources"):
         unique = {}
         for data in [country, *emirates.values()]:
             for item in data.get(key, []):
@@ -213,7 +221,7 @@ def weighted_context(snapshots):
     out, checks = {}, {}
     for code, snapshot in snapshots.items():
         data = dict(snapshot)
-        for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series"):
+        for key in ("signals", "news", "trending", "social", "events", "economy", "natural_hazards", "trend_series"):
             data[key] = []
             for item in snapshot.get(key, []):
                 provenance = item.get("provenance") or {"status": "placeholder", "label": "estimate, source pending", "source_weight": 0}
@@ -243,6 +251,8 @@ EMIRATE_CONTEXT_CODES = [r["code"] for r in EMIRATE_CONTEXT]
 
 async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,
                        org_id: str | None = None, with_briefs: bool = True) -> dict[str, dict]:
+    from app.services.datapool.connectors.hazards import timestamp
+    cutoff = min(at or utcnow(), utcnow())
     expanded = list(dict.fromkeys([*codes, *([r["code"] for r in EMIRATE_CONTEXT] if "AE" in codes else [])]))
     out = await _snapshots_at(expanded, at, llm, usage, org_id, with_briefs)
     # Hourly caching and archive replay must never preserve a revoked production entitlement.
@@ -252,9 +262,13 @@ async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | Non
         sources = {row.key: signal_source(row) for row in (await s.execute(select(DataSource))).scalars()}
     for data in out.values():
         weights = {}
-        for key in ("signals", "news", "trending", "social", "events", "economy", "trend_series"):
+        for key in ("signals", "news", "trending", "social", "events", "economy", "natural_hazards", "trend_series"):
             items = []
             for item in data.get(key, []):
+                if key == "natural_hazards" or item.get("kind") == "natural_hazard":
+                    expiry = timestamp(item.get("expires_at"))
+                    if not expiry or expiry <= cutoff:
+                        continue
                 source = item.get("source")
                 metadata = sources.get(source, sources["placeholder_priors"])
                 if item.get("kind") == "tone" and any(not sources.get(k, {}).get("production_eligible") for k in (data.get("tone") or {}).get("upstream_sources", [])):
@@ -361,7 +375,8 @@ async def _llm_briefs(out: dict, codes: list[str], llm: BaseLLM, usage: Usage, b
     payload = [{"region": c, "city": out[c]["city"], "local_time": out[c]["local_time"], "weather": out[c].get("weather"),
                 "headlines": [n["title"] for n in out[c].get("news", [])[:10]], "news_tone": out[c].get("tone"),
                 "most_read": [t["title"] for t in out[c].get("trending", [])[:8]],
-                "social_trends": [t["title"] for t in out[c].get("social", [])[:8]], "upcoming": out[c].get("events")} for c in codes]
+                "social_trends": [t["title"] for t in out[c].get("social", [])[:8]], "upcoming": out[c].get("events"),
+                "nearby_natural_events": out[c].get("natural_hazards", [])[:3]} for c in codes]
     try:
         data = await llm.complete_json(system=BRIEF_SYSTEM, user=json.dumps(payload, ensure_ascii=False, default=str),
                                        role="brief", max_tokens=1800, usage=usage)

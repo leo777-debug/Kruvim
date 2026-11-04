@@ -13,7 +13,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import select
 
-from app.api.routes import auth, collab, creator, datapool, monitoring, platform, projects, runs, sharing, simulations, workspace
+from app.api.routes import (
+    analytics,
+    auth,
+    billing,
+    library,
+    collab,
+    creator,
+    datapool,
+    monitoring,
+    platform,
+    projects,
+    runs,
+    sharing,
+    simulations,
+    tokens,
+    workspace,
+)
 from app.core import errors
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -41,11 +57,11 @@ async def _bootstrap():
             if u is None:
                 s.add(User(email=settings.first_superuser_email.lower(), name="Administrator",
                            password_hash=hash_password(settings.first_superuser_password), is_superuser=True))
-    if not settings.redis_url:
+    if not settings.redis_url and not settings.serverless:
         # Single-process mode: jobs died with the previous process; mark them so the UI does not hang.
         from sqlalchemy import update
         async with session_scope() as s:
-            await s.execute(update(Simulation).where(Simulation.status.in_(["building_graph", "preparing", "queued", "running", "paused"]))
+            await s.execute(update(Simulation).where(Simulation.status.in_(["building_graph", "preparing", "queued", "running", "paused"]), Simulation.pause_state["code"].as_string().is_(None))
                             .values(status="failed", error="Interrupted by a server restart. Run this step again."))
         from app.services.datapool import ensure_platform_connectors
         await ensure_platform_connectors()
@@ -56,7 +72,23 @@ async def lifespan(app: FastAPI):
     setup_logging(json_logs=settings.env != "development")
     await _bootstrap()
     scheduler = None
-    if not settings.redis_url and settings.env != "test":
+    watcher = None
+    if settings.env != 'test' and not settings.serverless:
+        import asyncio
+
+        async def watch_loop():
+            from app.services.watchdog import check
+            while True:
+                try:
+                    await check()
+                    from app.services.token_budget import tick as token_tick
+                    await token_tick()
+                except Exception:
+                    log.exception('run watchdog failed')
+                await asyncio.sleep(30)
+        # The API can recover runs even when every worker is unavailable.
+        watcher = asyncio.create_task(watch_loop())
+    if not settings.redis_url and settings.env != "test" and not settings.serverless:
         import asyncio
 
         from app.services.datapool import run_due
@@ -64,6 +96,11 @@ async def lifespan(app: FastAPI):
         async def loop():
             memory_day = None
             while True:
+                try:
+                    from app.services.watchdog import check
+                    await check()
+                except Exception:
+                    log.exception("run watchdog failed")
                 try:
                     await run_due()
                     from app.services.datapool.archive import compress_old
@@ -96,6 +133,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if watcher:
+            watcher.cancel()
+            from contextlib import suppress
+            with suppress(asyncio.CancelledError):
+                await watcher
         if scheduler:
             scheduler.cancel()
             from contextlib import suppress
@@ -112,8 +154,12 @@ def create_app() -> FastAPI:
                        allow_headers=["*"], expose_headers=["x-request-id"])
     app.add_middleware(RequestContextMiddleware)
     errors.install(app)
-    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router):
+    for r in (auth.router, workspace.router, projects.router, simulations.router, collab.router, creator.router, analytics.router, monitoring.router, runs.router, sharing.router, datapool.router, platform.router, tokens.router):
         app.include_router(r, prefix="/api/v1")
+    app.include_router(billing.router, prefix="/api/v1")
+    app.include_router(library.router, prefix="/api/v1")
+    from app.services.cloud_jobs import router as cloud_router
+    app.include_router(cloud_router, prefix="/api/v1")
     app.add_api_route("/healthz", platform.healthz, include_in_schema=False)
     app.add_api_route("/readyz", platform.readyz, include_in_schema=False)
     app.add_api_route("/metrics", platform.metrics, include_in_schema=False)

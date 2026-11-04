@@ -2,9 +2,11 @@
 control, server-side refusal fallback on models that support it)."""
 from __future__ import annotations
 
+import asyncio
 import time
 
 from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .errors import ProviderFailure, classify, retry_delay
 
 _FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 _LIGHT_ROLES = {"voice", "action", "debate", "chat", "brief", "survey", "persona"}
@@ -20,7 +22,7 @@ class AnthropicLLM(BaseLLM):
         except ImportError:
             raise LLMAuthError("The 'anthropic' package is not installed.")
         self._a = anthropic
-        kw = {"max_retries": 3, "timeout": float(s.timeout or 120)}
+        kw = {"max_retries": 0, "timeout": float(s.timeout or 120)}
         if s.api_key:
             kw["api_key"] = s.api_key
         if s.base_url:
@@ -49,37 +51,37 @@ class AnthropicLLM(BaseLLM):
         if "haiku" not in model:
             params["output_config"] = {"effort": "low" if role in _LIGHT_ROLES else "high"}
         async with self.sem:
+            from app.services.llm.errors import BudgetPause
+            from app.services.token_budget import current
+            if current.get() and current.get().paused:
+                raise BudgetPause(current.get().paused)
             t0 = time.time()
-            try:
-                if model in _FALLBACK_MODELS and not self.custom_base:
-                    resp = await self.client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
-                else:
-                    resp = await self.client.messages.create(**params)
-            except a.AuthenticationError as exc:
-                usage.fail(self.name, role)
-                raise LLMAuthError(f"Anthropic rejected the API key: {exc.message}")
-            except a.NotFoundError as exc:
-                usage.fail(self.name, role)
-                raise LLMAuthError(f"Model '{model}' not found: {exc.message}")
-            except a.PermissionDeniedError as exc:
-                usage.fail(self.name, role)
-                raise LLMAuthError(f"Permission denied: {exc.message}")
-            except a.BadRequestError as exc:
-                if "output_config" in params and "effort" in str(exc.message).lower():
-                    params.pop("output_config")
-                    resp = await self.client.messages.create(**params)
-                else:
-                    usage.fail(self.name, role)
-                    raise LLMError(f"Bad request: {exc.message}")
-            except a.RateLimitError as exc:
-                usage.fail(self.name, role)
-                raise LLMError(f"Rate limited after retries: {exc.message}")
-            except a.APIStatusError as exc:
-                usage.fail(self.name, role)
-                raise LLMError(f"Anthropic API error {exc.status_code}: {exc.message}")
-            except a.APIConnectionError as exc:
-                usage.fail(self.name, role)
-                raise LLMAuthError(f"Cannot reach the Anthropic API: {exc}")
+            for attempt in range(4):
+                try:
+                    if model in _FALLBACK_MODELS and not self.custom_base:
+                        resp = await self.client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+                    else:
+                        resp = await self.client.messages.create(**params)
+                    break
+                except a.APIStatusError as exc:
+                    issue = classify(exc.status_code, exc.body, settings=self.s)
+                    if issue.category == 'request_error' and "output_config" in params and 'effort' in str(exc.message).lower():
+                        params.pop('output_config')
+                        continue
+                    if not issue.retryable or attempt == 3:
+                        usage.fail(self.name, role)
+                        raise ProviderFailure(issue, str(exc.body)[:2000]) from exc
+                    delay = retry_delay(exc.response.headers, 1.5 * 2 ** attempt)
+                    if delay > self.s.timeout * 4:
+                        raise ProviderFailure(issue, 'Provider retry delay exceeds this request deadline') from exc
+                    await asyncio.sleep(delay)
+                except a.APIConnectionError as exc:
+                    if attempt == 3:
+                        usage.fail(self.name, role)
+                        raise ProviderFailure(classify(None, settings=self.s, network_error=True), type(exc).__name__) from exc
+                    await asyncio.sleep(1.5 * 2 ** attempt)
+            else:
+                raise LLMError('The model provider could not complete this request.')
         if resp.stop_reason == "refusal":
             usage.fail(self.name, role)
             raise LLMError("model declined this request")

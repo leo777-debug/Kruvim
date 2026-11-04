@@ -23,9 +23,11 @@ from app.services.providers import resolve
 from app.services.report import generate as generate_report_fn
 from app.services.simulation import Engine, agent_detail
 from app.services.simulation import prepare as prepare_env
+from app.services.token_budget import survey_budget
+from app.services.watchdog import bounded_job, job_lease
 
 log = logging.getLogger("kruvim.jobs")
-USER_ERRORS = (ContentError, LLMAuthError, LLMError, ValueError)
+USER_ERRORS = (ContentError, LLMAuthError, LLMError, ValueError, QuotaExceeded)
 
 
 def _now():
@@ -38,13 +40,18 @@ async def _set(sim_id: str, **values):
 
 
 async def _llm_for(org_id: str):
+    from app.services.token_budget import current
+    work = current.get()
     async with session_scope() as s:
-        res = await resolve(s, org_id)
+        sim = await s.get(Simulation, work.simulation_id) if work and work.simulation_id else None
+        res = await resolve(s, org_id, platform=bool(sim and (sim.config or {}).get('use_platform_tokens')))
+    if work:
+        work.res = res
     return res, make_llm(res.settings)
 
 
 async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed"):
-    msg = str(exc) if isinstance(exc, USER_ERRORS) else f"Internal error in {stage}: {exc.__class__.__name__}: {exc}"
+    msg = str(exc) if isinstance(exc, USER_ERRORS) else "This step could not finish. Retry the test; contact support if it happens again."
     if not isinstance(exc, USER_ERRORS):
         log.error("job failed\n%s", traceback.format_exc(), extra={"simulation_id": sim_id, "job": stage})
     await _set(sim_id, status=status, error=msg[:2000])
@@ -96,6 +103,7 @@ async def _asset_files(sim: Simulation, kinds: tuple[str, ...]) -> tuple[dict, l
 
 
 # ---- Step 1 --------------------------------------------------------------------------------------------
+@bounded_job
 async def build_graph(ctx, sim_id: str):
     JOBS_RUNNING.labels("graph").inc()
     usage = Usage()
@@ -145,6 +153,9 @@ async def build_graph(ctx, sim_id: str):
         await _set(sim_id, ontology=ontology, status="graph_ready", step=2, usage={"graph": usage.as_dict(res.settings)})
         await metering.record(org_id, sim_id, "graph", usage, res)
         await bus.publish(sim_id, "graph.completed", {"ontology": ontology, "usage": usage.as_dict(res.settings)})
+        # All stage writes are committed. Transfer ownership before the next job
+        # can claim its token; the parent's queue transaction may finish later.
+        job_lease.set(None)
         await _autopilot(sim_id, "environment")
     except Exception as exc:
         await _fail(sim_id, "graph", exc)
@@ -155,6 +166,7 @@ async def build_graph(ctx, sim_id: str):
 
 
 # ---- Step 2 --------------------------------------------------------------------------------------------
+@bounded_job
 async def prepare_environment(ctx, sim_id: str):
     JOBS_RUNNING.labels("environment").inc()
     usage = Usage()
@@ -176,9 +188,10 @@ async def prepare_environment(ctx, sim_id: str):
             sim.usage = {**(sim.usage or {}), "environment": usage.as_dict(res.settings)}
         await metering.record(org_id, sim_id, "environment", usage, res)
         await bus.publish(sim_id, "env.completed", {"config": {k: v for k, v in cfg.items() if k != "context"}})
+        job_lease.set(None)
         await _autopilot(sim_id, "run")
     except Exception as exc:
-        await _fail(sim_id, "env", exc, status="graph_ready")
+        await _fail(sim_id, "env", exc)
     finally:
         JOBS_RUNNING.labels("environment").dec()
         if llm:
@@ -186,6 +199,7 @@ async def prepare_environment(ctx, sim_id: str):
 
 
 # ---- Step 3 --------------------------------------------------------------------------------------------
+@bounded_job
 async def run_simulation(ctx, sim_id: str):
     JOBS_RUNNING.labels("simulation").inc()
     usage = Usage()
@@ -200,12 +214,17 @@ async def run_simulation(ctx, sim_id: str):
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
         engine = Engine(sim_id, llm, usage)
         results = await engine.run()
+        from app.services.analytics_import import forecast
+        async with session_scope() as s:
+            results['creator_analytics'] = await forecast(s, org_id, sim.content.get('platform'),
+                None if llm.is_dry else results.get('viral', {}).get('raw', {}).get('mean_share_intent'))
         results["usage"] = usage.as_dict(res.settings)
         results["provider"] = {"name": res.settings.provider, "preset": res.settings.preset, "dry": llm.is_dry, "source": res.source,
                                "voice_model": llm.model_for("voice"), "report_model": llm.model_for("report")}
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
-            sim.results, sim.status, sim.step, sim.finished_at = results, "completed", 4, _now()
+            sim.results, sim.status, sim.step = results, "completed", 4
+            sim.finished_at = sim.finished_at or _now()
             sim.score = float(results["score"]["mean"])
             topics = (sim.card or {}).get("topics") or {}
             sim.niche = max(topics, key=topics.get) if topics else None
@@ -226,8 +245,9 @@ async def run_simulation(ctx, sim_id: str):
         await bus.publish(sim_id, "simulation.completed", {"score": results["score"], "viral": results["viral"]["score"],
                                                            "stopped_early": results.get("stopped_early")})
         from app.services.jobs import enqueue
-        await enqueue("generate_report", sim_id=sim_id)
         await monitoring.on_completed(sim_id)
+        job_lease.set(None)
+        await enqueue("generate_report", sim_id=sim_id)
     except Exception as exc:
         SIMULATIONS.labels("failed").inc()
         await _fail(sim_id, "simulation", exc)
@@ -238,6 +258,7 @@ async def run_simulation(ctx, sim_id: str):
 
 
 # ---- Step 4 --------------------------------------------------------------------------------------------
+@bounded_job
 async def generate_report(ctx, sim_id: str):
     JOBS_RUNNING.labels("report").inc()
     usage = Usage()
@@ -271,6 +292,7 @@ async def generate_report(ctx, sim_id: str):
 
 
 # ---- Step 5 surveys ------------------------------------------------------------------------------------
+@survey_budget
 async def run_survey(ctx, survey_id: str):
     usage = Usage()
     llm = None
@@ -299,7 +321,7 @@ async def run_survey(ctx, survey_id: str):
             if len(pick) != len(f["agent_refs"]):
                 raise ValueError("The agents changed. Preview and start the survey again.")
         details = [await agent_detail(sim, r.ref) for r in pick]
-        partial = []
+        partial = list(sv.answers or [])
         answer_lock = asyncio.Lock()
 
         async def on_answer(item):
@@ -310,7 +332,7 @@ async def run_survey(ctx, survey_id: str):
                     row.answers = list(partial)
                 await bus.publish(sim.id, "survey.answer", {"survey_id": survey_id, "answered": len(partial), "total": len(details), **item})
 
-        out = await run_survey_fn(details, sim.card, (sim.content or {}).get("platform"), sv.question, llm, usage, on_answer)
+        out = await run_survey_fn(details, sim.card, (sim.content or {}).get("platform"), sv.question, llm, usage, on_answer, initial_answers=sv.answers or [])
         async with session_scope() as s:
             row = await s.get(Survey, survey_id)
             row.answers, row.summary, row.status = out["answers"], __import__("json").dumps(out["summary"], ensure_ascii=False), "done"

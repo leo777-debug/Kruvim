@@ -7,12 +7,14 @@ import { useAuth } from "./lib/auth";
 import { AuthPage, InvitePage } from "./features/auth/AuthPages";
 
 const Dashboard = lazy(() => import("./features/dashboard/DashboardPage"));
+const Help = lazy(() => import("./features/help/HelpPage"));
 const AllRuns = lazy(() => import("./features/simulations/AllRunsPage"));
 const Projects = lazy(() => import("./features/projects/ProjectsPage"));
 const Project = lazy(() => import("./features/projects/ProjectPage"));
 const NewSimulation = lazy(() => import("./features/simulations/NewSimulationPage"));
 const Simulation = lazy(() => import("./features/simulations/SimulationPage"));
 const DataPool = lazy(() => import("./features/datapool/DataPoolPage"));
+const Library = lazy(() => import("./features/datapool/LibraryPage"));
 const Population = lazy(() => import("./features/population/PopulationPage"));
 const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
 const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
@@ -69,7 +71,10 @@ export default function App() {
           <Route index element={<PublicAccuracy />} />
         </Route>
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<NewSimulation home />} />
+          <Route path="overview" element={<Dashboard />} />
+          <Route path="help" element={<Help />} />
+          <Route path="tests" element={<AllRuns simple />} />
           <Route path="runs" element={<AllRuns />} />
           <Route path="projects" element={<Projects />} />
           <Route path="projects/:projectId" element={<Project />} />
@@ -77,6 +82,7 @@ export default function App() {
           <Route path="simulations/:simId" element={<Simulation />} />
           <Route path="simulations/:simId/edit" element={<NewSimulation />} />
           <Route path="data-pool" element={<DataPool />} />
+          <Route path="data-library" element={<Library />} />
           <Route path="population" element={<Population />} />
           <Route path="saved-audiences" element={<Audiences />} />
           <Route path="audiences" element={<LegacyAudiences />} />

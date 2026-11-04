@@ -24,10 +24,10 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
       <RTooltip.Provider>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
           <App />
         </BrowserRouter>
-        <Toaster position="bottom-right" toastOptions={{ className: "!bg-panel !border-line !text-fg !shadow-pop !rounded-md !text-[13px]" }} />
+        <Toaster position="top-right" closeButton toastOptions={{ className: "!bg-panel !border-line !text-fg !shadow-pop !rounded-md !text-[13px]" }} />
       </RTooltip.Provider>
     </QueryClientProvider>
   </StrictMode>,

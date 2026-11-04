@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import json
 
+from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.session import session_scope
@@ -113,8 +114,11 @@ async def _react(llm: BaseLLM, usage: Usage, tb: Toolbox, system: str, task: str
 async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
     async with session_scope() as s:
         sim = await s.get(Simulation, sim_id)
-        rep = Report(simulation_id=sim_id, status="running", model=llm.model_for("report"))
-        s.add(rep)
+        rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id, Report.status == 'running')
+            .order_by(Report.created_at.desc()).limit(1))).scalar_one_or_none()
+        if rep is None:
+            rep = Report(simulation_id=sim_id, status="running", model=llm.model_for("report"))
+            s.add(rep)
         await s.flush()
         rep_id = rep.id
     tb = Toolbox(sim, llm, usage)

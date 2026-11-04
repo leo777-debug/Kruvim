@@ -80,7 +80,8 @@ async def prepare_retrieval(org_id, personas, card, snapshots, llm, usage):
     texts = [(x.get("title", "") + " " + x.get("summary", ""))[:1500] for x in candidates] + queries
     vectors = [embed(text) for text in texts]
     model, cost = "local-hash-v1", 0.0
-    if settings.embedding_model and not llm.is_dry and llm.s.provider in ("openai", "openai_compatible") and llm.s.base_url and candidates:
+    if (settings.embedding_model and not llm.is_dry and not (settings.billing_enabled and llm.s.billing_metered)
+            and llm.s.provider in ("openai", "openai_compatible") and llm.s.base_url and candidates):
         start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=15) as client:

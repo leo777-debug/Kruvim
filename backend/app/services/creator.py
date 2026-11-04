@@ -26,7 +26,7 @@ def audience_weights(pop, indices, split):
     groups, coverage, clipped = [], {}, []
     if not idx.size:
         return w, {"coverage": {}, "warning": "No synthetic audience matches these filters."}
-    for dimension in ("countries", "ages", "genders"):
+    for dimension in ("countries", "ages", "genders", "cities"):
         values = split.get(dimension) or {}
         if not values:
             continue
@@ -38,6 +38,15 @@ def audience_weights(pop, indices, split):
                 mask = pop.region[idx] == codes.index(label) if label in codes else np.zeros(idx.size, bool)
             elif dimension == "genders":
                 mask = pop.male[idx] == (label == "male") if label in ("male", "female") else np.zeros(idx.size, bool)
+            elif dimension == 'cities':
+                from app.services.population.uae import EMIRATES
+                normalized = label.strip().casefold()
+                mask = np.array([REGIONS[int(r)]['city'].casefold() == normalized for r in pop.region[idx]])
+                if getattr(pop, 'uae', None):
+                    for k, (code, name) in enumerate(EMIRATES.items()):
+                        if normalized in (code.casefold(), name.casefold()):
+                            mask = (pop.region[idx] == 0) & (pop.uae['residence_emirate'][idx] == k)
+                            break
             else:
                 lo = int(label.split('-')[0].rstrip('+'))
                 hi = int(label.split('-')[1]) if '-' in label else 120
@@ -69,7 +78,7 @@ def audience_weights(pop, indices, split):
             w /= w.sum()
     errors = [abs(w[mask].sum() - target) for cells in groups for mask, target in cells]
     return w, {"coverage": coverage, "max_marginal_error_percent": round(100 * max(errors, default=0), 2),
-               "method": "Raked country, age and gender marginals over available synthetic people; other traits remain synthetic priors.",
+               "method": "Raked country, city/emirate, age and gender marginals over available synthetic people; other traits remain synthetic priors. Unrepresented cities are disclosed as coverage gaps.",
                "clipped_age_bands": clipped,
                "warning": "Unsupported demographics are excluded, ages clipped to 16–70 and supported shares normalized." if clipped or any(v < 99 for v in coverage.values()) else None}
 

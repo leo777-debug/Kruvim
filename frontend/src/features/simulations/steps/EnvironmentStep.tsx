@@ -11,7 +11,7 @@ import { fmt, platformName } from "@/lib/utils";
 import type { StreamState } from "../useSimulationStream";
 import { Section } from "./GraphStep";
 
-const DEFAULTS = { voice: 80, crowd: 3000, stakeholders: 5, hours: 24, minutes_per_round: 60, platforms: ["feed", "forum"], listening: true };
+const DEFAULTS = { voice: 40, crowd: 3000, stakeholders: 5, hours: 24, minutes_per_round: 60, platforms: ["feed", "forum"], listening: true };
 
 export function EnvironmentStep({ sim, stream, onNext, refetch, onAgent }: { sim: Simulation; stream: StreamState; onNext: () => void; refetch: () => void; onAgent: (r: string) => void }) {
   const [o, setO] = useState<any>({ ...DEFAULTS, ...(sim.config?.overrides || {}) });

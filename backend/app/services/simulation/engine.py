@@ -33,6 +33,7 @@ from app.services.datapool.retrieval import embed
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
 from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
+from app.services.llm.errors import BudgetPause
 from app.services.population import get_population, persona_text, platform_label, topic_match
 from app.services.population.regions import PLATFORMS, REGIONS, STANCES, region
 
@@ -301,26 +302,27 @@ class Engine:
     # ---- round 0: first exposure ------------------------------------------------------------------------
     async def first_exposure(self):
         await self.emit("round.start", self.round_meta(0))
-        async with session_scope() as s:
-            self.creator = {}
-            text = self.card.get("summary") if self.card.get("type") in ("video", "audio", "image") else ""
-            body = " ".join(seg["text"] for seg in self.card.get("segments", []))[:600]
-            for pl in self.enabled:
-                main = text or body
-                head = self.card["title"].rstrip("…")
-                content = (main if main.startswith(head) else f"{self.card['title']}\n{main}").strip()
-                p = await self.new_post(s, pl, "post", "creator", "Creator", (self.cfg.get("regions") or ["AE"])[0], content, None)
-                self.creator[pl] = p.id
-                self.writer.node(f"post:{p.id}", "post", self.card["title"][:80], f"creator · {pl}", content[:300], platform=pl)
-                self.writer.edge("content:A", f"post:{p.id}", "published_as", f"Published on the {pl}")
-                self.log_action(s, None, pl, "POST", post_id=p.id, content=content, actor_ref="creator", actor_name="Creator")
-            for e in self.cfg.get("external_seed", []):
-                pl = "forum" if e.get("platform") == "reddit" and "forum" in self.enabled else self.enabled[0]
-                p = await self.new_post(s, pl, "external", f"ext:{e.get('platform')}", e.get("author") or e.get("platform"), "*",
-                                        e.get("text", ""), 5.0, url=e.get("url"))
-                p.likes = int(min(500, e.get("engagement") or 0))
-                self.writer.node(f"post:{p.id}", "post", (e.get("text") or "")[:80], f"live · {e.get('platform')}", e.get("text", "")[:300],
-                                 platform=pl, url=e.get("url"))
+        if not getattr(self, "creator", None):
+            async with session_scope() as s:
+                self.creator = {}
+                text = self.card.get("summary") if self.card.get("type") in ("video", "audio", "image") else ""
+                body = " ".join(seg["text"] for seg in self.card.get("segments", []))[:600]
+                for pl in self.enabled:
+                    main = text or body
+                    head = self.card["title"].rstrip("…")
+                    content = (main if main.startswith(head) else f"{self.card['title']}\n{main}").strip()
+                    p = await self.new_post(s, pl, "post", "creator", "Creator", (self.cfg.get("regions") or ["AE"])[0], content, None)
+                    self.creator[pl] = p.id
+                    self.writer.node(f"post:{p.id}", "post", self.card["title"][:80], f"creator · {pl}", content[:300], platform=pl)
+                    self.writer.edge("content:A", f"post:{p.id}", "published_as", f"Published on the {pl}")
+                    self.log_action(s, None, pl, "POST", post_id=p.id, content=content, actor_ref="creator", actor_name="Creator")
+                for e in self.cfg.get("external_seed", []):
+                    pl = "forum" if e.get("platform") == "reddit" and "forum" in self.enabled else self.enabled[0]
+                    p = await self.new_post(s, pl, "external", f"ext:{e.get('platform')}", e.get("author") or e.get("platform"), "*",
+                                            e.get("text", ""), 5.0, url=e.get("url"))
+                    p.likes = int(min(500, e.get("engagement") or 0))
+                    self.writer.node(f"post:{p.id}", "post", (e.get("text") or "")[:80], f"live · {e.get('platform')}", e.get("text", "")[:300],
+                                     platform=pl, url=e.get("url"))
         # graph: agents + crowd clusters
         for a in self.agents.values():
             self.writer.node(f"agent:{a.ref}", "agent", a.name, a.kind, a.persona.get("description") or "", region=a.region,
@@ -352,22 +354,35 @@ class Engine:
                 return a, v, short_video_metrics(reaction)
             from app.services.agent_memory import remember_block
             personal = "\nWhat's on your mind today:\n" + "\n".join(x.get("title", "") for x in a.cfg.get("personal_signals", []))
+            from app.services.library import evidence_block
+            personal += evidence_block(a.cfg.get("personal_signals", []))
             personal += remember_block(self.cfg.get("agent_memory", {}).get("snapshots", {}).get(a.ref, []))
             history_state = self.cfg.get("agent_memory", {}).get("affinity", {}).get("people", {}).get(str(idx), {})
             if history_state:
                 personal += "\nYour simulated creator history (small familiarity/affinity effects; fatigue reduces novelty): " + json.dumps(history_state)
-            d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
-                                             max_tokens=700, usage=self.usage)
-            normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            try:
+                d = await self.llm.complete_json(system=systems[v], user=persona_text(a.persona, plab) + personal + "\n\nReact now.", role="voice",
+                                                 max_tokens=700, usage=self.usage, operation_key=f"reaction:{a.ref}:{v}")
+                normalized = norm_reaction(d, len(c["segments"]), len(c.get("poll_options") or []))
+            except Exception:
+                self.failures.append("A participant model call failed; a deterministic simulated response was used.")
+                tm = float(topic_match(self.pop, np.array([idx]), topic_vector(c.get("topics")))[0])
+                d = normalized = dry.reaction(a.persona, tm, True, c, self.snaps.get(a.region), np.random.default_rng([self.seed, idx, ord(v)]))
+                normalized["fallback"] = True
             normalized.update({k: d[k] for k in ("rewatch_probability", "stitch_duet_likelihood", "sound_reuse_likelihood", "comment_bait") if k in d})
             return a, v, short_video_metrics(normalized)
 
-        tasks = [asyncio.create_task(react(a, v)) for a in voices for v in cards]
+        tasks = [asyncio.create_task(react(a, v)) for a in voices for v in cards
+                 if not (a.reaction and ((v == 'A' and 'score' in a.reaction) or (v == 'B' and 'B' in a.reaction)))]
+        paused = None
         done = 0
         try:
             for fut in asyncio.as_completed(tasks):
                 try:
                     a, v, r = await fut
+                except BudgetPause as exc:
+                    paused = exc
+                    continue
                 except LLMAuthError:
                     raise
                 except Exception as exc:
@@ -386,10 +401,21 @@ class Engine:
                 a.memory.append(f"You saw the creator's content and thought: \"{r['quote']}\" ({r['score']:.1f}/10)")
                 acts = await self.initial_actions(a, r)
                 await self.emit("reaction", {"agent": a.ref, "variant": "A", "r": _brief(r) | {"influence": _influence(r, a.followers)}, "actions": acts, "progress": [done, len(tasks)]})
+                answered = [person.reaction for person in voices if person.reaction and "score" in person.reaction]
+                if len(answered) == 5:
+                    self.quick_read = {"score": round(float(np.mean([reaction["score"] for reaction in answered])), 2),
+                        "sample_size": 5, "preliminary": True, "dry": self.llm.is_dry,
+                        "method": "First five completed simulated impressions; not the full audience prediction"}
+                    async with session_scope() as s:
+                        row = await s.get(Simulation, self.sim_id)
+                        row.progress = {**(row.progress or {}), "quick_read": self.quick_read}
+                    await self.emit("simulation.quick_read", self.quick_read)
         finally:
             for t in tasks:
                 if not t.done():
                     t.cancel()
+        if paused:
+            raise paused
         reacted = [a for a in voices if a.reaction and "score" in a.reaction]
         if len(reacted) < max(5, len(voices) * 0.3):
             raise LLMError(f"Only {len(reacted)} voice agents answered. Last error: {self.failures[-1] if self.failures else 'unknown'}")
@@ -401,7 +427,9 @@ class Engine:
             for a in reacted:
                 await s.execute(update(SimAgent).where(SimAgent.id == a.id).values(reaction=a.reaction))
         self.fit_first(reacted)
-        self.init_crowd()
+        if not getattr(self, '_crowd_initialized', False):
+            self.init_crowd()
+            self._crowd_initialized = True
         await self.end_round()
 
     async def initial_actions(self, a: AgentRT, r: dict) -> list[dict]:
@@ -574,14 +602,21 @@ class Engine:
 
     # ---- LLM agent turns ------------------------------------------------------------------------------------
     async def agent_turn(self, a: AgentRT):
-        weights = {p: a.cfg["platform_weights"].get(p, 0.3) for p in self.enabled}
-        tot = sum(weights.values())
-        pl = self.rng.choice(list(weights), p=[w / tot for w in weights.values()])
-        feed = self.recommend(a, pl, self.cfg["platforms"][pl].get("feed_size", 6))
-        views = [self.post_view(p) for p in feed]
-        for p in feed:
-            a.seen.add(p.id)
-            p.views += 1
+        previous = getattr(self, '_turn_inputs', {}).get(a.ref)
+        if previous:
+            pl, views = previous
+        else:
+            weights = {p: a.cfg["platform_weights"].get(p, 0.3) for p in self.enabled}
+            tot = sum(weights.values())
+            pl = self.rng.choice(list(weights), p=[w / tot for w in weights.values()])
+            feed = self.recommend(a, pl, self.cfg["platforms"][pl].get("feed_size", 6))
+            views = [self.post_view(p) for p in feed]
+            for p in feed:
+                a.seen.add(p.id)
+                p.views += 1
+            if not hasattr(self, '_turn_inputs'):
+                self._turn_inputs = {}
+            self._turn_inputs[a.ref] = (pl, views)
         if self.dry:
             await asyncio.sleep(DRY_PACE / max(self.speed, 0.1))
             out = dry.action(a, views, pl, np.random.default_rng([self.seed, a.id, self.round]))
@@ -595,8 +630,12 @@ class Engine:
             remembered = remembered + [m for m in self.cfg.get("agent_memory", {}).get("opinion_snapshots", {}).get(a.ref, [])
                                       if m["id"] not in {x["id"] for x in remembered}]
             ptxt += remember_block(remembered)
-            out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
-                                               user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking))
+            try:
+                out = await self.llm.complete_json(system=self.system_action, role="action", max_tokens=500, usage=self.usage,
+                                                   user=action_user(ptxt, a.opinion, a.memory, clock, pl, views, self.breaking), operation_key=f"action:{self.round}:{a.ref}")
+            except Exception:
+                self.failures.append("An activity model call failed; deterministic simulated activity was used.")
+                out = dry.action(a, views, pl, np.random.default_rng([self.seed, a.id, self.round]))
         return a, pl, views, out
 
     async def apply_turn(self, a: AgentRT, pl: str, views: list[dict], out: dict) -> list[dict]:
@@ -751,38 +790,51 @@ class Engine:
 
     async def run_round(self, r: int):
         self.round = r
-        self.breaking = []
-        self.writer.round = r
-        for ev in self.cfg["events"].get("scheduled", []):
-            if int(ev.get("round", -1)) == r:
-                await self.inject(ev["text"], source=ev.get("source", "scheduled"))
-        await self.handle_control()
-        await self.emit("round.start", self.round_meta(r))
-        llm_agents = [a for a in self.agents.values() if a.reaction or a.kind == "stakeholder"]
-        active = [a for a in llm_agents if self.rng.random() < a.cfg["activity"] * self.curve(a.region, r)]
-        tasks = [asyncio.create_task(self.agent_turn(a)) for a in active]
-        try:
-            for fut in asyncio.as_completed(tasks):
-                try:
-                    a, pl, views, out = await fut
-                except LLMAuthError:
-                    raise
-                except Exception as exc:
-                    self.failures.append(str(exc)[:200])
-                    continue
-                if out is None:
-                    continue
-                done = await self.apply_turn(a, pl, views, out)
-                if done:
-                    await self.emit("actions", {"round": r, "agent": a.ref, "name": a.name, "handle": a.handle, "kind": a.kind,
-                                                "region": a.region, "platform": pl, "opinion": a.opinion, "actions": done,
-                                                "time": self.local(a.region, r).strftime("%H:%M")})
-        finally:
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
-        crowd = self.crowd_step()
-        await self.end_round(crowd, len(active))
+        if getattr(self, '_round_id', None) != r:
+            self._round_id, self._round_done, self._round_phase = r, set(), 'actions'
+            self._turn_inputs = {}
+            self.breaking = []
+            self.writer.round = r
+            for ev in self.cfg['events'].get('scheduled', []):
+                if int(ev.get('round', -1)) == r:
+                    await self.inject(ev['text'], source=ev.get('source', 'scheduled'))
+            await self.handle_control()
+            await self.emit('round.start', self.round_meta(r))
+            llm_agents = [a for a in self.agents.values() if a.reaction or a.kind == 'stakeholder']
+            self._round_active = [a.ref for a in llm_agents if self.rng.random() < a.cfg['activity'] * self.curve(a.region, r)]
+        if self._round_phase == 'actions':
+            tasks = [asyncio.create_task(self.agent_turn(self.agents[ref])) for ref in self._round_active if ref not in self._round_done]
+            paused = None
+            try:
+                for future in asyncio.as_completed(tasks):
+                    try:
+                        a, pl, views, out = await future
+                    except BudgetPause as exc:
+                        paused = exc
+                        continue
+                    except LLMAuthError:
+                        raise
+                    except Exception as exc:
+                        self.failures.append(str(exc)[:200])
+                        continue
+                    if out is not None:
+                        done = await self.apply_turn(a, pl, views, out)
+                        if done:
+                            await self.emit('actions', {'round': r, 'agent': a.ref, 'name': a.name, 'handle': a.handle,
+                                'kind': a.kind, 'region': a.region, 'platform': pl, 'opinion': a.opinion, 'actions': done,
+                                'time': self.local(a.region, r).strftime('%H:%M')})
+                    self._round_done.add(a.ref)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if paused:
+                raise paused
+            self._pending_crowd = self.crowd_step()
+            self._round_phase = 'finishing'
+        await self.end_round(self._pending_crowd, len(self._round_active))
+        self._round_phase = 'done'
         if self.dry and self.speed < 5:
             await asyncio.sleep(0.25 / self.speed)
 
@@ -817,7 +869,10 @@ class Engine:
                            for c in self.cfg.get("regions", [])},
              "top_posts": [{"id": p.id, "platform": p.platform, "author": p.author_name, "content": p.content[:140], **p.stats()} for p in top]}
         m["by_region"] = {k: (None if v != v else v) for k, v in m["by_region"].items()}
-        self.timeline.append(m)
+        if self.timeline and self.timeline[-1]['round'] == self.round:
+            self.timeline[-1] = m
+        else:
+            self.timeline.append(m)
         from app.services.knowledge.learn import learn_round
         await learn_round(self.writer, [{"id": p.id, "author_ref": p.author_ref, "content": p.content[:2000],
                                         "kind": p.kind} for p in self.posts.values()
@@ -827,6 +882,7 @@ class Engine:
         await self.emit("round.end", m)
         async with session_scope() as s:
             await s.execute(update(Simulation).where(Simulation.id == self.sim_id).values(progress={
+                "quick_read": getattr(self, "quick_read", None),
                 "round": self.round, "rounds": self.rounds, "posts": len(self.posts), "actions": int(sum(self.counts.values())),
                 "sim_time": self.sim_time(self.round).isoformat(), "voice_opinion": m["voice_opinion"], "crowd_opinion": m["crowd_opinion"]}))
 
@@ -835,10 +891,29 @@ class Engine:
         self.system_action = action_system(card_block(self.card)[:3000], self.world_block, self.cfg.get("analysis_focus", ""))
         t0 = time.time()
         stopped = False
-        await self.first_exposure()
+        async with session_scope() as s:
+            sim = await s.get(Simulation, self.sim_id)
+            saved = sim.checkpoint
+        self._resume_phase = 'first'
+        if saved:
+            from .checkpoint import restore
+            restore(self, saved)
+        if self._resume_phase == 'finished':
+            return self._final_results
         try:
-            for r in range(1, self.rounds + 1):
+            if self._resume_phase == 'first':
+                await self.first_exposure()
+                self._resume_phase = 'rounds'
+        except BudgetPause:
+            await self.save_checkpoint()
+            raise
+        try:
+            begin = self.round if getattr(self, '_round_phase', 'done') != 'done' and self.round else self.round + 1
+            for r in range(max(1, begin), self.rounds + 1):
                 await self.run_round(r)
+        except BudgetPause:
+            await self.save_checkpoint()
+            raise
         except Stopped:
             stopped = True
             await self.emit("simulation.stopping", {"round": self.round})
@@ -851,7 +926,27 @@ class Engine:
         results = await asyncio.to_thread(finalize, self)
         results["runtime_seconds"] = round(time.time() - t0, 1)
         results["stopped_early"] = stopped
+        results["reliability"] = {"fallback_calls": len(self.failures), "failed_provider_calls": self.usage.failed,
+            "method": "Failed model responses use deterministic simulated behaviour. They are not real model answers.",
+            "warnings": sorted(set(self.failures))}
+        self._resume_phase, self._final_results = 'finished', results
+        await self.save_checkpoint()
         return results
+
+    async def save_checkpoint(self):
+        from .checkpoint import snapshot
+        await self.writer.flush('Saved partial test')
+        saved = snapshot(self)
+        async with session_scope() as s:
+            sim = await s.get(Simulation, self.sim_id)
+            sim.checkpoint = saved
+            for a in self.agents.values():
+                await s.execute(update(SimAgent).where(SimAgent.id == a.id).values(reaction=a.reaction or {},
+                    state={'opinion': a.opinion, 'initial': a.initial, 'trajectory': a.trajectory, 'actions': a.actions,
+                           'following': sorted(a.following), 'muted': sorted(a.muted), 'comment_votes': a.comment_votes,
+                           'memory': a.memory[-8:]}))
+            for post in self.posts.values():
+                await s.execute(update(Post).where(Post.id == post.id).values(stats=post.stats()))
 
 
 def _influence(r: dict, followers: int) -> float:

@@ -213,8 +213,10 @@ function Surveys({ sim, stream }: { sim: Simulation; stream: StreamState }) {
         <p className="text-xs text-muted">Interview everyone surveys every voice agent in this run. You'll see the cost before starting.</p>
         <Dialog open={!!preview} onOpenChange={(v) => {if (!v && !create.isPending) setPreview(null);}} title={pending?.everyone ? "Interview everyone" : "Survey estimate"}
           description="Review the respondents and model cost before starting." footer={<><Button disabled={create.isPending} onClick={() => setPreview(null)}>Cancel</Button><Button variant="primary" loading={create.isPending} disabled={!preview?.respondents || !preview?.affordable} onClick={() => create.mutate()}>Start interviews</Button></>}>
-          {preview && <div className="space-y-3 text-sm"><p>{fmt.n(preview.respondents)} respondents · about {fmt.n(preview.credits)} credits</p>
-            {preview.metered && <Callout tone="warn">Up to {fmt.n(preview.max_credits)} credits will be reserved, including summary retries. Unused credits are returned. Balance: {fmt.n(preview.balance)}.</Callout>}
+          {preview && <div className="space-y-3 text-sm"><p>{fmt.n(preview.respondents)} respondents · {preview.cost_metered ? `about ${fmt.n(preview.model_calls)} model calls` : `about ${fmt.n(preview.credits)} credits`}</p>
+            {preview.metered && (preview.cost_metered
+              ? <Callout tone="warn">Usage is deducted from your available credits as interviews complete. Interviews pause if your allowance runs out; you can add credits in Billing.</Callout>
+              : <Callout tone="warn">Up to {fmt.n(preview.max_credits)} credits will be reserved, including summary retries. Unused credits are returned. Balance: {fmt.n(preview.balance)}.</Callout>)}
             {preview.dry && <p className="text-muted">Dry run: no model calls or credits.</p>}
             {preview.own_provider && <Callout tone="warn">Uses about {fmt.n(preview.model_calls)} calls on your own model provider. That provider may charge you directly.</Callout>}
             {!preview.affordable && <Callout tone="neg">There aren't enough credits for this survey.</Callout>}

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart3, Building2, ChevronRight, Contact, ChevronsUpDown, Database, FolderKanban, Gauge, LayoutGrid, LogOut, Menu as MenuIcon, Moon, Plus, Settings, Shield, Sun, Users2, X,
+  BarChart3, Building2, ChevronRight, Contact, ChevronsUpDown, Database, FolderKanban, Gauge, HelpCircle, LayoutGrid, LogOut, Menu as MenuIcon, Moon, Plus, Settings, Shield, Sun, Users2, X,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
@@ -12,9 +12,16 @@ import { Logo } from "./Logo";
 import { Menu } from "../ui/overlay";
 import { AlertsBell } from "@/features/monitoring/AlertsBell";
 import { Tip } from "../ui/primitives";
+import { BillingNotice, useBilling } from "@/features/settings/BillingPanel";
 import { isNavActive, readCollapsedSections, visibleSections, writeCollapsedSections, type CollapsedSections, type NavIcon, type NavItemDefinition, type SectionId } from "./navigation";
 
-const ICONS: Record<NavIcon, LucideIcon> = { LayoutGrid, FolderKanban, Users2, Contact, Database, Gauge, BarChart3, Settings, Shield };
+const ICONS: Record<NavIcon, LucideIcon> = { LayoutGrid, FolderKanban, Users2, Contact, Database, Gauge, HelpCircle, BarChart3, Settings, Shield };
+
+function WorkspaceBalance({ plan, credits }: { plan?: string; credits?: number }) {
+  const billing = useBilling();
+  if (billing.data?.enabled) return <>{billing.data.active ? "Membership" : "Subscription needed"} · {fmt.k(billing.data.available)} credits</>;
+  return <><span className="capitalize">{plan}</span> plan · {fmt.k(credits)} credits</>;
+}
 
 function useTheme() {
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
@@ -75,6 +82,7 @@ function ShellContent({ userId }: { userId?: string }) {
           <AlertsBell />
         </div>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <BillingNotice />
           <Outlet />
         </main>
       </div>
@@ -114,7 +122,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line-strong bg-panel text-[11px] font-semibold text-muted">{initials(org?.name)}</div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-medium">{org?.name ?? "No workspace"}</div>
-              <div className="truncate text-xs text-muted"><span className="capitalize">{org?.plan}</span> plan · {fmt.k(org?.credits_balance)} credits</div>
+              <div className="truncate text-xs text-muted"><WorkspaceBalance plan={org?.plan} credits={org?.credits_balance} /></div>
             </div>
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-faint" />
           </button>
@@ -127,6 +135,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
       </div>
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {visibleSections(!!user?.is_superuser).map((section) => {
+          if (section.id === "main") return <div key={section.id} className="space-y-px">{section.items.map((item) => <NavItem key={item.to} {...item} />)}</div>;
           const current = section.items.find((item) => isNavActive(item, pathname));
           const isCollapsed = !!collapsed[section.id];
           const sectionId = `${navigationId}-${section.id}`;

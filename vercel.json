@@ -1,0 +1,51 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "backend": {
+      "root": "backend",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app"
+    },
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "buildCommand": "npm run build -- --base=/app/ --outDir dist/app",
+      "outputDirectory": "dist",
+      "devCommand": "npm run dev -- --base=/app/ --port $PORT",
+      "rewrites": [
+        {
+          "source": "/app",
+          "destination": "/app/index.html"
+        },
+        {
+          "source": "/app/((?!assets/|src/|node_modules/|@|favicon\\.svg$).*)",
+          "destination": "/app/index.html"
+        }
+      ]
+    },
+    "landing": {
+      "root": "landing-page/frontend",
+      "framework": "nextjs"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/app/:path*",
+      "destination": {
+        "service": "frontend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "landing"
+      }
+    }
+  ]
+}

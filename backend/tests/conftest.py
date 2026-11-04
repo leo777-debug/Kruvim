@@ -8,7 +8,7 @@ os.environ.update(KRUVIM_ENV="test", KRUVIM_DATA_DIR=_tmp,
     KRUVIM_DATABASE_URL="sqlite+aiosqlite:///" + os.path.join(_tmp, "test.db").replace("\\", "/"),
     KRUVIM_POPULATION_SIZE="40000", KRUVIM_REDIS_URL="", KRUVIM_RATE_LIMIT_AUTH_PER_MINUTE="1000",
     KRUVIM_LLM_PROVIDER="dryrun", KRUVIM_LLM_PRESET="dryrun", KRUVIM_LLM_API_KEY="",
-    KRUVIM_FIRST_SUPERUSER_EMAIL="", KRUVIM_FIRST_SUPERUSER_PASSWORD="")
+    KRUVIM_FIRST_SUPERUSER_EMAIL="", KRUVIM_FIRST_SUPERUSER_PASSWORD="", KRUVIM_BILLING_ENABLED="false")
 
 
 import httpx  # noqa: E402
@@ -22,14 +22,14 @@ async def isolated_state(monkeypatch, tmp_path):
     from app.core.config import settings
     from app.db.session import engine
     from app.models import Base
-    from app.services import jobs, lifecycle
+    from app.services import jobs, lifecycle, token_budget
     from app.services.events import bus
     from app.services.population import store
 
     await jobs.drain()
     saved = settings.model_copy(deep=True)
     monkeypatch.setattr(settings, "data_dir", str(tmp_path / "data"))
-    for cache in (ratelimit._local, jobs._local_ctl, lifecycle._start_locks, bus._seq, bus._locks, bus._local, store._cache):
+    for cache in (ratelimit._local, jobs._local_ctl, lifecycle._start_locks, token_budget.locks, bus._seq, bus._locks, bus._local, store._cache):
         cache.clear()
     jobs._local_sem = None
     async with engine.begin() as connection:

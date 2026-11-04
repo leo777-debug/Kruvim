@@ -29,6 +29,9 @@ class Organization(IdMixin, TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     plan: Mapped[str] = mapped_column(String(32), default="free")
     credits_balance: Mapped[int] = mapped_column(Integer, default=0)      # credits; 1 credit = 1 voice-agent-round
+    topup_balance: Mapped[int] = mapped_column(Integer, default=0)
+    daily_credits_used: Mapped[int] = mapped_column(Integer, default=0)
+    daily_credit_day: Mapped[str] = mapped_column(String(10), default='')
     max_concurrent: Mapped[int] = mapped_column(Integer, default=2)
     settings: Mapped[dict] = mapped_column(default=dict)
     memberships: Mapped[list[Membership]] = relationship(back_populates="org", cascade="all, delete-orphan")
