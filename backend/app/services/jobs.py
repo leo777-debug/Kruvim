@@ -33,16 +33,32 @@ async def _arq_pool():
     return _pool
 
 
+async def commit_and_enqueue(session, name, *, simulation=None, **payload):
+    if settings.redis_url:
+        from app.services.outbox import stage
+        job_id = stage(session, name, payload)
+        if simulation is not None:
+            simulation.job_id = job_id
+        await session.commit()
+        return job_id
+    await session.commit()
+    job_id = await enqueue(name, **payload)
+    if simulation is not None:
+        simulation.job_id = job_id
+        await session.commit()
+    return job_id
+
+
 async def enqueue(name: str, *, delay: float = 0, **kwargs) -> str:
     if settings.serverless and not settings.redis_url:
         from app.services.cloud_jobs import enqueue as cloud_enqueue
         return await cloud_enqueue(name, delay, kwargs)
     job_id = f"{name}:{uuid.uuid4().hex[:12]}"
     if settings.redis_url:
-        pool = await _arq_pool()
-        queue = "kruvim:connectors" if name == "run_connector" else "arq:queue"
-        await pool.enqueue_job(name, _job_id=job_id, _defer_by=delay, _queue_name=queue, **kwargs)
-        return job_id
+        from app.db.session import session_scope
+        from app.services.outbox import stage
+        async with session_scope() as session:
+            return stage(session, name, kwargs, delay)
     global _local_sem
     if _local_sem is None:
         _local_sem = asyncio.Semaphore(settings.worker_max_jobs)
@@ -120,4 +136,15 @@ async def queue_depth() -> dict:
     r = get_redis()
     if r is None:
         return {"mode": "in-process", "running": len(_local_tasks)}
-    return {"mode": "redis", "queued": int(await r.zcard("arq:queue"))}
+    from sqlalchemy import func, select
+
+    from app.db.base import utcnow
+    from app.db.session import session_scope
+    from app.models import CloudJob
+    async with session_scope() as s:
+        pending, oldest = (await s.execute(select(func.count(), func.min(CloudJob.created_at)).where(
+            CloudJob.status == "redis_pending"))).one()
+    async with r.pipeline(transaction=False) as pipe:
+        main, connectors = await pipe.zcard("arq:queue").zcard("kruvim:connectors").execute()
+    return {"mode": "redis", "queued": int(main) + int(connectors), "pending_delivery": pending,
+            "oldest_pending_seconds": max(0, int((utcnow() - oldest).total_seconds())) if oldest else 0}

@@ -14,6 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import Principal, get_project, get_sim, principal, role
 from app.api.routes.projects import sim_summary
+from app.core.config import settings
 from app.core.errors import AppError, Conflict, NotFound
 from app.db.base import utcnow
 from app.db.session import get_session
@@ -124,9 +125,7 @@ async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: Asy
     sim.config = {**(sim.config or {}), "autopilot": True}
     if sim.status == "completed":
         sim.report_status, sim.error = "queued", None
-        await s.commit()
-        sim.job_id = await jobs.enqueue("generate_report", sim_id=sim.id)
-        await s.commit()
+        await jobs.commit_and_enqueue(s, "generate_report", simulation=sim, sim_id=sim.id)
     elif (sim.config or {}).get("agents"):
         await lifecycle.queue_run(s, sim, p.user_id)
     elif (sim.ontology or {}).get("entity_types"):
@@ -369,8 +368,7 @@ async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")),
     if sim.report_status in ("queued", "running"):
         raise Conflict("A report is already being written.")
     sim.report_status = "queued"
-    await s.commit()
-    await jobs.enqueue("generate_report", sim_id=sim_id)
+    await jobs.commit_and_enqueue(s, "generate_report", simulation=sim, sim_id=sim_id)
     return {"ok": True}
 
 
@@ -480,10 +478,11 @@ async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role
     if res.metered:
         await check_tokens(s, p.org, estimate["max_credits"])
     sv.filters = {**filters, "reserved_credits": 0}
-    await s.commit()
     try:
-        await jobs.enqueue("run_survey", survey_id=sv.id)
+        await jobs.commit_and_enqueue(s, "run_survey", survey_id=sv.id)
     except Exception:
+        if settings.redis_url:
+            raise
         from app.services.quotas import ledger
         await ledger(s, p.org_id, 0, "survey_refund", sv.id)
         sv.status, sv.filters = "failed", {**filters, "reserved_credits": 0}

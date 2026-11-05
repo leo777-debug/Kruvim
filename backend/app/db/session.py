@@ -10,7 +10,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-_kwargs = {"pool_pre_ping": True}
+_kwargs = {"pool_pre_ping": True, "hide_parameters": True}
 if not settings.is_sqlite:
     if settings.serverless:
         import uuid
