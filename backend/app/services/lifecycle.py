@@ -23,6 +23,7 @@ _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status in LOCKED:
         raise Conflict("A step is already running for this simulation.")
     res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
@@ -48,6 +49,7 @@ async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
 async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status not in ("graph_ready", "ready", "completed", "failed", "cancelled"):
         raise Conflict("Build the graph first.")
     sim.status, sim.error = "preparing", None
@@ -65,6 +67,7 @@ async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None
 async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()

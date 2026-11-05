@@ -120,6 +120,7 @@ async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: Async
 @router.post("/simulations/{sim_id}/retry")
 async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status != "failed" and sim.report_status != "failed":
         raise Conflict("Only a failed test can be retried.")
     sim.config = {**(sim.config or {}), "autopilot": True}
@@ -363,6 +364,7 @@ async def get_report(sim_id: str, p: Principal = Depends(principal), s: AsyncSes
 @router.post("/simulations/{sim_id}/report")
 async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status != "completed":
         raise Conflict("Run the simulation first.")
     if sim.report_status in ("queued", "running"):
