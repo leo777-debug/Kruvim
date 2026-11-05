@@ -119,7 +119,10 @@ async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: Async
 
 @router.post("/simulations/{sim_id}/retry")
 async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    from app.services.billing import require_access
+
     sim = await get_sim(s, p, sim_id)
+    await require_access(s, sim.org_id)
     await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status != "failed" and sim.report_status != "failed":
         raise Conflict("Only a failed test can be retried.")
