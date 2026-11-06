@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 
 type Folder = { id: string; name: string; project_id: string | null; enabled: boolean; watch_enabled: boolean;
-  rows: number; inbox_path: string | null; storage: string; database_schema: string; supabase_url: string | null; supabase_storage_url: string | null; sync_status: { at?: string; errors?: string[] } };
+  rows: number; inbox_path: string | null; storage: string; supabase_storage_url: string | null; sync_status: { at?: string; errors?: string[] } };
 type Row = { id: string; title: string; data: string; region: string; language: string; tags: string; filename: string; revision: number };
 type Draft = Pick<Row, "title" | "data" | "region" | "language" | "tags">;
 type Preview = { headers: string[]; sample: Record<string, string>[]; rows: number };
@@ -108,11 +108,6 @@ function FolderTable({ folder, orgId, filter, setFilter, refresh }: { folder: Fo
         {folder.sync_status.at && <p>Last checked: {new Date(folder.sync_status.at).toLocaleString()}</p>}
         {folder.sync_status.errors?.map(error => <p key={error} role="alert" className="text-neg">{error}</p>)}
         {can("admin") && <Button loading={busy} onClick={() => perform(() => api(`/library/folders/${folder.id}/sync`, { json: {} }), "Inbox checked")}>Check inbox now</Button>}
-      </div>}
-      {folder.supabase_url && <div className="rounded-md bg-raised p-3 text-sm space-y-2">
-        <p>All workspace data lives in Supabase. To enter rows there, open Table Editor, select the <strong>{folder.database_schema}</strong> schema and <strong>library_entries</strong>. Use this folder ID:</p>
-        <code className="block break-all">{folder.id}</code>
-        <a className="text-brand underline" href={folder.supabase_url} target="_blank" rel="noreferrer">Open Supabase Table Editor</a>
       </div>}
     </Card>
     <Card className="space-y-3 p-4">
