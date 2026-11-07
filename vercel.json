@@ -4,7 +4,13 @@
     "backend": {
       "root": "backend",
       "framework": "fastapi",
-      "entrypoint": "app.main:app"
+      "entrypoint": "app.main:app",
+      "functions": {
+        "app/main.py": {
+          "maxDuration": 300,
+          "regions": ["fra1"]
+        }
+      }
     },
     "frontend": {
       "root": "frontend",
