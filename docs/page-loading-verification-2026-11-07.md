@@ -39,5 +39,58 @@ Validation:
   save/edit/CSV import/reload. No production accounts, research or provider calls
   are used by these browser tests.
 
-The release is based on live commit `f828521`, preserving its newer library and
-data-feed fixes. Only the focused frontend patch, its tests, and this note are added.
+The frontend release is based on live commit `f828521`, preserving its newer
+library and data-feed fixes. Commit `842aa41` adds the frontend patch and tests.
+
+## Hosted API follow-up
+
+Live logs also showed signed-in requests spending 2–3.4 seconds in the API.
+Supabase reports database region `eu-central-1` (Frankfurt); the previous service
+had no explicit regional placement. Commit `f2c8213` configures the backend
+function for `fra1` in the owning service and backend configuration. The local
+release preparation script preserves that placement in future releases.
+
+A temporary account measured the same authenticated endpoints before and after
+the configuration deployment, from the same client, without fetching any existing
+user's data. All responses returned HTTP 200:
+
+| Request | Before (two calls), ms | After (three calls), ms |
+| --- | --- | --- |
+| Projects | 2,552; 2,165 | 1,206; 704; 258 |
+| Runs | 2,828; 2,202 | 762; 254; 267 |
+| Account | 1,798; 1,376 | 443; 243; 224 |
+
+These sample request timings include client network overhead; the test workspace
+was empty. They are not a guarantee for every page or an existing large workspace.
+The final warm project/run handlers logged 59–83 ms internally.
+
+Production deployment `dpl_CbocTmWhhBDMPgKABTCsdNe2CFgf` reached READY and owns
+`kruvim-lp.vercel.app`. The live HTML preloads only the React vendor chunk, and
+the live entry contains the new page-loading boundary. The temporary account
+was signed out and deleted with its temporary workspace; database checks confirmed
+both were absent. No research, simulation, provider or billing records from
+existing workspaces were modified.
+
+## Blank-screen follow-up
+
+After a report of a white screen, a headless Edge browser exercised the live Home,
+My tests, Data pool, Data library, Settings, Help and public homepage. All rendered
+with no page errors in a fresh session. The temporary account was signed out and
+removed with its workspace; deletion was verified.
+
+The application had no React error boundary and no Vite failed-chunk recovery.
+An already-open tab can request old lazy-loaded filenames after deployment.
+That is a likely explanation for the report; the exact failing user tab was not
+available to confirm it.
+
+- Handle Vite preload errors by refreshing the asset map once, keeping the stored
+  session. A session-storage timestamp prevents a reload loop.
+- Show a clear Reload Kruvim control for persistent page/render failures.
+- Browser regression checks inject a real HTTP 404 for a page chunk, verify one
+  automatic reload and successful authenticated rendering, and check persistent
+  failures display recovery controls. Both desktop and mobile are covered.
+- TypeScript, production build, bundle budgets and navigation checks pass.
+- Initial browser run passed nine checks; its tenth reached the recovered page
+  but incorrectly expected a desktop-only Sign out button on mobile. The check
+  was corrected to verify the authenticated library controls instead, then the
+  missing-chunk cases were rerun on both viewports.
