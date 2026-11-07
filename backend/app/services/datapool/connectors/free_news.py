@@ -85,18 +85,21 @@ class GdeltEventsConnector(BaseConnector):
             latest -= timedelta(minutes=15)
         if not now - timedelta(hours=2) <= latest <= now:
             raise ValueError("GDELT latest event export is stale or future-dated")
-        out, seen, counts = [], set(), {}
+        out, seen, counts, downloaded = [], set(), {}, 0
         # Read the last hour to recover between ten-minute scheduler invocations.
         for offset in range(4):
             stamp = (latest - timedelta(minutes=15 * offset)).strftime("%Y%m%d%H%M%S")
             response = await client.get(BASE_URL + stamp + ".export.CSV.zip")
-            if offset and response.status_code == 404:
+            if response.status_code == 404:
                 continue
             response.raise_for_status()
+            downloaded += 1
             for item in parse_events(response.content, regions, now):
                 identity = (item.region, item.payload["event_id"])
                 if identity not in seen and counts.get(item.region, 0) < 10:
                     out.append(item)
                     seen.add(identity)
                     counts[item.region] = counts.get(item.region, 0) + 1
+        if not downloaded:
+            raise ValueError("GDELT recent event exports are unavailable")
         return out

@@ -97,6 +97,24 @@ async def test_announced_future_batch_uses_a_completed_batch():
     assert calls[1].url.path.endswith(f"{announced-timedelta(minutes=15):%Y%m%d%H%M%S}.export.CSV.zip")
 
 
+async def test_missing_newest_batch_uses_earlier_exports_and_all_missing_is_an_error():
+    now = datetime.now(UTC) - timedelta(minutes=1)
+    latest = f"{now:%Y%m%d%H%M%S}.export.CSV.zip"
+    def response(request):
+        if request.url.path.endswith("lastupdate.txt"):
+            return httpx.Response(200, text=latest)
+        if request.url.path.endswith(latest):
+            return httpx.Response(404)
+        return httpx.Response(200, content=zipped([record(now)]))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+        assert await GdeltEventsConnector().fetch(client, REGIONS, {}, {})
+    def missing(request):
+        return httpx.Response(200, text=latest) if request.url.path.endswith("lastupdate.txt") else httpx.Response(404)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(missing)) as client:
+        with pytest.raises(ValueError, match="unavailable"):
+            await GdeltEventsConnector().fetch(client, REGIONS, {}, {})
+
+
 async def test_free_records_reach_simulation_snapshot_and_deduplicate(monkeypatch):
     now = datetime.now(UTC)
     items = parse_events(zipped([record(now)]), REGIONS, now)
