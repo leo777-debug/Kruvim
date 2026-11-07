@@ -22,7 +22,7 @@ from .connectors import REGISTRY
 
 log = logging.getLogger("kruvim.datapool")
 MEASUREMENT_KINDS = {"weather", "tone", "economy", "natural_hazard"}
-ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key"}
+ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key", "world_monitor_api_key"}
 
 
 def env_secrets() -> dict:

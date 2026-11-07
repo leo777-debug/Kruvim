@@ -73,6 +73,8 @@ async def refresh(request: Request):
     authorize(request)
     from app.services.library import sync_due
     await sync_due()
+    from app.services.datapool.connectors.world_monitor import refresh_due
+    await refresh_due()
     from app.services.token_budget import tick
     from app.services.watchdog import check
     await check()

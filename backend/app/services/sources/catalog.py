@@ -16,6 +16,14 @@ def source(key, name, publisher, url, attributes, *, level="country", country="A
 
 
 CATALOG = [
+    source("world_monitor", "World Monitor news", "World Monitor", "https://www.worldmonitor.app/",
+        ["regional_headlines"], country="*", method="api", cadence="daily",
+        terms="https://www.worldmonitor.app/docs/eula",
+        licence="World Monitor subscription agreement. Customer-facing outputs require API Business or Enterprise. "
+                "Headline retention requires an agreement covering persistent simulation evidence.",
+        notes="Authenticated country-headlines API. Publisher attribution and article dates are retained. "
+              "Confirm access, redistribution and evidence retention before activation.",
+        config={"adapter": "world_monitor"}),
     source("fcsc_population", "FCSC UAE.Stat", "Federal Competitiveness and Statistics Centre", "https://uaestat.fcsc.gov.ae/en",
         ["population", "labour", "cpi", "household_expenditure", "trade"], method="api", cadence="annual",
         notes="Public SDMX population flow identified but returned HTTP 403 (Cloudflare) during verification. Download from UAE.Stat manually or request access; do not bypass the restriction. Map publisher code lists explicitly; other flows need separate mappings. Register-based figures retain their reference date, denominator and revision.",
