@@ -3,7 +3,7 @@ import { Progress, Status } from "@/components/ui/primitives";
 import { scoreColor } from "@/lib/colors";
 import type { SimSummary } from "@/lib/types";
 import { fmt, platformName } from "@/lib/utils";
-import { STATUS_LABEL, STATUS_TONE } from "./SimulationPage";
+import { STATUS_LABEL, STATUS_TONE } from "./status";
 
 export function SimTable({ rows, selected, onSelect }: { rows: SimSummary[]; selected?: string[]; onSelect?: (id: string, checked: boolean) => void }) {
   const nav = useNavigate();

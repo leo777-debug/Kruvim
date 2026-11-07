@@ -20,6 +20,7 @@ import { ReportStep } from "./steps/ReportStep";
 import { SimulationStep } from "./steps/SimulationStep";
 import { useSimulationStream } from "./useSimulationStream";
 import { SimpleResults } from "./SimpleResults";
+import { STATUS_LABEL, STATUS_TONE } from "./status";
 
 const STEPS = [
   { n: 1, key: "graph", label: "Knowledge graph", sub: "Entities and live context" },
@@ -28,15 +29,6 @@ const STEPS = [
   { n: 4, key: "report", label: "Results", sub: "Report and analysis" },
   { n: 5, key: "interaction", label: "Interviews", sub: "Agent chat and surveys" },
 ];
-
-export const STATUS_TONE: Record<string, "default" | "brand" | "pos" | "neg" | "warn" | "info"> = {
-  draft: "default", building_graph: "info", graph_ready: "brand", preparing: "info", ready: "brand", queued: "warn", running: "warn",
-  paused: "warn", completed: "pos", failed: "neg", cancelled: "default",
-};
-export const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft", building_graph: "Building graph", graph_ready: "Graph ready", preparing: "Preparing", ready: "Ready to run", queued: "Queued",
-  running: "Running", paused: "Paused", completed: "Completed", failed: "Failed", cancelled: "Cancelled",
-};
 
 export function reachable(sim: Simulation): number {
   const st = sim.status;

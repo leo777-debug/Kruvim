@@ -20,9 +20,9 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
-          charts: ["recharts"],
-          graph: ["react-force-graph-2d"],
-          markdown: ["react-markdown", "remark-gfm"],
+          // Let Rollup split feature dependencies automatically. Grouping entire
+          // dependency trees put shared helpers into charts/markdown, making
+          // the entry point download those libraries on every page.
         },
       },
     },

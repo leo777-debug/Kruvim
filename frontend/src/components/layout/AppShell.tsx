@@ -3,9 +3,10 @@ import {
   BarChart3, Building2, ChevronRight, Contact, ChevronsUpDown, Database, FolderKanban, Gauge, HelpCircle, LayoutGrid, LogOut, Menu as MenuIcon, Moon, Plus, Settings, Shield, Sun, Users2, X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useId, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { preloadRoute } from "@/lib/routes";
 import { refreshToken, useAuth } from "@/lib/auth";
 import { cn, fmt, initials } from "@/lib/utils";
 import { Logo } from "./Logo";
@@ -83,7 +84,9 @@ function ShellContent({ userId }: { userId?: string }) {
         </div>
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <BillingNotice />
-          <Outlet />
+          <Suspense fallback={<div role="status" className="p-6 text-sm text-muted">Loading page…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
@@ -178,7 +181,7 @@ function NavItem({ to, label, icon, end, description }: NavItemDefinition) {
   const isActive = isNavActive({ to, label, icon, end, description }, pathname);
   return (
     <Tip content={description} side="right" contentClassName="max-w-[calc(100vw-24px)] sm:max-w-none sm:whitespace-nowrap">
-      <NavLink to={to} end={end} className={cn("flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors",
+      <NavLink to={to} end={end} onPointerEnter={() => preloadRoute(to)} onFocus={() => preloadRoute(to)} className={cn("flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors",
         isActive ? "bg-line/70 font-medium text-fg" : "text-muted hover:bg-raised hover:text-fg")}>
         <Icon className="h-4 w-4" strokeWidth={1.75} />
         {label}

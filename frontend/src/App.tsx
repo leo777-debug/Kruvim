@@ -2,29 +2,30 @@ import { Loader2 } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
-import { api, refreshSession } from "./lib/api";
+import { refreshSession } from "./lib/api";
 import { useAuth } from "./lib/auth";
+import { pageLoaders, preloadRoute } from "./lib/routes";
 import { AuthPage, InvitePage } from "./features/auth/AuthPages";
 
-const Dashboard = lazy(() => import("./features/dashboard/DashboardPage"));
-const Help = lazy(() => import("./features/help/HelpPage"));
-const AllRuns = lazy(() => import("./features/simulations/AllRunsPage"));
-const Projects = lazy(() => import("./features/projects/ProjectsPage"));
-const Project = lazy(() => import("./features/projects/ProjectPage"));
-const NewSimulation = lazy(() => import("./features/simulations/NewSimulationPage"));
-const Simulation = lazy(() => import("./features/simulations/SimulationPage"));
-const DataPool = lazy(() => import("./features/datapool/DataPoolPage"));
-const Library = lazy(() => import("./features/datapool/LibraryPage"));
-const Population = lazy(() => import("./features/population/PopulationPage"));
-const Audiences = lazy(() => import("./features/audiences/AudiencesPage"));
-const Calibration = lazy(() => import("./features/calibration/CalibrationPage"));
-const MyAudience = lazy(() => import("./features/audiences/MyAudiencePage"));
-const PublicResults = lazy(() => import("./features/simulations/PublicResultsPage"));
-const PublicAccuracy = lazy(() => import("./features/calibration/PublicAccuracyPage"));
-const Settings = lazy(() => import("./features/settings/SettingsPage"));
-const Usage = lazy(() => import("./features/settings/UsagePage"));
-const Admin = lazy(() => import("./features/admin/AdminPage"));
-const Monitoring = lazy(() => import("./features/monitoring/MonitoringPage"));
+const Dashboard = lazy(pageLoaders.Dashboard);
+const Help = lazy(pageLoaders.Help);
+const AllRuns = lazy(pageLoaders.AllRuns);
+const Projects = lazy(pageLoaders.Projects);
+const Project = lazy(pageLoaders.Project);
+const NewSimulation = lazy(pageLoaders.NewSimulation);
+const Simulation = lazy(pageLoaders.Simulation);
+const DataPool = lazy(pageLoaders.DataPool);
+const Library = lazy(pageLoaders.Library);
+const Population = lazy(pageLoaders.Population);
+const Audiences = lazy(pageLoaders.Audiences);
+const Calibration = lazy(pageLoaders.Calibration);
+const MyAudience = lazy(pageLoaders.MyAudience);
+const PublicResults = lazy(pageLoaders.PublicResults);
+const PublicAccuracy = lazy(pageLoaders.PublicAccuracy);
+const Settings = lazy(pageLoaders.Settings);
+const Usage = lazy(pageLoaders.Usage);
+const Admin = lazy(pageLoaders.Admin);
+const Monitoring = lazy(pageLoaders.Monitoring);
 
 function Spinner() {
   return <div className="flex h-full items-center justify-center text-muted"><Loader2 className="h-5 w-5 animate-spin" /></div>;
@@ -44,21 +45,16 @@ function LegacyAudiences() {
 }
 
 export default function App() {
-  const { markReady, setOrgs } = useAuth();
+  const markReady = useAuth((state) => state.markReady);
   const signedIn = useAuth((state) => !!state.accessToken);
   useEffect(() => {
-    (async () => {
-      if (await refreshSession()) {
-        try {
-          const me = await api("/auth/me");
-          setOrgs(me.orgs, me.user);
-        } catch { /* handled by guard */ }
-      }
-      markReady();
-    })();
+    // Load the requested page while restoring the session. Refresh already
+    // returns the current user and workspaces; /auth/me adds a serial round trip.
+    preloadRoute(window.location.pathname.replace(import.meta.env.BASE_URL.replace(/\/$/, ""), "") || "/");
+    void refreshSession().finally(markReady);
     const t = setInterval(() => { if (useAuth.getState().accessToken) refreshSession(); }, 20 * 60 * 1000);
     return () => clearInterval(t);
-  }, [markReady, setOrgs]);
+  }, [markReady]);
 
   return (
     <Suspense fallback={<Spinner />}>
