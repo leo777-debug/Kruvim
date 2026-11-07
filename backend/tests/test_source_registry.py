@@ -25,7 +25,8 @@ async def test_registry_crud_licence_and_private_upload(client, auth):
     headers = auth[0]
     sources = (await client.get("/datapool/sources", headers=headers)).json()
     assert len(sources) >= 29
-    assert {x["key"] for x in sources if x["production_eligible"]} == {"wikipedia"}
+    assert {x["key"] for x in sources if x["production_eligible"]} == {
+        "wikipedia", "gdelt_events", "usgs_earthquakes", "nasa_eonet"}
     assert "CC0" in next(x["licence"] for x in sources if x["key"] == "wikipedia")
     source = next(x for x in sources if x["key"] == "scad_statistics")
     await make_super(auth, False)

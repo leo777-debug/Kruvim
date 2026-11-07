@@ -16,14 +16,14 @@ def source(key, name, publisher, url, attributes, *, level="country", country="A
 
 
 CATALOG = [
-    source("world_monitor", "World Monitor news", "World Monitor", "https://www.worldmonitor.app/",
-        ["regional_headlines"], country="*", method="api", cadence="daily",
-        terms="https://www.worldmonitor.app/docs/eula",
-        licence="World Monitor subscription agreement. Customer-facing outputs require API Business or Enterprise. "
-                "Headline retention requires an agreement covering persistent simulation evidence.",
-        notes="Authenticated country-headlines API. Publisher attribution and article dates are retained. "
-              "Confirm access, redistribution and evidence retention before activation.",
-        config={"adapter": "world_monitor"}),
+    source("gdelt_events", "GDELT free news events", "GDELT Project", "https://www.gdeltproject.org/",
+        ["regional_headlines", "coded_news_events"], country="*", method="api", cadence="daily",
+        terms="https://www.gdeltproject.org/about.html",
+        licence="GDELT Project datasets are available without fee for academic, commercial and governmental use. "
+                "Redistribution requires attribution and a link to the GDELT Project.",
+        notes="Public event records only. Original news URLs and GDELT attribution are retained. "
+              "Generated event labels describe automated coding; article text is not collected. Terms verified 2026-11-07.",
+        config={"adapter": "gdelt_events"}),
     source("fcsc_population", "FCSC UAE.Stat", "Federal Competitiveness and Statistics Centre", "https://uaestat.fcsc.gov.ae/en",
         ["population", "labour", "cpi", "household_expenditure", "trade"], method="api", cadence="annual",
         notes="Public SDMX population flow identified but returned HTTP 403 (Cloudflare) during verification. Download from UAE.Stat manually or request access; do not bypass the restriction. Map publisher code lists explicitly; other flows need separate mappings. Register-based figures retain their reference date, denominator and revision.",
@@ -167,6 +167,19 @@ for key, name, url, licence, attributes in CORE:
 
 # Only the aggregate pageview dataset is covered; no Wikipedia article text is collected.
 for entry in CATALOG:
+    if entry["key"] == "gdelt_events":
+        entry.update(status="active", licence_approved=True)
+    if entry["key"] == "usgs_earthquakes":
+        entry.update(status="active", licence_approved=True,
+            licence="USGS-produced event data are U.S. public domain. Credit USGS and preserve source links.",
+            terms_url="https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+            notes="Factual earthquake metadata only. Reuse terms verified 2026-11-07. Proximity is not an impact assessment.")
+    if entry["key"] == "nasa_eonet":
+        entry.update(status="active", licence_approved=True,
+            licence="Public NASA EONET factual event metadata for general information. Preserve NASA and underlying source references.",
+            terms_url="https://eonet.gsfc.nasa.gov/what-is-eonet",
+            notes="Structured natural-event metadata only. External article text and media are not collected. "
+                  "EONET describes event extent as approximate. Source disclosure does not imply NASA endorsement.")
     if entry["key"] == "wikipedia":
         entry.update(status="active", licence_approved=True,
             licence="Wikimedia aggregate analytics/pageview data: CC0 1.0. Article text has separate terms and is not imported.",

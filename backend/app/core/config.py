@@ -108,7 +108,6 @@ class Settings(BaseSettings):
     bluesky_handle: str = ""
     bluesky_app_password: str = ""
     open_meteo_api_key: str = ""  # Optional in development; paid customer API required in production.
-    world_monitor_api_key: str = ""
     datapool_refresh_minutes: int = 60
     youtube_client_id: str = ""
     youtube_client_secret: str = ""

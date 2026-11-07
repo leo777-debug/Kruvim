@@ -72,7 +72,7 @@ async def test_storage_snapshot_revisions_and_source_gating(monkeypatch):
     async with session_scope() as s:
         await ensure_sources(s)
         source = (await s.execute(select(DataSource).where(DataSource.key == "usgs_earthquakes"))).scalar_one()
-        assert not source.licence_approved
+        assert source.licence_approved
         source.status, source.licence_approved = "active", True
     assert await store_signals("usgs_earthquakes", items) == 1
     assert await store_signals("usgs_earthquakes", items) == 1

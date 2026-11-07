@@ -22,7 +22,7 @@ from .connectors import REGISTRY
 
 log = logging.getLogger("kruvim.datapool")
 MEASUREMENT_KINDS = {"weather", "tone", "economy", "natural_hazard"}
-ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key", "world_monitor_api_key"}
+ENV_SECRETS = {"reddit_client_id", "reddit_client_secret", "youtube_api_key", "x_bearer_token", "bluesky_handle", "bluesky_app_password", "open_meteo_api_key"}
 
 
 def env_secrets() -> dict:
@@ -185,3 +185,21 @@ async def run_due() -> list[dict]:
 
 def _aware(dt):
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+async def refresh_free_feeds():
+    """Claim due free-feed checks across hosted instances before fetching."""
+    await ensure_platform_connectors()
+    results = []
+    for key in ("gdelt_events", "usgs_earthquakes", "nasa_eonet"):
+        async with session_scope() as session:
+            row = (await session.execute(select(Connector).where(Connector.key == key,
+                Connector.org_id.is_(None)).with_for_update(skip_locked=True))).scalar_one_or_none()
+            now = utcnow()
+            if not row or not row.enabled or not row.interval_minutes:
+                continue
+            if row.last_run_at and _aware(row.last_run_at) + timedelta(minutes=row.interval_minutes) > now:
+                continue
+            row.last_run_at = now
+        results.append(await run_connector(key))
+    return results
