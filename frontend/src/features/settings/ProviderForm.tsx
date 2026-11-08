@@ -26,7 +26,7 @@ export function ProviderForm({ presets, current, endpoint, onSaved, canClear }: 
   const test = useMutation({ mutationFn: () => api(endpoint.test, { json: body() }), onSuccess: (r) => setResult(r) });
   const list = useMutation({ mutationFn: () => api(endpoint.models, { json: body() }), onSuccess: (r) => { setModels(r.models || []); if (r.error) toast.error(r.error); else toast.success(`${r.models.length} models found`); } });
   const groups = [
-    { label: "Cloud APIs", keys: ["deepseek", "openrouter", "openai", "anthropic", "groq", "together", "custom"] },
+    { label: "Cloud APIs", keys: ["mistral", "gemini", "deepseek", "openrouter", "openai", "anthropic", "groq", "together", "custom"] },
     { label: "Local and self-hosted", keys: ["ollama", "lmstudio", "llamacpp", "vllm"] },
     { label: "No model", keys: ["dryrun"] },
   ];

@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, Search, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,17 +12,19 @@ import { REGION_COLORS } from "@/lib/colors";
 import { useReference } from "@/lib/queries";
 import { fmt, platformName } from "@/lib/utils";
 import { ObservationMappingDialog, SourcesPanel } from "./SourcesPanel";
+import { usePoolQuery } from "./queries";
+import { PoolQueryState } from "./PoolQueryState";
 
 export default function DataPoolPage() {
   const [tab, setTab] = useState("world");
-  const orgId = useAuth((s) => s.orgId);
-  const health = useQuery({ queryKey: [orgId, "datapool-health"], queryFn: () => api("/datapool/health"), staleTime: 60_000 });
+  const health = usePoolQuery(["health"], "/datapool/health");
   return (
     <Page wide title="Data pool" subtitle="Live inputs every simulation is conditioned on: weather, news, news tone, attention, holidays, economy and social platforms. Fetched on a schedule and archived hourly so any past moment can be replayed. Survey data calibrates the population itself.">
       <UnderlineTabs value={tab} onChange={setTab} className="mb-5" tabs={[
         { key: "world", label: "Regions" }, { key: "signals", label: "Signals" }, { key: "connectors", label: "Connectors" },
         { key: "listen", label: "Social listening" }, { key: "barometers", label: "Survey data" }, { key: "sources", label: "Sources" },
       ]} />
+      <WorldMonitorFeeds />
       {!!health.data?.warnings?.length && <Callout tone="warn" className="mb-4"><strong>Some live inputs are excluded.</strong> {health.data.warnings.map((w: any) => <p key={w.source}>{w.message}</p>)}<p>Review Data pool → Sources to record permission or change reliability.</p></Callout>}
       {tab === "world" && <World />}
       {tab === "signals" && <Signals />}
@@ -35,7 +37,8 @@ export default function DataPoolPage() {
 }
 
 function World() {
-  const q = useQuery({ queryKey: ["world", "all"], queryFn: () => api("/datapool/world"), staleTime: 120_000 });
+  const q = usePoolQuery(["world"], "/datapool/world", true);
+  if (q.isError) return <PoolQueryState query={q} label="Regions" />;
   if (q.isLoading) return <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-72" />)}</div>;
   return (
     <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
@@ -50,6 +53,8 @@ function World() {
           </div>
           <div className="flex-1 px-4 py-3">
             <p dir="auto" className="text-[13px] leading-relaxed">{w.brief}</p>
+            {w.data_status === "unavailable" && <p className="mt-2 text-xs text-muted">No collected data yet. Check the feed statuses above.</p>}
+            {w.snapshot_at && <p className="mt-2 text-xs text-muted">Snapshot {fmt.ago(w.snapshot_at)}{w.data_status === "stale" ? " · awaiting the next scheduled update" : ""}</p>}
             <div className="mt-1 text-[11px] text-faint">{w.brief_by === "template" ? "Automatic summary. Connect a model for written briefs." : `Summary by ${w.brief_by}`}</div>
             <KV className="mt-3" rows={[
               ["News tone", w.tone?.avg != null ? `${w.tone.avg > 0 ? "+" : ""}${w.tone.avg.toFixed(1)}` : w.emirates ? "See emirate cards" : "Source unavailable"],
@@ -61,6 +66,8 @@ function World() {
             {w.events?.length > 0 && <div className="mt-2 space-y-1">{w.events.slice(0, 5).map((e: any, i: number) => <p key={i} className="text-[11px] text-muted">{e.name} · {signalLabel(e)}</p>)}</div>}
             <div className="mt-4 text-xs font-medium text-muted">Headlines</div>
             <ul className="mt-1 space-y-2 text-[13px]">{(w.news || []).slice(0, 4).map((n: any, i: number) => <li key={i} dir="auto"><span className="line-clamp-2">{n.title}</span><span className="block text-[11px] text-faint">{signalLabel(n)}</span></li>)}</ul>
+            {!w.news?.length && <p className="mt-1 text-xs text-muted">No recent headlines available for this region.</p>}
+            {!!w.natural_hazards?.length && <><div className="mt-3 text-xs font-medium text-muted">Nearby natural events</div>{w.natural_hazards.slice(0, 3).map((item: any, i: number) => <p key={i} className="mt-1 text-xs">{item.title}<span className="block text-faint">{signalLabel(item)}</span></p>)}</>}
             {w.trending?.length > 0 && <><div className="mt-3 text-xs font-medium text-muted">Most read</div>
               <div dir="auto" className="mt-1 space-y-1 text-[13px] text-muted">{w.trending.slice(0, 5).map((t: any, i: number) => <p key={i}>{t.title}<span className="block text-[11px] text-faint">{signalLabel(t)}</span></p>)}</div></>}
             {w.social?.length > 0 && <><div className="mt-3 text-xs font-medium text-muted">Social trends</div>
@@ -70,6 +77,24 @@ function World() {
       ))}
     </div>
   );
+}
+
+const WORLD_MONITOR_FEEDS = new Set(["gdelt_events", "usgs_earthquakes", "nasa_eonet", "wikipedia"]);
+
+function WorldMonitorFeeds() {
+  const q = usePoolQuery<any[]>(["connectors"], "/datapool/connectors", true);
+  return <Card className="mb-5 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">World Monitor public feeds</h2>
+      <Button size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>Reload status</Button></div>
+    <p className="mt-1 text-xs text-muted">Direct public upstream feeds, collected on a schedule. No World Monitor account or model key is needed to view them.</p>
+    <PoolQueryState query={q} label="Feed status" />
+    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{q.data?.filter(item => WORLD_MONITOR_FEEDS.has(item.key)).map(item => <div key={item.key} className="rounded border border-line p-3">
+      <a href={item.docs_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">{item.name}</a>
+      <div className="mt-1"><Status tone={item.last_status === "ok" && !item.freshness?.stale ? "pos" : "warn"}>{item.last_status === "ok" && !item.freshness?.stale ? "Connected" : item.last_status === "error" ? "Feed error" : item.last_status === "skipped" ? "Setup pending" : "Awaiting refresh"}</Status></div>
+      <p className="mt-1 text-xs text-muted">Checked {fmt.ago(item.last_run_at)} · {fmt.n(item.last_items)} new items</p>
+      {item.last_error && <p className="mt-1 text-xs text-muted">{item.last_error}</p>}
+    </div>)}</div>
+  </Card>;
 }
 
 function signalLabel(signal: any): string {
@@ -82,7 +107,7 @@ function signalLabel(signal: any): string {
 function Signals() {
   const ref = useReference();
   const [f, setF] = useState({ region: "", kind: "", source: "", hours: 24 });
-  const q = useQuery({ queryKey: ["signals", f], queryFn: () => api<any[]>(`/datapool/signals?${new URLSearchParams(Object.entries(f).filter(([, v]) => v).map(([k, v]) => [k, String(v)]))}&limit=300`) });
+  const q = usePoolQuery<any[]>(["signals", f], `/datapool/signals?${new URLSearchParams(Object.entries(f).filter(([, v]) => v).map(([k, v]) => [k, String(v)]))}&limit=300`);
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-end gap-3 border-b border-line p-3">
@@ -93,6 +118,8 @@ function Signals() {
         <span className="num ml-auto text-xs text-muted">{fmt.n(q.data?.length)} signals</span>
       </div>
       <div className="max-h-[640px] overflow-auto">
+        <PoolQueryState query={q} label="Signals" />
+        {!q.isPending && !q.isError && !q.data?.length && <Empty title="No signals match these filters">Try a wider time window or another region.</Empty>}
         <table className="dt min-w-[860px]">
           <thead><tr><th>Fetched</th><th>Source</th><th>Type</th><th>Region</th><th>Signal</th><th className="!text-right">Value</th></tr></thead>
           <tbody>{(q.data || []).map((s) => (
@@ -113,7 +140,7 @@ const CATEGORY_LABEL: Record<string, string> = { weather: "Weather", news: "News
 
 function Connectors() {
   const user = useAuth((s) => s.user);
-  const q = useQuery({ queryKey: ["connectors"], queryFn: () => api<any[]>("/datapool/connectors"), refetchInterval: 15000 });
+  const q = usePoolQuery<any[]>(["connectors"], "/datapool/connectors", true);
   const [edit, setEdit] = useState<any>(null);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const save = useMutation({
@@ -129,6 +156,7 @@ function Connectors() {
     <div className="space-y-4">
       {!user?.is_superuser && <Callout tone="info">Shared connectors are managed by platform administrators. You can add your organisation's own social credentials for live listening; they are encrypted and used only for your simulations.</Callout>}
       <Card className="overflow-hidden">
+        <PoolQueryState query={q} label="Connectors" />
         <div className="overflow-x-auto">
           <table className="dt min-w-[980px]">
             <thead><tr>{user?.is_superuser && <th className="w-12">On</th>}<th>Connector</th><th>Category</th><th>Status</th><th>Schedule</th><th className="!text-right">Last run</th><th className="!text-right">Items (last / total)</th><th className="w-48" /></tr></thead>
@@ -222,11 +250,11 @@ function Listen() {
 
 function Barometers() {
   const user = useAuth((s) => s.user);
-  const list = useQuery({ queryKey: ["datasets"], queryFn: () => api<any[]>("/datapool/datasets") });
-  const pop = useQuery({ queryKey: ["population"], queryFn: () => api("/datapool/population"), refetchInterval: 8000 });
+  const list = usePoolQuery<any[]>(["datasets"], "/datapool/datasets");
+  const pop = usePoolQuery(["population"], "/datapool/population", true);
   const input = useRef<HTMLInputElement>(null);
   const [mapFor, setMapFor] = useState<any>(null);
-  const sources = useQuery({ queryKey: ["sources"], queryFn: () => api<any[]>("/datapool/sources") });
+  const sources = usePoolQuery<any[]>(["sources"], "/datapool/sources");
   const [registered, setRegistered] = useState("");
   async function upload(file: File) {
     const fd = new FormData();
@@ -259,11 +287,12 @@ function Barometers() {
         <Card className="overflow-hidden">
           <CardHeader title="Datasets" divider actions={<Button size="sm" variant="primary" onClick={() => input.current?.click()}><Upload className="h-3.5 w-3.5" />Upload table</Button>} />
           <input ref={input} type="file" accept={registered ? ".csv,.tsv,.xlsx" : ".csv,.tsv,.txt"} className="hidden" onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0]); e.target.value = ""; }} />
-          {(list.data || []).length === 0 ? <Empty title="No datasets yet">Upload a CSV to start.</Empty> : (
+          <PoolQueryState query={list} label="Datasets" />
+          {!list.isPending && !list.isError && (list.data || []).length === 0 ? <Empty title="No datasets yet">Upload a CSV to start.</Empty> : (
             <div className="overflow-x-auto">
               <table className="dt min-w-[720px]">
                 <thead><tr><th>Dataset</th><th>Countries</th><th className="!text-right">Rows</th><th>Status</th><th className="w-44" /></tr></thead>
-                <tbody>{list.data!.map((d) => (
+                <tbody>{list.data?.map((d) => (
                   <tr key={d.id}>
                     <td><div className="font-medium">{d.name}</div><div className="text-xs text-muted">{d.source.replace("_", " ")} · {d.columns.length} columns · {fmt.day(d.created_at)}</div></td>
                     <td className="text-xs text-muted">{d.summary?.regions ? Object.entries(d.summary.regions).map(([k, v]: any) => `${k} (${fmt.n(v.respondents)})`).join(", ") : "–"}</td>
@@ -281,7 +310,9 @@ function Barometers() {
         </Card>
       </div>
       <Card className="h-fit overflow-hidden">
-        <CardHeader title="Population versions" subtitle={`Active: ${pop.data?.active?.label ?? "…"}`} divider />
+        <CardHeader title="Population versions" subtitle={`Active: ${pop.data?.active?.label ?? (pop.isPending ? "Loading" : "None")}`} divider />
+        <PoolQueryState query={pop} label="Population versions" />
+        {!pop.isPending && !pop.isError && !pop.data?.versions?.length && <Empty title="No population versions yet" />}
         <table className="dt">
           <thead><tr><th>Version</th><th>Status</th></tr></thead>
           <tbody>{(pop.data?.versions || []).map((v: any) => (

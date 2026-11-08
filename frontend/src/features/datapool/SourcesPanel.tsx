@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -7,10 +7,12 @@ import { Callout, Card, Empty, Field, Input, Status, Switch } from "@/components
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
+import { usePoolQuery } from "./queries";
+import { PoolQueryState } from "./PoolQueryState";
 
 export function SourcesPanel() {
   const admin = useAuth((s) => !!s.user?.is_superuser);
-  const q = useQuery({ queryKey: ["sources"], queryFn: () => api<any[]>("/datapool/sources") });
+  const q = usePoolQuery<any[]>(["sources"], "/datapool/sources");
   const [filter, setFilter] = useState("");
   const [pending, setPending] = useState(false);
   const [edit, setEdit] = useState<any>(null);
@@ -30,8 +32,8 @@ export function SourcesPanel() {
     <Callout tone="info" title="Public sources, with their limitations">Figures retain the publisher's period and geography. No missing cells are filled. Sources awaiting commercial reuse approval contribute no production weight. Synthetic priors are labelled “estimate, source pending”.</Callout>
     <div className="flex flex-wrap items-center gap-4"><Input className="max-w-md" aria-label="Search sources" placeholder="Search publisher or attribute…" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <label className="flex items-center gap-2 text-sm"><Switch checked={pending} onChange={setPending} />Pending import checklist</label></div>
-    {q.isError && <Callout tone="warn">Could not load the source registry.</Callout>}
-    {q.isLoading ? <p className="text-muted">Loading sources…</p> : !rows.length ? <Empty title="No matching sources" /> : <div className="grid min-w-0 gap-4 lg:grid-cols-2">{rows.map((r) => <Card key={r.id} className="min-w-0 space-y-3 p-4">
+    <PoolQueryState query={q} label="Sources" />
+    {!q.isPending && !q.isError && (!rows.length ? <Empty title="No matching sources" /> : <div className="grid min-w-0 gap-4 lg:grid-cols-2">{rows.map((r) => <Card key={r.id} className="min-w-0 space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><a href={r.url} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">{r.name}</a><Status tone={r.production_eligible ? "pos" : "warn"}>{r.status.replaceAll("_", " ")}</Status></div>
       <p className="text-xs text-muted">{r.publisher} · {r.country} · {r.geography_level} · {r.access_method.replaceAll("_", " ")} · {r.cadence}</p>
       <p className="break-words text-sm">{r.licence}</p>
@@ -44,7 +46,7 @@ export function SourcesPanel() {
         {admin && <Button size="sm" onClick={() => { setEdit(r); setConfigText(JSON.stringify(r.config || {}, null, 2)); setDraft({ reliability: r.reliability, status: r.status, licence: r.licence, notes: r.notes, config: r.config || {}, licence_approved: r.licence_approved, approval_note: "" }); }}>Edit source</Button>}
         {admin && r.config?.endpoint && ["table", "sdmx", "world_bank"].includes(r.config?.adapter) && <Button size="sm" loading={fetch.isPending && fetch.variables === r.id} onClick={() => fetch.mutate(r.id)}>Import public feed</Button>}
       </div>
-    </Card>)}</div>}
+    </Card>)}</div>)}
     <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)} title={`Edit ${edit?.name || "source"}`} footer={<><Button onClick={() => setEdit(null)}>Cancel</Button><Button variant="primary" disabled={!configValid} loading={save.isPending} onClick={() => save.mutate()}>Save source</Button></>}>
       <div className="space-y-3"><Field label="Reliability weight (0–1)"><Input type="number" min="0" max="1" step="0.05" value={draft.reliability ?? 0} onChange={(e) => setDraft({ ...draft, reliability: Number(e.target.value) })} /></Field>
         <Field label="Licence"><Input value={draft.licence || ""} onChange={(e) => setDraft({ ...draft, licence: e.target.value })} /></Field>

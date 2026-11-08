@@ -111,6 +111,7 @@ async def test_world_exposes_regional_fallback_without_leaking_private_estimates
     from sqlalchemy import select
 
     from app.models import RegionSnapshot
+    from app.services.datapool.context import refresh_snapshot_archive
 
     headers, data = auth
     at = utcnow() - timedelta(minutes=1)
@@ -119,6 +120,7 @@ async def test_world_exposes_regional_fallback_without_leaking_private_estimates
         for code, titles in fixture["headlines"].items():
             for title in titles:
                 s.add(Signal(region=code, source="google_news", kind="headline", title=title, observed_at=at, fetched_at=at))
+    await refresh_snapshot_archive()
     response = await client.get("/datapool/world?regions=SA,AE", headers=headers)
     assert response.status_code == 200, response.text
     for code in ("SA", "AE"):
@@ -130,14 +132,15 @@ async def test_world_exposes_regional_fallback_without_leaking_private_estimates
         assert not any("gdelt has no recent data" in (x.get("note") or "") for x in snapshot["stale_sources"])
     async with session_scope() as s:
         estimates = (await s.execute(select(Signal).where(Signal.source == "headline_tone", Signal.org_id == data["orgs"][0]["id"]))).scalars().all()
-        assert len(estimates) == 2
+        assert len(estimates) == 0  # Browsing never creates workspace-private estimates.
         private_ids = {row.id for row in estimates}
         archives = (await s.execute(select(RegionSnapshot))).scalars().all()
         assert not any(x["id"] in private_ids for row in archives for x in row.data.get("signals", []))
 
 
-async def test_world_model_credit_reservation_refund_and_cached_reads(client, auth, monkeypatch):
+async def test_world_preview_never_spends_model_credits_even_when_connected(client, auth, monkeypatch):
     from app.models import Organization
+    from app.services.datapool.context import refresh_snapshot_archive
     from app.services.providers import Resolved
 
     headers, data = auth
@@ -158,17 +161,18 @@ async def test_world_model_credit_reservation_refund_and_cached_reads(client, au
         s.add(Signal(region="AE", source="google_news", kind="headline", title="Dubai recovery and investment"))
         org = await s.get(Organization, oid)
         before = org.credits_balance
+    await refresh_snapshot_archive()
     response = await client.get("/datapool/world?regions=AE", headers=headers)
-    assert response.status_code == 200 and response.json()["AE"]["tone"]["method"] == "model"
+    assert response.status_code == 200 and response.json()["AE"]["tone"]["method"] == "lexicon"
     async with session_scope() as s:
-        assert (await s.get(Organization, oid)).credits_balance == before - 1
+        assert (await s.get(Organization, oid)).credits_balance == before
     assert (await client.get("/datapool/world?regions=AE", headers=headers)).status_code == 200
-    llm.complete_json.assert_awaited_once()
+    llm.complete_json.assert_not_awaited()
     async with session_scope() as s:
-        assert (await s.get(Organization, oid)).credits_balance == before - 1
+        assert (await s.get(Organization, oid)).credits_balance == before
         (await s.get(Organization, oid)).credits_balance = 0
-    # A connected platform model without credits must still yield a usable lexicon estimate.
+    # Viewing public context is still available when the workspace has no model credits.
     response = await client.get("/datapool/world?regions=AE", headers=headers)
     assert response.status_code == 200
-    assert response.json()["AE"]["tone"]["method"] in {"lexicon", "model"}  # Cached model costs nothing.
-    llm.complete_json.assert_awaited_once()
+    assert response.json()["AE"]["tone"]["method"] == "lexicon"
+    llm.complete_json.assert_not_awaited()

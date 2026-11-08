@@ -102,9 +102,9 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
   );
 }
 
-export function Checkbox({ checked, onChange, indeterminate, disabled }: { checked: boolean; onChange?: (v: boolean) => void; indeterminate?: boolean; disabled?: boolean }) {
+export function Checkbox({ checked, onChange, indeterminate, disabled, labelledBy }: { checked: boolean; onChange?: (v: boolean) => void; indeterminate?: boolean; disabled?: boolean; labelledBy?: string }) {
   return (
-    <button type="button" role="checkbox" aria-checked={indeterminate ? "mixed" : checked} disabled={disabled}
+    <button type="button" role="checkbox" aria-checked={indeterminate ? "mixed" : checked} aria-labelledby={labelledBy} disabled={disabled}
       onClick={(e) => { e.stopPropagation(); onChange?.(!checked); }}
       className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
         checked || indeterminate ? "border-brand bg-brand text-white" : "border-line-strong bg-panel hover:border-faint", disabled && "opacity-50")}>
@@ -115,11 +115,12 @@ export function Checkbox({ checked, onChange, indeterminate, disabled }: { check
 
 /** A labelled checkbox row, with an optional right-aligned figure (e.g. a count). */
 export function CheckRow({ checked, onChange, label, meta, sub }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; meta?: ReactNode; sub?: ReactNode }) {
+  const labelId = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded px-1.5 py-1 hover:bg-raised" onClick={() => onChange(!checked)}>
-      <Checkbox checked={checked} />
+    <label className="flex cursor-pointer items-center gap-2.5 rounded px-1.5 py-1 hover:bg-raised">
+      <Checkbox checked={checked} onChange={onChange} labelledBy={labelId} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] text-fg">{label}</span>
+        <span id={labelId} className="block truncate text-[13px] text-fg">{label}</span>
         {sub && <span className="block truncate text-xs text-muted">{sub}</span>}
       </span>
       {meta != null && <span className="num shrink-0 text-xs text-muted">{meta}</span>}

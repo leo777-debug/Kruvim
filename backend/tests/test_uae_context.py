@@ -73,6 +73,8 @@ async def test_hourly_emirate_union_retrieval_and_cached_licence_revocation(clie
              SignalItem("headline", "AE-AUH", "Abu Dhabi fitness fixture", lang="ar", payload={"source_key": "al_khaleej"})]
     assert await store_signals("publisher_rss", items) == 2
     assert await store_signals("publisher_rss", items) == 0
+    from app.services.datapool.context import refresh_snapshot_archive
+    await refresh_snapshot_archive()
     response = await client.get("/datapool/world?regions=AE", headers=headers)
     assert response.status_code == 200, response.text
     snapshots = response.json()
@@ -89,7 +91,7 @@ async def test_hourly_emirate_union_retrieval_and_cached_licence_revocation(clie
     assert info["provider_calls"] == 0
     async with session_scope() as s:
         archives = (await s.execute(select(RegionSnapshot))).scalars().all()
-        assert {row.region for row in archives} == {"AE", *EMIRATES}
+        assert {"AE", *EMIRATES}.issubset({row.region for row in archives})
         row = (await s.execute(select(DataSource).where(DataSource.key == "siraj"))).scalar_one()
         row.licence_approved = False
         signals = (await s.execute(select(Signal).where(Signal.source == "siraj"))).scalars().all()

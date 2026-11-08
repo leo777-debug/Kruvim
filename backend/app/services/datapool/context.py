@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
@@ -250,11 +250,11 @@ EMIRATE_CONTEXT_CODES = [r["code"] for r in EMIRATE_CONTEXT]
 
 
 async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,
-                       org_id: str | None = None, with_briefs: bool = True) -> dict[str, dict]:
+                       org_id: str | None = None, with_briefs: bool = True, preview: bool = False) -> dict[str, dict]:
     from app.services.datapool.connectors.hazards import timestamp
     cutoff = min(at or utcnow(), utcnow())
     expanded = list(dict.fromkeys([*codes, *([r["code"] for r in EMIRATE_CONTEXT] if "AE" in codes else [])]))
-    out = await _snapshots_at(expanded, at, llm, usage, org_id, with_briefs)
+    out = await saved_snapshots(expanded, cutoff) if preview else await _snapshots_at(expanded, at, llm, usage, org_id, with_briefs)
     # Hourly caching and archive replay must never preserve a revoked production entitlement.
     async with session_scope() as s:
         from app.services.sources import ensure_sources, signal_source
@@ -291,16 +291,67 @@ async def snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | Non
                 any(not sources.get(k, {}).get("production_eligible") for k in data["tone"].get("upstream_sources", []))):
                 data["tone"] = None
                 data["signals"] = [item for item in data["signals"] if item.get("kind") != "tone"]
-            if "local_time" in data:
+            if "local_time" in data and data.get("data_status") != "unavailable":
                 data["brief"], data["brief_by"] = template_brief(data), "template"
     if "AE" in codes:
         out["AE"] = aggregate_uae(out["AE"], {r["code"]: out[r["code"]] for r in EMIRATE_CONTEXT})
-        if not out["AE"].get("archived") and not out["AE"].get("archive_missing") and org_id is None:
+        if not preview and not out["AE"].get("archived") and not out["AE"].get("archive_missing") and org_id is None:
             async with session_scope() as s:
                 row = (await s.execute(select(RegionSnapshot).where(RegionSnapshot.region == "AE", RegionSnapshot.hour == hour_bucket(utcnow())))).scalar_one_or_none()
                 if row:
                     row.data, row.brief, row.brief_by = out["AE"], out["AE"]["brief"], "template"
     return out
+
+
+async def saved_snapshots(codes: list[str], at: datetime) -> dict[str, dict]:
+    """The dashboard is a bounded database read, never an upstream/model job."""
+    latest = select(RegionSnapshot.region, func.max(RegionSnapshot.hour).label("hour")).where(
+        RegionSnapshot.region.in_(codes), RegionSnapshot.hour <= at).group_by(RegionSnapshot.region).subquery()
+    async with session_scope() as s:
+        rows = (await s.execute(select(RegionSnapshot).join(latest, and_(
+            RegionSnapshot.region == latest.c.region, RegionSnapshot.hour == latest.c.hour)))).scalars().all()
+    saved = {row.region: row for row in rows}
+    out = {}
+    for code in codes:
+        reg = region(code)
+        row = saved.get(code)
+        data = clean_snapshot(row.data) if row and row.data else {}
+        available = bool(data.get("region") and data.get("local_time"))
+        local = at + timedelta(hours=reg["tz_offset"])
+        base = {"region": code, "name": reg["name"], "city": reg["city"], "local_time": local.strftime("%a %H:%M"),
+                "at": at.isoformat(), "signals": [], "news": [], "events": [], "economy": [], "trending": [],
+                "social": [], "natural_hazards": [], "freshness": [], "stale_sources": [], "weather": None, "tone": None}
+        out[code] = {**base, **data, "brief": row.brief if available and safe_title(row.brief) else "No collected regional snapshot is available yet. Public feeds refresh on a schedule.",
+                     "brief_by": row.brief_by if available else "template", "archived": False,
+                     "snapshot_at": _aware(row.hour).isoformat() if row else None,
+                     "data_status": "unavailable" if not available else "stale" if _aware(row.hour) < at - timedelta(hours=2) else "ready"}
+    return out
+
+
+async def refresh_snapshot_archive() -> int:
+    """Publish this hour's public context from collected signals, without model calls."""
+    now = utcnow()
+    bucket = hour_bucket(now)
+    async with session_scope() as s:
+        have = set((await s.execute(select(RegionSnapshot.region).where(RegionSnapshot.hour == bucket))).scalars())
+    count = 0
+    for code in CONTEXT_CODES:
+        if code in have:
+            continue
+        data = await build_snapshot_data(code, now)
+        async with session_scope() as s:
+            # A simulation may have published the same hour while collection ran.
+            exists = (await s.execute(select(RegionSnapshot.id).where(RegionSnapshot.region == code,
+                RegionSnapshot.hour == bucket))).scalar_one_or_none()
+            if not exists:
+                s.add(RegionSnapshot(region=code, hour=bucket, data=data, brief=template_brief(data), brief_by="template"))
+                try:
+                    await s.flush()
+                except IntegrityError:
+                    await s.rollback()
+                    continue
+                count += 1
+    return count
 
 
 async def _snapshots_at(codes: list[str], at: datetime | None, llm: BaseLLM | None = None, usage: Usage | None = None,

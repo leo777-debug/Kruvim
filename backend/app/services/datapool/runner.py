@@ -191,7 +191,7 @@ async def refresh_free_feeds():
     """Claim due free-feed checks across hosted instances before fetching."""
     await ensure_platform_connectors()
     results = []
-    for key in ("gdelt_events", "usgs_earthquakes", "nasa_eonet"):
+    for key in ("gdelt_events", "usgs_earthquakes", "nasa_eonet", "wikipedia"):
         async with session_scope() as session:
             row = (await session.execute(select(Connector).where(Connector.key == key,
                 Connector.org_id.is_(None)).with_for_update(skip_locked=True))).scalar_one_or_none()
