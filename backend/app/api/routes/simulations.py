@@ -98,7 +98,7 @@ async def create_sim(project_id: str, body: SimulationCreate, p: Principal = Dep
     await _check_assets(s, p, project_id, content)
     sim = Simulation(org_id=p.org_id, project_id=project_id, created_by=p.user_id, name=body.name, requirement=body.requirement,
                      content=content, audience=body.audience.model_dump(), publish_at=body.publish_at,
-                     config={"overrides": body.overrides.model_dump()})
+                     config={"overrides": body.overrides.model_dump(), "library_mode": body.library_mode})
     s.add(sim)
     audit.record(s, "simulation.create", org_id=p.org_id, user_id=p.user_id, target=sim.name)
     await s.commit()
@@ -137,6 +137,9 @@ async def update_sim(sim_id: str, body: SimulationUpdate, p: Principal = Depends
         raise Conflict("This simulation is busy; wait for the current step to finish.")
     data = body.model_dump(exclude_unset=True)
     graph_dirty = False
+    if data.get("library_mode") is not None:
+        sim.config = {**(sim.config or {}), "library_mode": data["library_mode"]}
+        graph_dirty = True
     if "name" in data:
         sim.name = data["name"]
     if "requirement" in data:

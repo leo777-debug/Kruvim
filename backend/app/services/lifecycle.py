@@ -116,7 +116,8 @@ async def make_copy(s: AsyncSession, sim: Simulation, mode: str = "edit", change
         content["variant_b"] = {k: content.get(k) for k in keys} | {"title": f"{content.get('title') or ''} (edited)"} | (changes or {})
         content["b_kind"] = "version"
         name = f"{sim.name} · re-test"
-    cfg = {"overrides": (sim.config or {}).get("overrides", {}), "autopilot": autopilot}
+    cfg = {"overrides": (sim.config or {}).get("overrides", {}), "autopilot": autopilot,
+           "library_mode": (sim.config or {}).get("library_mode", "private")}
     for k in ("watch_id",):
         if (sim.config or {}).get(k):
             cfg[k] = sim.config[k]

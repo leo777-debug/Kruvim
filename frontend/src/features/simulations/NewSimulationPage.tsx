@@ -51,6 +51,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   const formats = ref.data?.formats || [];
   const [name, setName] = useState("");
   const [req, setReq] = useState("");
+  const [libraryMode, setLibraryMode] = useState<"private" | "public">("private");
   const [format, setFormat] = useState("short_video");
   const [platform, setPlatform] = useState("tiktok");
   const [platformTouched, setPlatformTouched] = useState(false);
@@ -91,6 +92,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     setA({ ...blank(), ...c, poll_options: c.poll_options?.length ? c.poll_options : ["", ""], file: null, files: [] });
     if (c.variant_b) { setCompare(c.b_kind === "competitor" ? "competitor" : "version"); setB({ ...blank(), ...c.variant_b, poll_options: c.variant_b.poll_options?.length ? c.variant_b.poll_options : ["", ""] }); }
     setAud((a: any) => ({ ...a, ...s.audience }));
+    setLibraryMode(s.config?.library_mode === "public" ? "public" : "private");
     if (s.publish_at) { setWhen(new Date(s.publish_at) < new Date() ? "backtest" : "schedule"); setAt(s.publish_at.slice(0, 16)); }
     if (s.config?.overrides) setOv((o: any) => ({ ...o, ...s.config.overrides }));
   }, [existing.data]);
@@ -169,6 +171,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
         content: { format, platform, goal, source_url: link || undefined, creator_subject: creatorSubject || "workspace", creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
           variant_b: b ? { ...b, title: b.title || `${A.title || "Untitled"} (${compare === "competitor" ? "competitor" : "B"})` } : null },
         audience: cleanAud(aud),
+        library_mode: libraryMode,
         publish_at: when === "now" || !at ? null : new Date(at).toISOString(),
         overrides: ov,
       };
@@ -263,6 +266,13 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
           </Section>)}
 
           {!more && <Section title="Platform" desc="Where will you share it?"><Field label="Platform"><Select value={platform} onChange={(v) => { setPlatform(v); setPlatformTouched(true); }} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field></Section>}
+          <Section title="Research data" desc="Choose the evidence available to agents. Your content and results stay in your workspace.">
+            <Field label="Library mode"><Select value={libraryMode} onChange={v => setLibraryMode(v as "private" | "public")} options={[
+              { value: "private", label: "Private — admin baseline + your workspace data" },
+              { value: "public", label: "Public — also include community contributions" },
+            ]} /></Field>
+            <p className="text-sm text-muted">{libraryMode === "private" ? "Uses admin baseline and matching data from your workspace. Other users' contributions are excluded." : "Uses admin baseline, your workspace data and matching public contributions from all users. Broader evidence does not guarantee a representative opinion."} <Link to="/data-library" className="text-brand underline">Manage data</Link></p>
+          </Section>
           <Section title="Who it's for" desc="Start with a preset, use your own audience, or choose who should see it.">
             <div className="flex flex-wrap items-end gap-2">
               <Field label="Creator preset" help="Start with a suggested audience, then adjust its filters." className="min-w-0 basis-full sm:basis-auto sm:flex-1">

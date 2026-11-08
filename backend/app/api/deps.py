@@ -121,6 +121,12 @@ def role(min_role: str):
     return dep
 
 
+async def platform_pool(p: Principal = Depends(principal)) -> Principal:
+    if not p.is_superuser:
+        raise Forbidden("Data pool management is available only to platform administrators. Use the Data Library.")
+    return p
+
+
 async def superuser(user: User = Depends(current_user)) -> User:
     if not user.is_superuser:
         raise Forbidden("Platform administrators only.")

@@ -34,8 +34,8 @@ visit(app);
 
 const links = NAV_SECTIONS.flatMap((section) => section.items);
 assert.deepEqual(NAV_SECTIONS.map(({ label }) => label), ["", "Advanced"]);
-assert.deepEqual(NAV_SECTIONS[0].items.map(({label}) => label), ["Home", "My tests", "My audience", "Data pool", "Data library", "Settings", "Help"]);
-assert.equal(NAV_SECTIONS[0].items.length, 7);
+assert.deepEqual(NAV_SECTIONS[0].items.map(({label}) => label), ["Home", "My tests", "My audience", "Data library", "Settings", "Help"]);
+assert.equal(NAV_SECTIONS[0].items.length, 6);
 assert.equal(new Set(links.map(({ to }) => to)).size, links.length);
 for (const item of links) {
   assert.ok(paths.has(item.to), `${item.label} links to an undeclared route: ${item.to}`);
@@ -51,6 +51,8 @@ assert.equal(isNavActive(links.find((item) => item.to === "/projects"), "/projec
 assert.equal(isNavActive(links.find((item) => item.to === "/projects"), "/projects-old"), false);
 assert.equal(visibleSections(false).flatMap(({ items }) => items).some(({ to }) => to === "/admin"), false);
 assert.equal(visibleSections(true).flatMap(({ items }) => items).some(({ to }) => to === "/admin"), true);
+assert.equal(visibleSections(false).flatMap(({ items }) => items).some(({ to }) => to === "/data-pool"), false);
+assert.equal(visibleSections(true).flatMap(({ items }) => items).some(({ to }) => to === "/data-pool"), true);
 
 const saved = new Map();
 const storage = { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
@@ -65,4 +67,4 @@ assert.deepEqual(readCollapsedSections("bad", storage), {advanced: true});
 const blocked = {getItem: () => {throw new Error("blocked")}, setItem: () => {throw new Error("blocked")}};
 assert.deepEqual(readCollapsedSections("creator-a", blocked), {advanced: true});
 assert.doesNotThrow(() => writeCollapsedSections("creator-a", {advanced: false}, blocked));
-console.log(`Navigation: ${links.length} real routes, seven default items, admin visibility and per-user advanced preferences passed.`);
+console.log(`Navigation: ${links.length} real routes, six default items, platform-only data pool and per-user advanced preferences passed.`);

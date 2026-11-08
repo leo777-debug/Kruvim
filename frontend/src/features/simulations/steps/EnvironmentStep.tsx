@@ -94,6 +94,7 @@ export function EnvironmentStep({ sim, stream, onNext, refetch, onAgent }: { sim
           <Section title="Generated configuration">
             <KV rows={[["Start (UTC)", fmt.date(cfg.time?.start)], ["Rounds", `${cfg.time?.rounds} × ${cfg.time?.minutes_per_round} min`],
               ["Audience", `${fmt.n(cfg.audience_size)} agents`], ["Agents", `${fmt.n(cfg.agents?.voice)} voice · ${cfg.agents?.stakeholders} stakeholder · ${fmt.n(cfg.agents?.crowd)} crowd`],
+              ["Research data", cfg.library_mode === "public" ? "Public — admin + workspace + community" : "Private — admin + workspace"],
               ...(cfg.events?.hot_topics?.length ? [["Hot topics", cfg.events.hot_topics.join(", ")] as [string, string]] : [])]} />
             {cfg.events?.narrative && <p className="mt-3 text-[13px] leading-relaxed text-muted">{cfg.events.narrative}</p>}
             <div className="mt-4 space-y-4">

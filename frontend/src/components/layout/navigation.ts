@@ -19,12 +19,12 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     { to: "/", label: "Home", icon: "LayoutGrid", end: true, description: "Home: test a piece of content and see your recent results" },
     { to: "/tests", label: "My tests", icon: "FolderKanban", description: "My tests: find and open every test in your workspace" },
     { to: "/my-audience", label: "My audience", icon: "Contact", description: "My audience: import your analytics and match your own followers" },
-    { to: "/data-pool", label: "Data pool", icon: "Database", description: "Data pool: the local news, trends and sources behind your tests" },
     { to: "/data-library", label: "Data library", icon: "Database", description: "Data library: manage research folders and spreadsheets for customer projects" },
     { to: "/settings", label: "Settings", icon: "Settings", description: "Settings: manage your workspace, team and model connection" },
     { to: "/help", label: "Help", icon: "HelpCircle", description: "Help: learn how to test content and understand your results" },
   ] },
   { id: "advanced", label: "Advanced", items: [
+    { to: "/data-pool", label: "Data pool", icon: "Database", adminOnly: true, description: "Data pool: manage the platform's background feeds and sources" },
     { to: "/overview", label: "Overview", icon: "LayoutGrid", description: "Overview: detailed workspace activity, data coverage and usage" },
     { to: "/projects", label: "Projects", icon: "FolderKanban", description: "Projects: group your tests by campaign, client or channel" },
     { to: "/runs", label: "All runs", icon: "FolderKanban", description: "All runs: search and filter runs across every project" },

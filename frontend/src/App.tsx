@@ -44,6 +44,11 @@ function LegacyAudiences() {
   return <Navigate to={{ pathname: "/saved-audiences", search, hash }} replace />;
 }
 
+function PlatformDataPool() {
+  const allowed = useAuth(state => !!state.user?.is_superuser);
+  return allowed ? <DataPool /> : <Navigate to="/data-library" replace />;
+}
+
 export default function App() {
   const markReady = useAuth((state) => state.markReady);
   const signedIn = useAuth((state) => !!state.accessToken);
@@ -77,7 +82,7 @@ export default function App() {
           <Route path="projects/:projectId/new" element={<NewSimulation />} />
           <Route path="simulations/:simId" element={<Simulation />} />
           <Route path="simulations/:simId/edit" element={<NewSimulation />} />
-          <Route path="data-pool" element={<DataPool />} />
+          <Route path="data-pool" element={<PlatformDataPool />} />
           <Route path="data-library" element={<Library />} />
           <Route path="population" element={<Population />} />
           <Route path="saved-audiences" element={<Audiences />} />

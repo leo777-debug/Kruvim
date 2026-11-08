@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import Principal, current_user, principal, role
+from app.api.deps import Principal, current_user, platform_pool, principal, role
 from app.api.routes.sources import router as sources_router
 from app.core.config import settings
 from app.core.errors import AppError, Forbidden, NotFound
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/datapool", tags=["data pool"])
 router.include_router(sources_router)
 
 
-@router.get("/health")
+@router.get("/health", dependencies=[Depends(platform_pool)])
 async def signal_health(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     from app.services.sources import ensure_sources, signal_source
     await ensure_sources(s)
@@ -57,7 +57,7 @@ def _spec(key: str) -> dict:
             "supports_search": c.supports_search, "license_note": c.license_note, "docs_url": c.docs_url, "default_interval": c.interval_minutes}
 
 
-@router.get("/connectors")
+@router.get("/connectors", dependencies=[Depends(platform_pool)])
 async def connectors(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     await ensure_platform_connectors()
     rows = (await s.execute(select(Connector).where((Connector.org_id.is_(None)) | (Connector.org_id == p.org_id)))).scalars().all()
@@ -83,7 +83,7 @@ async def connectors(p: Principal = Depends(principal), s: AsyncSession = Depend
     return out
 
 
-@router.patch("/connectors/{key}")
+@router.patch("/connectors/{key}", dependencies=[Depends(platform_pool)])
 async def update_connector(key: str, body: dict, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session),
                            user: User = Depends(current_user)):
     """Superusers manage the platform connector (schedule, enabled, shared credentials). Org admins may store
@@ -111,7 +111,7 @@ async def update_connector(key: str, body: dict, p: Principal = Depends(role("ad
     return {"ok": True}
 
 
-@router.post("/connectors/{key}/run")
+@router.post("/connectors/{key}/run", dependencies=[Depends(platform_pool)])
 async def run_connector(key: str, p: Principal = Depends(role("admin")), user: User = Depends(current_user)):
     if key not in REGISTRY:
         raise NotFound("Unknown connector.")
@@ -121,7 +121,7 @@ async def run_connector(key: str, p: Principal = Depends(role("admin")), user: U
     return {"ok": True, "job_id": job}
 
 
-@router.get("/signals")
+@router.get("/signals", dependencies=[Depends(platform_pool)])
 async def signals(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session), region: str | None = None,
                   kind: str | None = None, source: str | None = None, hours: int = 24, limit: int = 200):
     since = datetime.now(UTC) - timedelta(hours=max(1, min(hours, 24 * 30)))
@@ -186,7 +186,7 @@ async def world(p: Principal = Depends(principal), regions: str = "", at: dateti
             await llm.aclose()
 
 
-@router.post("/listen")
+@router.post("/listen", dependencies=[Depends(platform_pool)])
 async def listen_route(body: dict, p: Principal = Depends(role("member"))):
     q = str(body.get("query") or "").strip()
     if len(q) < 2:
@@ -196,7 +196,7 @@ async def listen_route(body: dict, p: Principal = Depends(role("member"))):
 
 
 # ---- barometer datasets ----------------------------------------------------------------------------------
-@router.get("/datasets")
+@router.get("/datasets", dependencies=[Depends(platform_pool)])
 async def datasets(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     rows = (await s.execute(select(Dataset).where((Dataset.org_id == p.org_id) | (Dataset.org_id.is_(None))).order_by(desc(Dataset.created_at)))).scalars().all()
     return [{"id": d.id, "name": d.name, "source": d.source, "filename": d.filename, "rows": d.rows, "columns": d.columns, "preview": d.preview[:5],
@@ -205,7 +205,7 @@ async def datasets(p: Principal = Depends(principal), s: AsyncSession = Depends(
             for d in rows]
 
 
-@router.post("/datasets")
+@router.post("/datasets", dependencies=[Depends(platform_pool)])
 async def upload_dataset(file: UploadFile = File(...), name: str = Form(""), source: str = Form("custom"),
                          registered_source_id: str = Form(""),
                          p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
@@ -237,7 +237,7 @@ async def upload_dataset(file: UploadFile = File(...), name: str = Form(""), sou
     return {"id": d.id, "columns": d.columns, "preview": d.preview, "rows": d.rows, "registered_source_id": d.registered_source_id}
 
 
-@router.put("/datasets/{dataset_id}/mapping")
+@router.put("/datasets/{dataset_id}/mapping", dependencies=[Depends(platform_pool)])
 async def map_dataset(dataset_id: str, mapping: dict, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     d = (await s.execute(select(Dataset).where(and_(Dataset.id == dataset_id, Dataset.org_id == p.org_id)))).scalar_one_or_none()
     if not d:
@@ -263,7 +263,7 @@ async def map_dataset(dataset_id: str, mapping: dict, p: Principal = Depends(rol
     return {"summary": summary}
 
 
-@router.post("/datasets/{dataset_id}/apply")
+@router.post("/datasets/{dataset_id}/apply", dependencies=[Depends(platform_pool)])
 async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     if not user.is_superuser:
         raise Forbidden("Recalibrating the shared population requires a platform administrator.")

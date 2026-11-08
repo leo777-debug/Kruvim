@@ -22,7 +22,8 @@ LABEL = "Simulated memories; these describe synthetic experiences, not real foll
 
 
 def creator_subject(sim):
-    return "creator:" + (slug((sim.content or {}).get("creator_subject") or "workspace")[:120] or "workspace")
+    return "creator:" + (slug((sim.content or {}).get("creator_subject") or "workspace")[:120] or "workspace") + (
+        ":public" if (sim.config or {}).get("library_mode") == "public" else "")
 
 
 def person_key(ref, persona=None):
@@ -31,7 +32,8 @@ def person_key(ref, persona=None):
 
 def topic_subject(sim):
     topics = {k: v for k, v in (sim.card or {}).get("topics", {}).items() if k in INTERESTS}
-    return "topic:" + (max(topics, key=topics.get) if topics else "general")
+    return "topic:" + (max(topics, key=topics.get) if topics else "general") + (
+        ":public" if (sim.config or {}).get("library_mode") == "public" else "")
 
 
 def query_text(card):
@@ -66,6 +68,8 @@ def rule_memories(agent, sim, posts, actions, events):
     own_ids = [p.id for p in posts if p.kind in ("post", "comment", "quote")]
     rows = []
     def add(kind, subject, text, ids=None, weight=importance):
+        if (sim.config or {}).get("library_mode") == "public" and not subject.endswith(":public"):
+            subject += ":public"
         rows.append({"kind": kind, "subject": subject, "text": text, "importance": round(weight, 3),
                      "sentiment": round(sentiment, 3), "source_post_ids": ids or []})
     ending = "; I lost interest before the ending" if r.get("drop_segment") else "; I stayed interested through the ending"
@@ -222,7 +226,12 @@ def ranked_memories(rows, query_vector, now, k=6, budget=150):
     return selected
 
 
-async def recall_many(s, org, refs, card, now=None, fresh=False, record=True):
+def library_memory_scope(mode):
+    return AgentMemory.source_simulation_id.in_(select(Simulation.id).where(
+        func.coalesce(Simulation.config["library_mode"].as_string(), "private") == mode))
+
+
+async def recall_many(s, org, refs, card, now=None, fresh=False, record=True, library_mode=None):
     """Batch candidate reads, pgvector cosine on Postgres, native embeddings on SQLite."""
     now = now or utcnow()
     out = {ref: [] for ref in refs}
@@ -233,6 +242,8 @@ async def recall_many(s, org, refs, card, now=None, fresh=False, record=True):
         query = select(AgentMemory).where(AgentMemory.org_id == org.id,
             AgentMemory.population_ref.in_(refs[offset:offset + 200]), AgentMemory.superseded_by.is_(None),
             AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)), AgentMemory.created_at <= now)
+        if library_mode is not None:
+            query = query.where(library_memory_scope(library_mode))
         pg = s.bind.dialect.name == "postgresql"
         if pg:
             query = query.add_columns(1 - AgentMemory.embedding.cosine_distance(query_vector.tolist()))
@@ -259,15 +270,16 @@ async def attach_snapshot(org_id, sim_id, card, agents, fresh=False):
     now = utcnow()
     async with session_scope() as s:
         org = (await s.execute(select(Organization).where(Organization.id == org_id).with_for_update())).scalar_one()
+        run = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar_one()
+        mode = (run.config or {}).get("library_mode", "private")
         keys = [person_key(ref, persona) for ref, persona in agents]
-        recalled = await recall_many(s, org, keys, card, now, fresh=fresh)
+        recalled = await recall_many(s, org, keys, card, now, fresh=fresh, library_mode=mode)
         snapshot = {ref: recalled.get(key, []) for (ref, _), key in zip(agents, keys, strict=True)}
         opinions = {}
         if not fresh:
-            run = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar_one()
             query_vector = embed(query_text(card))
             for offset in range(0, len(keys), 200):
-                rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org_id,
+                rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == org_id, library_memory_scope(mode),
                     AgentMemory.population_ref.in_(keys[offset:offset + 200]), AgentMemory.kind == "opinion",
                     AgentMemory.subject.in_([creator_subject(run), topic_subject(run)]), AgentMemory.importance >= .65,
                     AgentMemory.superseded_by.is_(None), AgentMemory.created_at <= now,

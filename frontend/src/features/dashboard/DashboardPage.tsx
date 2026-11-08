@@ -14,6 +14,7 @@ import { SimTable } from "../simulations/SimTable";
 
 export default function DashboardPage() {
   const orgId = useAuth((s) => s.orgId);
+  const isPlatformAdmin = useAuth(s => !!s.user?.is_superuser);
   const nav = useNavigate();
   const sims = useQuery({ queryKey: [orgId, "sims"], queryFn: () => api<SimSummary[]>("/simulations?limit=50"), refetchInterval: 10000 });
   const usage = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
@@ -81,7 +82,7 @@ export default function DashboardPage() {
         <div className="space-y-5">
           <Card className="overflow-hidden">
             <CardHeader title="Regional context" subtitle="Live inputs agents are conditioned on this hour" divider
-              actions={<Link to="/data-pool" className="text-[13px] text-brand hover:underline">Data pool</Link>} />
+              actions={isPlatformAdmin ? <Link to="/data-pool" className="text-[13px] text-brand hover:underline">Data pool</Link> : <Link to="/data-library" className="text-[13px] text-brand hover:underline">Data library</Link>} />
             {world.isLoading ? <div className="space-y-2 p-4"><Skeleton /><Skeleton /></div> : (
               <table className="dt">
                 <thead><tr><th>Region</th><th className="!text-right">Local</th><th className="!text-right">Temp.</th><th>Top story</th></tr></thead>

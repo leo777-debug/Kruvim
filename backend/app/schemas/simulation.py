@@ -97,6 +97,7 @@ class OverridesIn(BaseModel):
 
 
 class SimulationCreate(BaseModel):
+    library_mode: Literal["private", "public"] = "private"
     name: str = Field(default="Untitled simulation", max_length=200)
     requirement: str = Field(default="", max_length=4000)
     content: ContentIn
@@ -106,6 +107,7 @@ class SimulationCreate(BaseModel):
 
 
 class SimulationUpdate(BaseModel):
+    library_mode: Literal["private", "public"] | None = None
     name: str | None = Field(default=None, max_length=200)
     requirement: str | None = Field(default=None, max_length=4000)
     content: ContentIn | None = None

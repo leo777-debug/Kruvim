@@ -6,7 +6,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, case, or_, select
 
 from app.core.config import settings
 from app.core.errors import AppError
@@ -192,29 +192,51 @@ async def sync_due(org_id=None):
             await sync_folder(s, folder)
 
 
-async def retrieve(org_id, project_id, query, personas, limit=3):
+async def retrieve(org_id, project_id, query, personas, limit=3, *, mode="private"):
     from app.services.datapool.context import tokens
     from app.services.datapool.retrieval import personal_match
     if settings.storage_backend == "supabase":
         # Catch files uploaded directly in Supabase even between scheduled scans.
         await sync_due(org_id)
     query_tokens = set(tokens(query))
+    own_scope = and_(LibraryFolder.org_id == org_id,
+        or_(LibraryFolder.project_id.is_(None), LibraryFolder.project_id == project_id))
+    visible = or_(own_scope, LibraryFolder.visibility == "baseline")
+    if mode == "public":
+        visible = or_(visible, LibraryFolder.visibility == "public")
     async with session_scope() as s:
         rows = (await s.execute(select(LibraryEntry, LibraryFolder).join(LibraryFolder).where(
-            LibraryFolder.org_id == org_id, LibraryFolder.enabled.is_(True),
-            or_(LibraryFolder.project_id.is_(None), LibraryFolder.project_id == project_id))
-            .order_by(LibraryEntry.id).limit(25000))).all()
+            visible, LibraryFolder.enabled.is_(True))
+            .order_by(case((LibraryFolder.org_id == org_id, 0), (LibraryFolder.visibility == "baseline", 1), else_=2),
+                      LibraryEntry.id).limit(25000))).all()
         candidates = []
         for entry, folder in rows:
             words = set(tokens(entry.title + " " + entry.tags + " " + entry.data))
             overlap = len(words & query_tokens)
             if not overlap:
                 continue
-            candidates.append((overlap / max(1, len(words)) ** .5, {
+            group = "baseline" if folder.visibility == "baseline" else "own" if folder.org_id == org_id else "community"
+            candidates.append((overlap / max(1, len(words)) ** .5, group, {
                 "id": "library:" + entry.id, "source": "workspace_library", "title": entry.title,
                 "summary": entry.data, "region": entry.region, "language": entry.language,
                 "tags": entry.tags, "source_weight": 1, "folder_id": folder.id, "folder": folder.name,
-                "filename": entry.filename or "Typed row", "revision": entry.revision,
-                "provenance": {"label": "User-supplied evidence; not independently verified", "workspace_private": True}}))
-    candidates.sort(key=lambda item: (-item[0], item[1]["id"]))
-    return [[e for _, e in candidates if personal_match(e, person)][:limit] for person in personas]
+                "filename": (entry.filename or "Typed row") if folder.org_id == org_id else "Shared evidence",
+                "revision": entry.revision, "visibility": folder.visibility,
+                "provenance": {"label": "Admin baseline; not independently verified" if group == "baseline"
+                    else "User-supplied evidence; not independently verified",
+                    "workspace_private": folder.visibility == "private", "library_group": group}}))
+    candidates.sort(key=lambda item: (-item[0], item[2]["id"]))
+    result = []
+    for person in personas:
+        matching = [(group, evidence) for _, group, evidence in candidates if personal_match(evidence, person)]
+        selected = []
+        # Preserve a place for each relevant source group instead of allowing a large
+        # community upload to crowd out the customer's own data or admin baseline.
+        for group in ("baseline", "own", "community"):
+            item = next((e for g, e in matching if g == group), None)
+            if item and len(selected) < limit:
+                selected.append(item)
+        chosen = {e["id"] for e in selected}
+        selected.extend(e for _, e in matching if e["id"] not in chosen)
+        result.append(selected[:limit])
+    return result

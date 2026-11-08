@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EntryIn(BaseModel):
@@ -24,3 +26,11 @@ class FolderIn(BaseModel):
     project_id: str | None = None
     enabled: bool = True
     watch_enabled: bool = False
+    visibility: Literal["private", "public", "baseline"] = "private"
+    publish_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def shared_scope(self):
+        if self.visibility != "private" and self.project_id:
+            raise ValueError("Public and admin baseline folders apply across projects.")
+        return self

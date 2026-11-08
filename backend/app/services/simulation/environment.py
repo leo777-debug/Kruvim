@@ -68,8 +68,10 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         publish_at = sim.publish_at or datetime.now(UTC)
         org_id = sim.org_id
         library_project_id = sim.project_id
+        library_mode = (sim.config or {}).get("library_mode", "private")
         org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
-        creator_memory = (org.settings or {}).get("creator_memory", {}).get("summary", "")
+        memory_key = "creator_memory_public" if library_mode == "public" else "creator_memory"
+        creator_memory = (org.settings or {}).get(memory_key, {}).get("summary", "")
         creator_memory += "\n" + (org.settings or {}).get("creator_memory", {}).get("real_summary", "")
         from app.services.source_weights import learned_weights
         topics = card.get("topics") or {}
@@ -131,7 +133,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     retrieved, retrieval_usage = await prepare_retrieval(org_id, personas, card, context, llm, usage)
     from app.services.library import retrieve as retrieve_library
     library_evidence = await retrieve_library(org_id, library_project_id,
-        requirement + " " + json.dumps(card, ensure_ascii=False), personas)
+        requirement + " " + json.dumps(card, ensure_ascii=False), personas, mode=library_mode)
     retrieved = [live + private for live, private in zip(retrieved, library_evidence, strict=True)]
     retrieval_usage["library_rows"] = len({e["id"] for group in library_evidence for e in group})
     regions_in = sorted({p["region"] for p in personas})
@@ -260,6 +262,7 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
             "context": context, "overrides": (sim.config or {}).get("overrides", {}),
             "audience_twin": twin, "creator_memory": creator_memory, "accuracy_live_model": not llm.is_dry,
             "retrieval_usage": retrieval_usage,
+            "library_mode": library_mode,
             "agent_memory": memory_snapshot,
             "population_version": pop.version, "population_provenance": pop.provenance,
         }

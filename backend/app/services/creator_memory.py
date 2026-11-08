@@ -10,7 +10,8 @@ async def update_memory(org_id, sim_id):
     async with session_scope() as s:
         sim = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar_one()
         org = (await s.execute(select(Organization).where(Organization.id == org_id).with_for_update())).scalar_one()
-        memory = dict((org.settings or {}).get("creator_memory", {}))
+        memory_key = "creator_memory_public" if (sim.config or {}).get("library_mode") == "public" else "creator_memory"
+        memory = dict((org.settings or {}).get(memory_key, {}))
         observations = [x for x in memory.get("observations", []) if x["simulation_id"] != sim_id]
         result = sim.results or {}
         observations.append({"simulation_id": sim_id, "title": sim.name, "score": result.get("score", {}).get("mean"),
@@ -24,4 +25,4 @@ async def update_memory(org_id, sim_id):
                             for x in observations[-5:])[:1800]
         memory = {**memory, "observations": observations, "summary": summary, "updated_at": utcnow().isoformat(),
                   "note": "Learned from simulated reactions; use linked real outcomes to evaluate accuracy."}
-        org.settings = {**(org.settings or {}), "creator_memory": memory}
+        org.settings = {**(org.settings or {}), memory_key: memory}
