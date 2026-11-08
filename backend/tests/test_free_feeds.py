@@ -131,8 +131,8 @@ async def test_free_records_reach_simulation_snapshot_and_deduplicate(monkeypatc
 async def test_hosted_refresh_claims_only_free_sources_once(monkeypatch):
     run = AsyncMock(return_value={"status": "ok", "items": 1})
     monkeypatch.setattr("app.services.datapool.runner.run_connector", run)
-    assert len(await refresh_free_feeds()) == 3
+    assert len(await refresh_free_feeds()) == 4
     assert await refresh_free_feeds() == []
-    assert [call.args[0] for call in run.await_args_list] == ["gdelt_events", "usgs_earthquakes", "nasa_eonet"]
+    assert [call.args[0] for call in run.await_args_list] == ["gdelt_events", "usgs_earthquakes", "nasa_eonet", "wikipedia"]
     assert "world_monitor" not in REGISTRY
     assert all(not REGISTRY[key].spec.secrets for key in ("gdelt_events", "usgs_earthquakes", "nasa_eonet"))

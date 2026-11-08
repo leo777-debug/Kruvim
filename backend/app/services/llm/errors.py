@@ -21,11 +21,11 @@ QUOTA_CODES = {'insufficient_quota', 'credit_balance_exhausted', 'organization_s
 def provider_name(settings):
     host = urlparse(settings.base_url).hostname or ''
     for key in PROVIDERS:
-        if key in settings.preset or key in host or key == settings.provider:
+        if key in settings.preset or key in host:
             return key
     if 'generativelanguage.googleapis.com' in host:
         return 'gemini'
-    return 'custom'
+    return settings.provider if settings.provider in PROVIDERS else 'custom'
 
 
 def local_model(settings):

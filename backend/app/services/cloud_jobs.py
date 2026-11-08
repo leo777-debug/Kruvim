@@ -75,6 +75,8 @@ async def refresh(request: Request):
     await sync_due()
     from app.services.datapool.runner import refresh_free_feeds
     await refresh_free_feeds()
+    from app.services.datapool.context import refresh_snapshot_archive
+    await refresh_snapshot_archive()
     from app.services.token_budget import tick
     from app.services.watchdog import check
     await check()
