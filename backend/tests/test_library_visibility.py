@@ -138,7 +138,8 @@ async def test_members_share_workspace_data_but_cannot_modify_baseline(client, a
 
 
 async def test_public_experiences_do_not_carry_into_private_agent_memory(client, auth):
-    from app.services.agent_memory import attach_snapshot
+    from app.models import Simulation
+    from app.services.agent_memory import attach_snapshot, detail_memory
     from app.services.datapool.retrieval import embed
 
     h, session = auth
@@ -156,3 +157,8 @@ async def test_public_experiences_do_not_carry_into_private_agent_memory(client,
         snapshot = await attach_snapshot(org_id, runs[mode]['id'], {'title': 'coffee'}, [('p:1', {})])
         texts = [m['text'] for m in snapshot['snapshots']['p:1']]
         assert texts == [mode + ' coffee experience']
+        async with session_scope() as db:
+            sim = await db.get(Simulation, runs[mode]['id'])
+        detail = await detail_memory(sim, 'p:1', {})
+        assert [m['text'] for m in detail['recalled']] == texts
+        assert [m['text'] for m in detail['memories']] == texts

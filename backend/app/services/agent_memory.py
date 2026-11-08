@@ -335,15 +335,17 @@ def adjust_reaction(reaction, state):
 
 async def detail_memory(sim, ref, persona):
     key, now = person_key(ref, persona), utcnow()
+    mode = (sim.config or {}).get("library_mode", "private")
     async with session_scope() as s:
         org = (await s.execute(select(Organization).where(Organization.id == sim.org_id))).scalar_one()
         rows = (await s.execute(select(AgentMemory).where(AgentMemory.org_id == sim.org_id, AgentMemory.population_ref == key,
+            library_memory_scope(mode),
             AgentMemory.superseded_by.is_(None), AgentMemory.created_at >= now - timedelta(days=plan(org).get("memory_retention_days", 90)))
             .order_by(AgentMemory.created_at.desc(), AgentMemory.id).limit(plan(org).get("memory_cap_per_agent", 60)))).scalars().all()
         affinity = (await s.execute(select(AgentCreatorAffinity).where(AgentCreatorAffinity.org_id == sim.org_id,
             AgentCreatorAffinity.population_ref == key, AgentCreatorAffinity.subject == creator_subject(sim)))).scalar_one_or_none()
         fresh = (sim.config or {}).get("agent_memory", {}).get("fresh", False)
-        recalled = (await recall_many(s, org, [key], sim.card or {}, fresh=fresh, record=False))[key]
+        recalled = (await recall_many(s, org, [key], sim.card or {}, fresh=fresh, record=False, library_mode=mode))[key]
         return {"label": LABEL, "fresh": fresh, "recalled": recalled, "affinity": decayed(affinity, now) if affinity else None,
             "memories": [{"id": m.id, "kind": m.kind, "text": m.text, "subject": m.subject, "importance": m.importance,
                 "created_at": m.created_at.isoformat(), "source_simulation_id": m.source_simulation_id} for m in rows]}
