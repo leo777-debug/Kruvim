@@ -20,7 +20,7 @@ export default function AdminPage() {
   const [delta, setDelta] = useState<Record<string, string>>({});
   const upd = useMutation({ mutationFn: ({ id, body }: any) => api(`/admin/orgs/${id}`, { method: "PATCH", json: body }), onSuccess: () => { orgs.refetch(); toast.success("Updated"); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed") });
-  if (!user?.is_superuser) return <Navigate to="/" />;
+  if (!user?.is_superuser) return <Navigate to="/home" />;
   const o = ov.data;
   return (
     <Page title="Platform admin" subtitle="Tenants, plans, credits, the shared model key and system health.">

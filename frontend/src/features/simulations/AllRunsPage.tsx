@@ -38,7 +38,7 @@ export default function AllRunsPage({ simple = false }: { simple?: boolean }) {
   const select = (key: string, title: string, options: {value:string;label:string}[]) => <Field label={title}><Select value={params.get(key) || "*"} onChange={(v) => set(key,v)} options={[{value:"*",label:`All ${title.toLowerCase()}`},...options]} /></Field>;
   const rows = q.data?.items || [];
   function page(next: number) {setParams((previous) => {const p = new URLSearchParams(previous); p.set("offset", String(next)); return p;});}
-  return <Page title={simple ? "My tests" : "All runs"} subtitle="Find your tests and open their results." actions={simple ? <Link to="/"><Button variant="primary">Test something</Button></Link> : undefined}>
+  return <Page title={simple ? "My tests" : "All runs"} subtitle="Find your tests and open their results." actions={simple ? <Link to="/home"><Button variant="primary">Test something</Button></Link> : undefined}>
     {simple && <div className="mb-4 flex flex-wrap gap-3"><Field label="Search tests"><Input value={text} onChange={(e) => setText(e.target.value)} /></Field><Button className="self-end" aria-expanded={filters} onClick={() => setFilters(!filters)}>More filters</Button></div>}
     {(!simple || filters) && <Card className="mb-5 p-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Field label="Search runs"><Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Run, project or content title" /></Field>

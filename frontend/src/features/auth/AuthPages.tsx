@@ -44,7 +44,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     try {
       const s = await api<Session>(`/auth/${mode}`, { json: mode === "login" ? { email: f.email, password: f.password } : f });
       setSession(s);
-      nav(loc.state?.from || "/", { replace: true });
+      nav(loc.state?.from || "/home", { replace: true });
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Something went wrong.");
     } finally {
@@ -91,7 +91,7 @@ export function InvitePage() {
       const s = await api<Session>("/auth/invites/accept", { json: { token, name: f.name, password: f.password || null } });
       setSession(s);
       toast.success("Welcome to the workspace");
-      nav("/");
+      nav("/home");
     } catch (ex) {
       toast.error(ex instanceof ApiError ? ex.message : "Could not accept the invite");
     } finally {

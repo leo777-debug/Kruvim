@@ -16,7 +16,7 @@ export interface NavSection {
 
 export const NAV_SECTIONS: readonly NavSection[] = [
   { id: "main", label: "", items: [
-    { to: "/", label: "Home", icon: "LayoutGrid", end: true, description: "Home: test a piece of content and see your recent results" },
+    { to: "/home", label: "Home", icon: "LayoutGrid", end: true, description: "Home: test a piece of content and see your recent results" },
     { to: "/tests", label: "My tests", icon: "FolderKanban", description: "My tests: find and open every test in your workspace" },
     { to: "/my-audience", label: "My audience", icon: "Contact", description: "My audience: import your analytics and match your own followers" },
     { to: "/data-library", label: "Data library", icon: "Database", description: "Data library: manage research folders and spreadsheets for customer projects" },

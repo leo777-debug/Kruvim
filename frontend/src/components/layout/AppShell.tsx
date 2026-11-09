@@ -131,7 +131,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
           </button>
         } items={[
           ...orgs.map((o) => ({ label: <span className="flex w-full justify-between gap-3"><span>{o.name}</span><span className="text-xs capitalize text-muted">{o.role}</span></span>,
-            icon: <Building2 className="h-3.5 w-3.5 text-muted" />, onSelect: () => { switchOrg(o.id); qc.clear(); nav("/"); } })),
+            icon: <Building2 className="h-3.5 w-3.5 text-muted" />, onSelect: () => { switchOrg(o.id); qc.clear(); nav("/home"); } })),
           "sep" as const,
           { label: "New workspace", icon: <Plus className="h-3.5 w-3.5" />, onSelect: () => nav("/settings?tab=org&new=1") },
         ]} />

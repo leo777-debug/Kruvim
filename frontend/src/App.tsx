@@ -72,7 +72,8 @@ export default function App() {
           <Route index element={<PublicAccuracy />} />
         </Route>
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
-          <Route index element={<NewSimulation home />} />
+          <Route index element={<Navigate to="/home" replace />} />
+          <Route path="home" element={<NewSimulation home />} />
           <Route path="overview" element={<Dashboard />} />
           <Route path="help" element={<Help />} />
           <Route path="tests" element={<AllRuns simple />} />
@@ -94,7 +95,7 @@ export default function App() {
           <Route path="usage" element={<Usage />} />
           <Route path="admin" element={<Admin />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </Suspense>
   );

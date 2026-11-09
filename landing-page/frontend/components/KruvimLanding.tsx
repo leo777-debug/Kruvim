@@ -66,9 +66,11 @@ function LandingForm({ kind }: { kind: "signup" | "feedback" }) {
   </form>;
 }
 
-export default function KruvimLanding() {
+export default function KruvimLanding({ appEntry = false }: { appEntry?: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = () => setMenuOpen(false);
+  const signupHref = appEntry ? "/app/register" : "#signup";
+  const signupLabel = appEntry ? "Sign up" : "Request early access";
   return (
     <MotionConfig reducedMotion="user">
       <main className="k-landing" id="top">
@@ -79,8 +81,9 @@ export default function KruvimLanding() {
             <a href="#demo" onClick={closeMenu}>Product demo</a>
             <a href="#how-it-works" onClick={closeMenu}>How it works</a>
             <a href="#feedback" onClick={closeMenu}>Feedback</a>
+            {appEntry && <a href="/app/login">Sign in</a>}
           </nav>
-          <a className="nav-cta" href="#signup">Request early access <ArrowUpRight size={15} /></a>
+          <a className="nav-cta" href={signupHref}>{signupLabel} <ArrowUpRight size={15} /></a>
           <button className="menu-toggle" aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-controls="landing-navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
             {menuOpen ? <X /> : <Menu />}
@@ -95,7 +98,7 @@ export default function KruvimLanding() {
             </div>
             <div className="hero-summary">
               <p>Kruvim gives your video, campaign or idea a test audience. AI-generated people with different backgrounds and interests react to it, so you can explore what connects, what confuses and what to change before publishing.</p>
-              <a className="text-link" href="#signup">Request early access <ArrowRight size={17} /></a>
+              <a className="text-link" href={signupHref}>{signupLabel} <ArrowRight size={17} /></a>
             </div>
           </div>
           <DemoVideo />
@@ -157,7 +160,9 @@ export default function KruvimLanding() {
             </details>
             <details>
               <summary>What happens when I sign up?</summary>
-              <p>You’ll join the early access list, and we’ll contact you about access to Kruvim. This form registers your interest; it does not create a product account.</p>
+              {appEntry
+                ? <p>You’ll create a workspace where you can set up audience tests and review their results.</p>
+                : <p>You’ll join the early access list, and we’ll contact you about access to Kruvim. This form registers your interest; it does not create a product account.</p>}
             </details>
           </div>
         </section>
@@ -165,12 +170,18 @@ export default function KruvimLanding() {
         <section className="access-section" id="signup">
           <div className="page-width access-layout">
             <Reveal className="access-copy">
-              <p className="section-label">Early access</p>
+              <p className="section-label">{appEntry ? "Get started" : "Early access"}</p>
               <h2>Have something<br />in the works?</h2>
-              <p>Join the early access list. Tell us who you are, and we’ll contact you about trying Kruvim with your own content.</p>
+              {appEntry
+                ? <p>Create a Kruvim workspace to test your own content.</p>
+                : <p>Join the early access list. Tell us who you are, and we’ll contact you about trying Kruvim with your own content.</p>}
               <span className="access-note">For creators, agencies, brands and independent teams.</span>
             </Reveal>
-            <Reveal><LandingForm kind="signup" /></Reveal>
+            <Reveal>
+              {appEntry
+                ? <a className="k-cta" href={signupHref}>{signupLabel}<ArrowUpRight size={19} /></a>
+                : <LandingForm kind="signup" />}
+            </Reveal>
           </div>
         </section>
 

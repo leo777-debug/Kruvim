@@ -72,7 +72,7 @@ function Org({ openNew }: { openNew: boolean }) {
   const save = useMutation({ mutationFn: () => api("/orgs/current", { method: "PATCH", json: { name } }), onSuccess: async () => {
     const me = await api("/auth/me"); setOrgs(me.orgs, me.user); toast.success("Saved"); } });
   const create = useMutation({ mutationFn: () => api("/orgs", { json: { name: newName } }), onSuccess: async (o) => {
-    const me = await api("/auth/me"); setOrgs(me.orgs, me.user); switchOrg(o.id); setNewOpen(false); nav("/"); toast.success("Workspace created"); },
+    const me = await api("/auth/me"); setOrgs(me.orgs, me.user); switchOrg(o.id); setNewOpen(false); nav("/home"); toast.success("Workspace created"); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed") });
   return (
     <Card className="max-w-2xl p-5">

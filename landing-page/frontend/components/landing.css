@@ -153,6 +153,7 @@
 .form-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 .k-cta { display: inline-flex; width: 100%; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 17px; min-height: 46px; background: var(--k-blue); border: 1px solid var(--k-blue); border-radius: 3px; color: #fff; font-size: 12px; font-weight: 550; transition: background .2s; }
 .k-cta:hover { background: #243b91; }
+.k-landing a.k-cta { color: #fff; }
 .k-cta:disabled { opacity: .6; cursor: wait; }
 .form-message { min-height: 27px; padding-top: 10px; font-size: 11px; }
 .form-message.error { color: #a52f2f; }

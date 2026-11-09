@@ -6,8 +6,8 @@ The repository root owns `vercel.json`. Import the GitHub repository and select 
 
 | Service | Directory | Public paths |
 | --- | --- | --- |
-| `landing` | `landing-page/frontend` | `/` and paths outside `/app` and `/api` |
-| `frontend` | `frontend` | `/app` and `/app/*`, including `/app/assets/*` |
+| `landing` | `landing-page/frontend` | `/`, the public `/app` entry page, and the final catch-all |
+| `frontend` | `frontend` | `/app/*`, including `/app/register`, `/app/login`, `/app/home`, and app assets |
 | `backend` | `backend` | `/api` and `/api/*` |
 
 The most specific rewrites run first; the landing page owns the final catch-all. `/healthz`, `/readyz`, and `/metrics` at the domain root are not exposed as backend routes by this configuration. API routes already include `/api/v1`, and API docs are at `/api/docs`, so the backend prefix must not be stripped.

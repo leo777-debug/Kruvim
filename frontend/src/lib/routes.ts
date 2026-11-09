@@ -23,7 +23,7 @@ export const pageLoaders = {
 };
 
 const routes: Record<string, keyof typeof pageLoaders> = {
-  "/": "NewSimulation", "/overview": "Dashboard", "/help": "Help",
+  "/home": "NewSimulation", "/overview": "Dashboard", "/help": "Help",
   "/tests": "AllRuns", "/runs": "AllRuns", "/projects": "Projects",
   "/data-pool": "DataPool", "/data-library": "Library", "/population": "Population",
   "/saved-audiences": "Audiences", "/audiences": "Audiences", "/calibration": "Calibration",
