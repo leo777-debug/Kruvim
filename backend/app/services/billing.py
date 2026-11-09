@@ -241,13 +241,18 @@ async def _payment(s, payment):
             r.get("status") == "succeeded" for r in payment.get("refunds", [])):
         return  # A refund/dispute can arrive before its original success event.
     payment_id = payment["payment_id"]
-    if (await s.execute(select(BillingGrant).where(BillingGrant.payment_id == payment_id))).scalar_one_or_none():
+    grant_query = select(BillingGrant).where(BillingGrant.payment_id == payment_id)
+    if (await s.execute(grant_query)).scalar_one_or_none():
         return
     sub_id = payment.get("subscription_id")
     if sub_id:
         sub = await dodo("GET", "/subscriptions/" + quote(sub_id, safe=""))
         a = await _subscription(s, sub)
         if not a:
+            return
+        # Both payment.succeeded and subscription.renewed can fulfill the same payment.
+        # Check again after taking the subscription order lock.
+        if (await s.execute(grant_query)).scalar_one_or_none():
             return
         order = await _order(s, payment, sub)
         periods = [p for p in payment.get("service_periods", []) if p.get("subscription_id") == sub_id]
