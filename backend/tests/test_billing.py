@@ -205,7 +205,7 @@ async def test_checkout_uses_server_catalog_and_cannot_grant_access(client, auth
         seen.append((method, path, kw))
         if method == "GET":
             return {"price": {"type": "recurring_price", "price": 5000, "currency": "AED",
-                              "payment_frequency_count": 1, "payment_frequency_interval": "month"}}
+                              "payment_frequency_count": 1, "payment_frequency_interval": "Month"}}
         return {"session_id": "cks_test", "checkout_url": "https://test.checkout.dodopayments.com/session/cks_test"}
     monkeypatch.setattr(billing, "dodo", fake_dodo)
     r = await client.post("/billing/checkout", headers=h, json={"kind": "subscription", "seats": 1, "price": 1})

@@ -162,16 +162,8 @@ async def checkout(s, p, kind, seats=1):
             or pricing.get("price") != price * 100 or pricing.get("pay_what_you_want")
             or pricing.get("discount", 0) or pricing.get("discount_bps", 0)
             or pricing.get("purchasing_power_parity")
-            or kind == "subscription" and (pricing.get("payment_frequency_interval") != "month"
+            or kind == "subscription" and (pricing.get("payment_frequency_interval") not in ("Month", "month")
                                            or pricing.get("payment_frequency_count") != 1)):
-        logging.getLogger(__name__).warning(
-            "Dodo catalog mismatch: kind=%s product_keys=%s price=%s",
-            kind, sorted(product), {key: pricing.get(key) for key in (
-                "type", "currency", "price", "pay_what_you_want", "discount",
-                "discount_bps", "purchasing_power_parity", "payment_frequency_interval",
-                "payment_frequency_count",
-            )},
-        )
         raise AppError("The checkout price needs configuration. Please contact support.", status=503,
                        code="billing_product_mismatch")
     order = BillingOrder(org_id=p.org_id, kind=kind, product_id=product_id, quantity=seats, budget_micros=budget)
