@@ -415,3 +415,11 @@ async def test_paid_openai_usage_blocks_only_the_spent_seat_and_member_can_top_u
     assert (await client.post("/billing/webhook", content=raw, headers=signature)).status_code == 200
     assert (await client.get("/billing", headers=headers)).json()["available_aed"] == 10
     assert (await client.get("/billing", headers=owner_headers)).json()["available_aed"] == 10
+
+    async def rejected(request):
+        return httpx.Response(429, json={"error": {"code": "rate_limit_exceeded"}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(rejected)) as llm.client:
+        with pytest.raises(ProviderFailure):
+            await llm.complete(system="test", user="hello", role="voice", max_tokens=100, usage=Usage())
+    assert (await client.get("/billing", headers=headers)).json()["available_aed"] == 10

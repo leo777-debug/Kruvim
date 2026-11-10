@@ -8,6 +8,7 @@ from collections import defaultdict
 from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import AppError, Conflict
 from app.models import Action, GraphEdge, GraphNode, Organization, Post, Report, SimAgent, SimEvent, Simulation
 from app.services import audit, jobs
@@ -20,9 +21,9 @@ LOCKED = ("building_graph", "preparing", "queued", "running", "paused")
 _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
-async def check_seat(s: AsyncSession, sim: Simulation, user_id: str | None = None):
+async def check_seat(s: AsyncSession, sim: Simulation, user_id: str | None = None, *, continuing=False):
     user_id = user_id or sim.seat_user_id or sim.created_by
-    await require_seat(s, sim.org_id, user_id, minimum=1)
+    await require_seat(s, sim.org_id, user_id, minimum=0 if continuing else 1)
     sim.seat_user_id = user_id
 
 
@@ -32,7 +33,7 @@ async def queue_graph(s: AsyncSession, sim: Simulation, user_id: str | None = No
         raise Conflict("A step is already running for this simulation.")
     res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
                         simulation=True, user_id=sim.seat_user_id)
-    if res.metered:
+    if res.metered and not settings.billing_enabled:
         org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
         overrides = (sim.config or {}).get('overrides', {})
         cfg = {'agents': {'voice': overrides.get('voice', 40), 'stakeholders': overrides.get('stakeholders', 5)},
@@ -55,7 +56,7 @@ async def queue_graph(s: AsyncSession, sim: Simulation, user_id: str | None = No
 
 
 async def queue_environment(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
-    await check_seat(s, sim, user_id)
+    await check_seat(s, sim, user_id, continuing=user_id is None and bool((sim.config or {}).get("autopilot")))
     if sim.status not in ("graph_ready", "ready", "completed", "failed", "cancelled"):
         raise Conflict("Build the graph first.")
     sim.status, sim.error = "preparing", None
@@ -74,13 +75,13 @@ async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None
 
 
 async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
-    await check_seat(s, sim, user_id)
+    await check_seat(s, sim, user_id, continuing=user_id is None and bool((sim.config or {}).get("autopilot")))
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
     res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
                         simulation=True, user_id=sim.seat_user_id)
-    await check_start(s, org, sim.config, res.metered, user_id=sim.seat_user_id)
+    await check_start(s, org, sim.config, res.metered and not settings.billing_enabled)
     from app.db.base import new_id
     sim.billing_epoch, sim.pause_state, sim.checkpoint = new_id(), {}, {}
     sim.finished_at = None

@@ -71,6 +71,8 @@ class OpenAICompatLLM(BaseLLM):
                         raise ProviderFailure(classify(None, settings=self.s, network_error=True), exc.__class__.__name__)
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
+                if self.base == "https://api.openai.com/v1" and r.status_code in (400, 401, 403, 404, 429):
+                    usage.rejected = True
                 if r.status_code == 400:
                     try:
                         issue = classify(r.status_code, r.json(), settings=self.s)

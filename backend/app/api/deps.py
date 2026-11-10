@@ -113,7 +113,9 @@ async def principal(request: Request, s: AsyncSession = Depends(get_session), au
             "/simulations" in request.url.path or request.url.path.endswith("/tokens/resume")):
         # Keep results/history readable. Subscription checks protect every simulation mutation,
         # including direct API calls using an organisation API key.
-        from app.services.billing import require_access
+        from app.services.billing import access_error, require_access
+        if p.via == "api_key" and not p.seat_user_id:
+            raise access_error("Use a workspace API key assigned to a current seat.", "billing_seat_required")
         await require_access(s, p.org_id)
         await s.commit()  # Release the gate's lock before routes invoke separately-accounted model work.
     return p

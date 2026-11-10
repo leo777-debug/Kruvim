@@ -187,7 +187,7 @@ async def refund_call(s, org, allocations):
     await ledger(s, org.id, amount, 'llm_call_refund')
 
 
-async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_key: bool, *, user_id=None) -> int:
+async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_key: bool) -> int:
     p = plan(org)
     a = cfg.get("agents", {})
     t = cfg.get("time", {})
@@ -203,5 +203,5 @@ async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_ke
         raise QuotaExceeded(f"Your plan runs {p['max_concurrent']} simulation(s) at a time. Wait for one to finish.", code="concurrency_limit")
     need = estimate_credits(cfg)["total"]
     if platform_key:   # only metered when Kruvim's own model key is used
-        await check_tokens(s, org, need, user_id=user_id)
+        await check_tokens(s, org, need)
     return need

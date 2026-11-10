@@ -175,6 +175,8 @@ async def call(llm, fn, kwargs):
         if usage.calls and (usage.input_tokens or usage.output_tokens):
             await settle(reservation_id, cost(usage.input_tokens, usage.output_tokens, prices,
                                               cached=usage.cached_tokens))
+        elif usage.rejected:
+            await settle(reservation_id, 0)
         original = kwargs["usage"]
         for role, row in usage.by_role.items():
             original.add(llm.name, row["model"], role, row["input"], row["cached"], row["output"], usage.seconds)

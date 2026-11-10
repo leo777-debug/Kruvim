@@ -72,7 +72,8 @@ def available(a, seat):
 
 
 def insufficient(a, balance, required):
-    message = (f"Your seat has AED {Decimal(balance) / MICROS:.2f} of AI usage remaining. "
+    display = "less than AED 0.01" if 0 < balance < MICROS // 100 else f"AED {Decimal(balance) / MICROS:.2f}"
+    message = (f"Your seat has {display} of AI usage remaining. "
                "Top up or wait for your next successful renewal.")
     return QuotaExceeded(message, code="api_budget_exhausted", details={
         "code": "api_budget_exhausted", "message": message, "available_aed": balance / MICROS,

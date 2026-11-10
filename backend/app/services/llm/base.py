@@ -23,7 +23,7 @@ class ProviderSettings:
     provider: str = "dryrun"
     preset: str = "dryrun"
     base_url: str = ""
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)
     voice_model: str = ""
     report_model: str = ""
     vision_model: str = ""
@@ -48,6 +48,7 @@ class Usage:
     output_tokens: int = 0
     seconds: float = 0.0
     by_role: dict = field(default_factory=dict)
+    rejected: bool = False
 
     def add(self, provider: str, model: str, role: str, inp: int, cached: int, out: int, secs: float):
         self.calls += 1
