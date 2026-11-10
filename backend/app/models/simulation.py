@@ -43,6 +43,7 @@ class Simulation(IdMixin, TimestampMixin, Base):
     job_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
     execution_token: Mapped[str | None] = mapped_column(String(32))
     billing_epoch: Mapped[str] = mapped_column(String(32), default=new_id)
+    seat_user_id: Mapped[str | None] = mapped_column(String(32))
     pause_state: Mapped[dict] = mapped_column(default=dict)
     checkpoint: Mapped[dict] = mapped_column(default=dict)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -192,6 +193,7 @@ class ChatMessage(Base):
 
 
 class Survey(IdMixin, TimestampMixin, Base):
+    seat_user_id: Mapped[str | None] = mapped_column(String(32))
     __tablename__ = "surveys"
     simulation_id: Mapped[str] = mapped_column(ForeignKey("simulations.id", ondelete="CASCADE"), index=True)
     question: Mapped[str] = mapped_column(Text)

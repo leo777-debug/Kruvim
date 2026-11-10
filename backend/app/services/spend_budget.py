@@ -15,8 +15,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.core.config import settings
+from app.core.errors import QuotaExceeded
 from app.db.base import utcnow
-from app.models import BillingAccount, BillingUsageWindow, SpendReservation
+from app.models import BillingUsageWindow, SpendReservation
 from app.services import billing
 from app.services.llm.errors import BudgetPause
 
@@ -36,12 +37,16 @@ def rates(llm, kwargs):
     if not values or any(k not in values or not 0 <= values[k] < 10000 for k in ("input", "output")):
         raise BudgetPause(pause_state("Kruvim's model pricing needs configuration. Please contact support.",
                                      "billing_model_unpriced"))
-    # Cache reads/writes and provider fallbacks must not cost more than this configured input ceiling.
-    return Decimal(str(values["input"])), Decimal(str(values["output"]))
+    cached = values.get("cached", values["input"])
+    if not 0 <= cached <= values["input"]:
+        raise BudgetPause(pause_state("Kruvim's cached-input pricing needs configuration.",
+                                     "billing_model_unpriced"))
+    return Decimal(str(values["input"])), Decimal(str(values["output"])), Decimal(str(cached))
 
 
-def cost(inp, out, prices):
-    usd = Decimal(inp) * prices[0] + Decimal(out) * prices[1]
+def cost(inp, out, prices, *, cached=0):
+    cached = min(inp, max(0, cached))
+    usd = Decimal(inp - cached) * prices[0] + Decimal(out) * prices[1] + Decimal(cached) * prices[2]
     # USD per million tokens -> AED microdirhams: the factors of one million cancel.
     return int((usd * Decimal(str(settings.billing_usd_to_aed))).to_integral_value(rounding=ROUND_CEILING))
 
@@ -60,30 +65,19 @@ async def consume_window(s, scope, bucket, amount, limit):
     return (await s.execute(statement)).scalar_one_or_none() is not None
 
 
-async def reserve(org_id, amount):
+async def reserve(org_id, amount, user_id=None):
     from app.services.token_budget import accounting_session
     async with locks[org_id]:
         async with accounting_session() as s:
             try:
-                a = await billing.require_access(s, org_id)
-            except Exception as exc:
-                from app.core.errors import QuotaExceeded
-                if isinstance(exc, QuotaExceeded):
-                    raise BudgetPause(exc.details) from exc
-                raise
-            monthly = min(max(0, a.monthly_remaining), amount)
+                a, seat = await billing.require_seat(s, org_id, user_id, minimum=amount)
+            except QuotaExceeded as exc:
+                raise BudgetPause(exc.details) from exc
+            # The locked account serializes assignments, grants, reservations and refunds.
+            monthly = min(seat.monthly_remaining, amount) if seat.period_start == a.period_start else 0
             topup = amount - monthly
-            # Conditional arithmetic also protects SQLite/multiple API and worker processes.
-            updated = (await s.execute(update(BillingAccount).where(
-                BillingAccount.org_id == org_id,
-                BillingAccount.monthly_remaining >= monthly,
-                BillingAccount.topup_remaining >= topup,
-                BillingAccount.monthly_remaining + BillingAccount.topup_remaining >= amount,
-            ).values(monthly_remaining=BillingAccount.monthly_remaining - monthly,
-                     topup_remaining=BillingAccount.topup_remaining - topup)
-                .returning(BillingAccount.org_id))).scalar_one_or_none()
-            if updated is None:
-                raise BudgetPause(pause_state("Your included usage is running low. Buy more credits to continue this test."))
+            seat.monthly_remaining -= monthly
+            seat.topup_remaining -= topup
             now = utcnow()
             minute = int(now.timestamp() // 60)
             if not await consume_window(s, f"workspace:{org_id}", minute, 1, settings.billing_ai_calls_per_minute):
@@ -96,7 +90,8 @@ async def reserve(org_id, amount):
                 reset = (now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) + timedelta(days=32)).replace(day=1)
                 raise BudgetPause({"code": "platform_budget_exhausted", "reset_at": reset.isoformat(),
                                    "message": "Kruvim has reached its shared AI spending limit for this month."})
-            reservation = SpendReservation(org_id=org_id, period_start=a.period_start, monthly=monthly, topup=topup,
+            reservation = SpendReservation(org_id=org_id, seat_user_id=seat.user_id,
+                                           period_start=a.period_start, monthly=monthly, topup=topup,
                                            platform_bucket=month)
             s.add(reservation)
             await s.flush()
@@ -117,9 +112,23 @@ async def settle(reservation_id, actual):
         # Monthly allowance is spent first, so unused purchased allowance is returned first.
         topup_refund = min(r.topup, refund)
         monthly_refund = refund - topup_refund if a.period_start == r.period_start else 0
-        await s.execute(update(BillingAccount).where(BillingAccount.org_id == r.org_id).values(
-            monthly_remaining=BillingAccount.monthly_remaining + monthly_refund,
-            topup_remaining=BillingAccount.topup_remaining + topup_refund))
+        if r.seat_user_id:
+            seat = await billing.seat_row(s, r.org_id, r.seat_user_id)
+            if seat.period_start == a.period_start:
+                seat.monthly_remaining += monthly_refund
+            seat.topup_remaining += topup_refund
+        else:
+            owner = await billing.primary_seat_user(s, r.org_id)
+            seat = await billing.claim_seat(s, a, owner) if owner and billing.active(a) else None
+            if seat and seat.period_start == a.period_start:
+                seat.monthly_remaining += monthly_refund
+            else:
+                a.monthly_remaining += monthly_refund
+            if owner:
+                purchased = seat or await billing.seat_row(s, r.org_id, owner)
+                purchased.topup_remaining += topup_refund
+            else:
+                a.topup_remaining += topup_refund
         if r.platform_bucket is not None and actual != reserved:
             await s.execute(update(BillingUsageWindow).where(BillingUsageWindow.scope == PLATFORM_SCOPE,
                 BillingUsageWindow.bucket == r.platform_bucket).values(used=BillingUsageWindow.used + actual - reserved))
@@ -136,12 +145,9 @@ async def call(llm, fn, kwargs):
     if not llm.s.billing_metered:
         async with accounting_session() as s:
             try:
-                await billing.require_access(s, org_id)
-            except Exception as exc:
-                from app.core.errors import QuotaExceeded
-                if isinstance(exc, QuotaExceeded):
-                    raise BudgetPause(exc.details) from exc
-                raise
+                await billing.require_seat(s, org_id, llm.s.billing_user_id)
+            except QuotaExceeded as exc:
+                raise BudgetPause(exc.details) from exc
         return await fn(llm, **kwargs)
     prices = rates(llm, kwargs)
     if kwargs.get("images"):
@@ -155,19 +161,21 @@ async def call(llm, fn, kwargs):
         # Anthropic currently permits server fallback and cache writes with different rates.
         raise BudgetPause(pause_state("Choose a priced OpenAI-compatible platform model to use included credits.",
                                      "billing_model_unpriced"))
+    if llm.s.base_url == "https://api.openai.com/v1" and not llm.s.api_key:
+        raise BudgetPause(pause_state("Kruvim's OpenAI connection is being set up. Please contact support.",
+                                     "billing_model_unconfigured"))
     # Paid platform requests use one HTTP attempt. An uncertain timeout cannot be retried for free.
     amount = max(1, cost(inp, output, prices))
-    reservation_id = await reserve(org_id, amount)
+    reservation_id = await reserve(org_id, amount, llm.s.billing_user_id)
     from app.services.llm import Usage
     usage = Usage()  # Concurrent calls must never read each other's aggregate token counters.
     try:
-        result = await fn(llm, **{**kwargs, "usage": usage})
+        return await fn(llm, **{**kwargs, "usage": usage})
     finally:
+        if usage.calls and (usage.input_tokens or usage.output_tokens):
+            await settle(reservation_id, cost(usage.input_tokens, usage.output_tokens, prices,
+                                              cached=usage.cached_tokens))
         original = kwargs["usage"]
         for role, row in usage.by_role.items():
             original.add(llm.name, row["model"], role, row["input"], row["cached"], row["output"], usage.seconds)
         original.failed += usage.failed
-    if usage.calls and (usage.input_tokens or usage.output_tokens):
-        await settle(reservation_id, cost(usage.input_tokens, usage.output_tokens, prices))
-    # Missing usage retains the conservative reservation rather than granting free model use.
-    return result

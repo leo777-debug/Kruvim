@@ -30,6 +30,7 @@ class Principal:
     role: str
     via: str              # session | api_key
     api_key_id: str | None = None
+    api_key_creator_id: str | None = None
 
     @property
     def org_id(self) -> str:
@@ -38,6 +39,10 @@ class Principal:
     @property
     def user_id(self) -> str | None:
         return self.user.id if self.user else None
+
+    @property
+    def seat_user_id(self) -> str | None:
+        return self.user_id or self.api_key_creator_id
 
     @property
     def is_superuser(self) -> bool:
@@ -82,7 +87,7 @@ async def principal(request: Request, s: AsyncSession = Depends(get_session), au
         org = await s.get(Organization, key.org_id)
         key.last_used_at = utcnow()
         await s.commit()
-        p = Principal(None, org, key.role, "api_key", key.id)
+        p = Principal(None, org, key.role, "api_key", key.id, key.created_by)
     else:
         user = await current_user(request, s, authorization)
         want = x_org_id or getattr(request.state, "token_org", None)

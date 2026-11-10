@@ -32,7 +32,7 @@ class OpenAICompatLLM(BaseLLM):
                                         limits=httpx.Limits(max_connections=max(8, s.concurrency * 2)))
         self.json_ok = bool(s.json_mode)
         self.temp_ok = True
-        self.max_tokens_key = "max_tokens"
+        self.max_tokens_key = "max_completion_tokens" if base == "https://api.openai.com/v1" else "max_tokens"
 
     async def complete(self, *, system, user, role, max_tokens, usage: Usage, json_out=True, images=None, temperature=None):
         model = self.model_for("vision" if images else role)

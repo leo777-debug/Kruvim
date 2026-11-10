@@ -22,13 +22,13 @@ class CheckoutIn(BaseModel):
 
 @router.get("")
 async def billing_status(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
-    state = await billing.status(s, p.org_id)
+    state = await billing.status(s, p.org_id, p.seat_user_id)
     await s.commit()
     return state
 
 
 @router.post("/checkout")
-async def checkout(body: CheckoutIn, p: Principal = Depends(role("owner")), s: AsyncSession = Depends(get_session)):
+async def checkout(body: CheckoutIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     return await billing.checkout(s, p, body.kind, body.seats)
 
 

@@ -48,7 +48,8 @@ def bounded_job(fn):
         job_lease.set((sim_id, token))
         from app.services.llm.errors import BudgetPause
         from app.services.token_budget import Work, current, pause
-        work_token = current.set(Work(row.org_id, sim_id, f'{row.billing_epoch}:{fn.__name__}'))
+        work_token = current.set(Work(row.org_id, sim_id, f'{row.billing_epoch}:{fn.__name__}',
+                                      seat_user_id=row.seat_user_id or row.created_by))
         try:
             async with asyncio.timeout(settings.simulation_max_duration_seconds):
                 return await fn(ctx, sim_id, **kw)

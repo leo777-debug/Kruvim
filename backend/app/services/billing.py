@@ -5,7 +5,6 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
@@ -19,7 +18,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.core.config import settings
 from app.core.errors import AppError, Conflict, Forbidden, QuotaExceeded
 from app.db.base import utcnow
-from app.models import BillingAccount, BillingEvent, BillingGrant, BillingOrder, Membership, Organization
+from app.models import BillingAccount, BillingEvent, BillingGrant, BillingOrder, BillingSeat, Membership, Organization
 
 MICROS = 1_000_000
 CREDIT_MICROS = 1_000  # One customer-facing usage credit = AED .001 of included API allowance.
@@ -27,6 +26,58 @@ CREDIT_MICROS = 1_000  # One customer-facing usage credit = AED .001 of included
 
 def micros(aed) -> int:
     return int((Decimal(str(aed)) * MICROS).to_integral_value(rounding=ROUND_CEILING))
+
+
+async def primary_seat_user(s, org_id):
+    return (await s.execute(select(Membership.user_id).where(Membership.org_id == org_id)
+        .order_by((Membership.role == "owner").desc(), Membership.created_at, Membership.user_id)
+        .limit(1))).scalar_one_or_none()
+
+
+async def seat_row(s, org_id, user_id):
+    row = await s.get(BillingSeat, (org_id, user_id))
+    if row is None:
+        row = BillingSeat(org_id=org_id, user_id=user_id, monthly_remaining=0, topup_remaining=0)
+        s.add(row)
+        await s.flush()
+    return row
+
+
+async def claim_seat(s, a, user_id):
+    """Called with the account locked. A seat can be assigned once per paid period."""
+    member = await s.scalar(select(Membership.id).where(
+        Membership.org_id == a.org_id, Membership.user_id == user_id))
+    if not member:
+        return None
+    row = await seat_row(s, a.org_id, user_id)
+    if a.topup_remaining:
+        # Before seat billing, the workspace owner was the only person who could buy a pack.
+        owner_id = await primary_seat_user(s, a.org_id)
+        owner = await seat_row(s, a.org_id, owner_id)
+        owner.topup_remaining += a.topup_remaining
+        a.topup_remaining = 0
+    if row.period_start != a.period_start:
+        assigned = await s.scalar(select(func.count()).select_from(BillingSeat).where(
+            BillingSeat.org_id == a.org_id, BillingSeat.period_start == a.period_start))
+        vacant = a.seats - assigned
+        if vacant > 0:
+            row.period_start = a.period_start
+            row.monthly_remaining = a.monthly_remaining // vacant
+            a.monthly_remaining -= row.monthly_remaining
+    return row
+
+
+def available(a, seat):
+    return seat.topup_remaining + (seat.monthly_remaining if seat.period_start == a.period_start else 0)
+
+
+def insufficient(a, balance, required):
+    message = (f"Your seat has AED {Decimal(balance) / MICROS:.2f} of AI usage remaining. "
+               "Top up or wait for your next successful renewal.")
+    return QuotaExceeded(message, code="api_budget_exhausted", details={
+        "code": "api_budget_exhausted", "message": message, "available_aed": balance / MICROS,
+        "required_micros": required, "reset_at": a.period_end.isoformat() if a.period_end else None,
+        "actions": [{"id": "add_tokens", "label": "Top up AI usage", "url": "/usage"}]})
 
 
 def configured() -> bool:
@@ -75,23 +126,45 @@ async def require_access(s, org_id):
     return a
 
 
-async def status(s, org_id):
-    a = await account(s, org_id)
+async def require_seat(s, org_id, user_id=None, *, minimum=0):
+    a = await require_access(s, org_id)
+    if a is None:
+        return None, None
+    if user_id is None:
+        user_id = await primary_seat_user(s, org_id)
+    seat = await claim_seat(s, a, user_id) if user_id else None
+    if seat is None:
+        raise access_error("This action needs a current workspace seat.", "billing_seat_required")
+    balance = available(a, seat)
+    if balance < minimum:
+        raise insufficient(a, balance, minimum)
+    return a, seat
+
+
+async def status(s, org_id, user_id):
+    a = await account(s, org_id, lock=True)
     member_count = (await s.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))).scalar()
     usable = active(a) and member_count <= a.seats
-    monthly = max(0, a.monthly_remaining) if usable else 0
-    total = max(0, monthly + a.topup_remaining) if usable else 0
+    seat = await claim_seat(s, a, user_id) if usable and user_id else None
+    monthly = seat.monthly_remaining if seat and seat.period_start == a.period_start else 0
+    purchased = seat.topup_remaining if seat else 0
+    total = monthly + purchased
     return {"enabled": settings.billing_enabled, "configured": configured(), "provider": "dodo",
         "environment": settings.dodo_environment, "active": usable, "status": a.status,
         "review_required": a.suspended, "seats": a.seats, "members": member_count,
         "period_end": a.period_end, "can_manage": bool(a.customer_id),
         "monthly_price_aed": settings.billing_monthly_price_aed,
         "topup_price_aed": settings.billing_topup_price_aed,
-        "monthly_credits": micros(settings.billing_monthly_budget_aed) * a.seats // CREDIT_MICROS,
+        "monthly_credits": micros(settings.billing_monthly_budget_aed) // CREDIT_MICROS,
         "topup_credits": micros(settings.billing_topup_budget_aed) // CREDIT_MICROS,
         "monthly_remaining": monthly // CREDIT_MICROS,
-        "purchased_remaining": max(0, a.topup_remaining) // CREDIT_MICROS,
+        "purchased_remaining": purchased // CREDIT_MICROS,
         "available": total // CREDIT_MICROS,
+        "monthly_allowance_aed": settings.billing_monthly_budget_aed,
+        "topup_allowance_aed": settings.billing_topup_budget_aed,
+        "monthly_remaining_aed": monthly / MICROS,
+        "purchased_remaining_aed": purchased / MICROS,
+        "available_aed": total / MICROS,
         "note": "" if configured() else "Checkout will be available once Kruvim's payment setup is complete."}
 
 
@@ -128,8 +201,9 @@ def safe_url(value):
 async def checkout(s, p, kind, seats=1):
     if not settings.billing_enabled or not configured():
         raise AppError("Checkout will be available once payment setup is complete.", status=503, code="billing_not_configured")
-    if p.via != "session" or p.role != "owner":
-        raise Forbidden("Only the workspace owner can manage billing.")
+    if p.via != "session":
+        raise Forbidden("Sign in to purchase AI usage.")
+    p.require("owner" if kind == "subscription" else "member")
     a = await account(s, p.org_id, lock=True)
     if kind == "subscription":
         if a.subscription_id and a.status not in ("cancelled", "expired", "failed"):
@@ -149,7 +223,7 @@ async def checkout(s, p, kind, seats=1):
         price = settings.billing_monthly_price_aed
         budget = micros(settings.billing_monthly_budget_aed) * seats
     else:
-        await require_access(s, p.org_id)
+        await require_seat(s, p.org_id, p.user_id)
         seats = 1
         product_id = settings.dodo_topup_product_id
         price = settings.billing_topup_price_aed
@@ -166,13 +240,15 @@ async def checkout(s, p, kind, seats=1):
                                            or pricing.get("payment_frequency_count") != 1)):
         raise AppError("The checkout price needs configuration. Please contact support.", status=503,
                        code="billing_product_mismatch")
-    order = BillingOrder(org_id=p.org_id, kind=kind, product_id=product_id, quantity=seats, budget_micros=budget)
+    order = BillingOrder(org_id=p.org_id, kind=kind, product_id=product_id, quantity=seats, budget_micros=budget,
+                         seat_user_id=p.user_id, price_minor=price * 100)
     s.add(order)
     await s.flush()
     # Persist the order before the external request: a fast webhook can arrive immediately.
     await s.commit()
     body = {"product_cart": [{"product_id": product_id, "quantity": seats}],
-        "customer": {"customer_id": a.customer_id} if a.customer_id else {"email": p.user.email, "name": p.user.name},
+        "customer": {"customer_id": a.customer_id} if kind == "subscription" and a.customer_id
+            else {"email": p.user.email, "name": p.user.name},
         "metadata": {"kruvim_order_id": order.id}, "billing_currency": "AED",
         "return_url": settings.public_app_url + "/usage?checkout=returned",
         "cancel_url": settings.public_app_url + "/usage?checkout=cancelled",
@@ -223,18 +299,22 @@ async def _subscription(s, sub):
         raise Conflict("A different subscription is already active for this workspace.")
     if a.subscription_id and a.subscription_id != sub_id and order.state == "fulfilled":
         return None  # A late event from an older subscription cannot replace its successor.
-    if int(sub.get("quantity", 0)) < 1:
+    if not 1 <= int(sub.get("quantity", 0)) <= 1000:
         raise ValueError("Invalid paid seat quantity")
     a.subscription_id = sub_id
     a.customer_id = sub["customer"]["customer_id"]
     a.status = sub["status"]
-    a.seats = int(sub["quantity"])
-    org = await s.get(Organization, a.org_id)
-    org.settings = {**(org.settings or {}), "billing_seats": a.seats}
-    return a
+    return a, order
 
 
-async def _payment(s, payment):
+def verify_amount(payment, expected):
+    total = int(payment.get("total_amount", 0))
+    tax = int(payment.get("tax") or 0)
+    if payment.get("currency") != "AED" or tax < 0 or total not in (expected, expected + tax):
+        raise ValueError("Unexpected payment currency or amount")
+
+
+async def _payment(s, payment, sub=None):
     if payment.get("status") != "succeeded" or payment.get("business_id") != settings.dodo_business_id:
         return
     if payment.get("refund_status") or payment.get("disputes") or any(
@@ -246,15 +326,14 @@ async def _payment(s, payment):
         return
     sub_id = payment.get("subscription_id")
     if sub_id:
-        sub = await dodo("GET", "/subscriptions/" + quote(sub_id, safe=""))
-        a = await _subscription(s, sub)
-        if not a:
+        linked = await _subscription(s, sub)
+        if not linked:
             return
+        a, order = linked
         # Both payment.succeeded and subscription.renewed can fulfill the same payment.
         # Check again after taking the subscription order lock.
         if (await s.execute(grant_query)).scalar_one_or_none():
             return
-        order = await _order(s, payment, sub)
         periods = [p for p in payment.get("service_periods", []) if p.get("subscription_id") == sub_id]
         if payment.get("charge_type") not in ("new", "renewal") or not periods:
             return  # Plan-change/usage-only payments must not refresh the allowance.
@@ -262,11 +341,28 @@ async def _payment(s, payment):
         start, end = date(period["starts_at"]), date(period["ends_at"])
         if not start or not end or end <= start:
             raise ValueError("Invalid service period")
-        amount = micros(settings.billing_monthly_budget_aed) * a.seats
+        if Decimal(str(period.get("proration_factor", "1"))) != 1:
+            raise ValueError("Expected a full service period")
+        seats = int(sub["quantity"])
+        if payment["charge_type"] == "new" and seats != order.quantity:
+            raise ValueError("Initial paid seat quantity mismatch")
+        verify_amount(payment, (order.price_minor or 5000) * seats)
+        amount = 0
         if not a.period_start or start > a.period_start:
+            a.seats = seats
+            amount = micros(settings.billing_monthly_budget_aed) * seats
             a.period_start, a.period_end, a.monthly_remaining = start, end, amount
+            members = (await s.scalars(select(Membership.user_id).where(Membership.org_id == a.org_id)
+                .order_by((Membership.role == "owner").desc(), Membership.created_at, Membership.user_id)
+                .limit(seats))).all()
+            for user_id in members:
+                seat = await seat_row(s, a.org_id, user_id)
+                seat.period_start = start
+                seat.monthly_remaining = micros(settings.billing_monthly_budget_aed)
+                a.monthly_remaining -= seat.monthly_remaining
         org = await s.get(Organization, a.org_id)
         org.plan = "pro"
+        org.settings = {**(org.settings or {}), "billing_seats": a.seats}
     else:
         order = await _order(s, payment)
         if not order or order.kind != "topup":
@@ -277,13 +373,19 @@ async def _payment(s, payment):
         if len(cart) != 1 or cart[0].get("product_id") != order.product_id or cart[0].get("quantity") != 1:
             raise ValueError("Credit pack product mismatch")
         a = await account(s, order.org_id, lock=True)
-        customer_id = payment["customer"]["customer_id"]
-        if a.customer_id != customer_id:
+        if not order.seat_user_id and a.customer_id != payment["customer"]["customer_id"]:
             raise ValueError("Credit pack customer mismatch")
+        if (order.session_id and payment.get("checkout_session_id")
+                and order.session_id != payment["checkout_session_id"]):
+            raise ValueError("Credit pack checkout mismatch")
+        verify_amount(payment, order.price_minor or 1000)
         amount = order.budget_micros
-        a.topup_remaining += amount
-    if payment.get("currency") != "AED" or int(payment.get("total_amount", 0)) <= 0:
-        raise ValueError("Unexpected payment currency or amount")
+        user_id = order.seat_user_id or await primary_seat_user(s, a.org_id)
+        if user_id:
+            seat = await seat_row(s, a.org_id, user_id)
+            seat.topup_remaining += amount
+        else:
+            a.topup_remaining += amount
     order.state, order.payment_id = "fulfilled", order.payment_id or payment_id
     s.add(BillingGrant(org_id=a.org_id, payment_id=payment_id, kind=order.kind, amount=amount))
 
@@ -291,18 +393,27 @@ async def _payment(s, payment):
 async def process_webhook(s, event_id, payload):
     insert = sqlite_insert if settings.is_sqlite else pg_insert
     kind, data = payload.get("type", ""), payload.get("data") or {}
+    if await s.get(BillingEvent, event_id):
+        return
+    await s.commit()  # Release the read snapshot before Dodo I/O and the write transaction.
+    payment, sub = None, None
+    if kind == "payment.succeeded" or (kind == "subscription.renewed" and data.get("payment_id")):
+        payment = await dodo("GET", "/payments/" + quote(data["payment_id"], safe=""))
+        if payment.get("payment_id") != data["payment_id"]:
+            raise ValueError("Payment id mismatch")
+    sub_id = (payment or {}).get("subscription_id") or (data["subscription_id"] if kind.startswith("subscription.") else None)
+    if sub_id:
+        sub = await dodo("GET", "/subscriptions/" + quote(sub_id, safe=""))
+        if sub.get("subscription_id") != sub_id:
+            raise ValueError("Subscription id mismatch")
     inserted = (await s.execute(insert(BillingEvent).values(id=event_id, kind=kind)
         .on_conflict_do_nothing(index_elements=["id"]).returning(BillingEvent.id))).scalar_one_or_none()
     if not inserted:
         return
-    if kind == "payment.succeeded":
-        await _payment(s, await dodo("GET", "/payments/" + quote(data["payment_id"], safe="")))
-    elif kind.startswith("subscription."):
-        sub = await dodo("GET", "/subscriptions/" + quote(data["subscription_id"], safe=""))
+    if payment:
+        await _payment(s, payment, sub)
+    elif sub:
         await _subscription(s, sub)
-        # The renewal event may arrive before payment.succeeded. Grants share payment-id idempotency.
-        if kind == "subscription.renewed" and data.get("payment_id"):
-            await _payment(s, await dodo("GET", "/payments/" + quote(data["payment_id"], safe="")))
     elif kind in ("refund.succeeded", "dispute.opened", "dispute.accepted", "dispute.lost") and data.get("payment_id"):
         grant = (await s.execute(select(BillingGrant).where(BillingGrant.payment_id == data["payment_id"])
                                  .with_for_update())).scalar_one_or_none()

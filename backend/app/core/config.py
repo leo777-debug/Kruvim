@@ -92,14 +92,18 @@ class Settings(BaseSettings):
     dodo_subscription_product_id: str = ""
     dodo_topup_product_id: str = ""
     billing_monthly_price_aed: int = Field(default=50, ge=1)
-    billing_topup_price_aed: int = Field(default=10, ge=1)
+    billing_topup_price_aed: int = Field(default=20, ge=1)
     billing_monthly_budget_aed: float = Field(default=10, gt=0)
-    billing_topup_budget_aed: float = Field(default=2.5, gt=0)
+    billing_topup_budget_aed: float = Field(default=10, gt=0)
+    billing_openai_api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""), repr=False)
+    billing_openai_model: str = "gpt-4.1-mini-2025-04-14"
     billing_ai_calls_per_minute: int = Field(default=120, ge=1)
     billing_platform_monthly_budget_aed: float = Field(default=100, gt=0, le=1_000_000)
     # Per-million USD rates, keyed by model id. Missing rates block platform calls.
     # Each entry: {"input": ..., "output": ..., "cached": ...}.
-    billing_model_prices: dict[str, dict[str, float]] = Field(default_factory=dict)
+    billing_model_prices: dict[str, dict[str, float]] = Field(default_factory=lambda: {
+        "gpt-4.1-mini-2025-04-14": {"input": 0.40, "cached": 0.10, "output": 1.60},
+    })
     billing_usd_to_aed: float = Field(default=3.6725, gt=0)
 
     # Data pool connector credentials (all optional)

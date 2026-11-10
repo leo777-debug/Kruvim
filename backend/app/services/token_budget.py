@@ -51,15 +51,17 @@ def interactive_budget(needed):
             from app.api.deps import get_sim
             sim = await get_sim(s, p, sim_id)
             from app.services.providers import resolve
-            res = await resolve(s, p.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+            res = await resolve(s, p.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                                simulation=True, user_id=p.seat_user_id)
             if res.metered:
-                await quotas.check_tokens(s, await s.get(Organization, p.org_id, with_for_update=True), needed)
+                org = await s.get(Organization, p.org_id, with_for_update=not settings.billing_enabled)
+                await quotas.check_tokens(s, org, needed, user_id=p.seat_user_id)
                 await s.commit()
             target = params.get('ref', 'report')
             last = (await s.execute(select(ChatMessage.id).where(ChatMessage.simulation_id == sim_id,
                 ChatMessage.target == target).order_by(ChatMessage.id.desc()).limit(1))).scalar_one_or_none()
             key = hashlib.sha256(f"{target}:{last}:{params['body'].message}".encode()).hexdigest()
-            work = Work(p.org_id, sim_id, f'{sim.billing_epoch}:chat:{key}', res)
+            work = Work(p.org_id, sim_id, f'{sim.billing_epoch}:chat:{key}', res, seat_user_id=p.seat_user_id)
             try:
                 async with scope(work):
                     return await fn(*args, **kwargs)
@@ -82,7 +84,8 @@ def survey_budget(fn):
         async with session_scope() as s:
             survey = await s.get(Survey, survey_id)
             sim = await s.get(Simulation, survey.simulation_id)
-        work = Work(sim.org_id, sim.id, f'{sim.billing_epoch}:survey:{survey_id}')
+        work = Work(sim.org_id, sim.id, f'{sim.billing_epoch}:survey:{survey_id}',
+                    seat_user_id=survey.seat_user_id or sim.seat_user_id or sim.created_by)
         try:
             async with scope(work):
                 return await fn(ctx, survey_id)
@@ -160,8 +163,9 @@ async def provider_status(res, category='ok', raw=''):
 
 
 class Work:
-    def __init__(self, org_id, simulation_id, namespace, res=None):
+    def __init__(self, org_id, simulation_id, namespace, res=None, *, seat_user_id=None):
         self.org_id, self.simulation_id, self.namespace, self.res = org_id, simulation_id, namespace, res
+        self.seat_user_id = seat_user_id
         self.paused = None
 
     async def call(self, llm, fn, kwargs, operation_key=None):
@@ -257,17 +261,28 @@ async def pause(sim_id, state, stage):
 
 async def tick(now=None):
     """Local-midnight reminders and automatic resumptions; called by API and workers."""
+    from app.services.billing import micros, primary_seat_user
     from app.services.billing import status as billing_status
     from app.services.spend_budget import LIMIT_PAUSES
 
-    paid_pause_codes = (*LIMIT_PAUSES, 'api_budget_exhausted', 'subscription_required', 'billing_seats_exceeded')
+    paid_pause_codes = (*LIMIT_PAUSES, 'api_budget_exhausted', 'subscription_required',
+                        'billing_seats_exceeded', 'billing_seat_required')
     now = now or utcnow()
+
+    async def paid_ready(sim, state, user_id=None):
+        if state['code'] in LIMIT_PAUSES and now < datetime.fromisoformat(state['reset_at']):
+            return False
+        async with accounting_session() as s:
+            user_id = user_id or sim.seat_user_id or sim.created_by or await primary_seat_user(s, sim.org_id)
+            paid = await billing_status(s, sim.org_id, user_id)
+            return paid['active'] and micros(paid['available_aed']) >= state.get('required_micros', 1)
+
     async with accounting_session() as s:
         reminders = (await s.execute(select(TokenNotice).where(TokenNotice.kind == 'reset', TokenNotice.delivered_at.is_(None),
             TokenNotice.due_at <= now).with_for_update())).scalars().all()
         for notice in reminders:
-            org = await s.get(Organization, notice.org_id, with_for_update=True)
-            state = await quotas.allowance(s, org, now)
+            org = await s.get(Organization, notice.org_id, with_for_update=not settings.billing_enabled)
+            state = await quotas.allowance(s, org, now, user_id=notice.user_id)
             if state['available']:
                 notice.delivered_at = now
                 s.add(Alert(org_id=org.id, kind='tokens_reset', title='Your tokens have reset',
@@ -278,21 +293,21 @@ async def tick(now=None):
     for sim in sims:
         if not sim.pause_state:
             continue
+        if sim.pause_state['code'] in paid_pause_codes:
+            if await paid_ready(sim, sim.pause_state):
+                await resume(sim.org_id, sim.id, automatic=True)
+            continue
         eligible = False
         async with accounting_session() as s:
-            org = await s.get(Organization, sim.org_id, with_for_update=True)
-            state = await quotas.allowance(s, org, now)
+            org = await s.get(Organization, sim.org_id, with_for_update=not settings.billing_enabled)
+            state = await quotas.allowance(s, org, now, user_id=sim.seat_user_id or sim.created_by)
             from app.services.providers import resolve
-            res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+            res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                                simulation=True)
             config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
             if sim.pause_state['code'] == 'workspace_tokens_exhausted':
                 eligible = state['available'] > 0
-            elif sim.pause_state['code'] in paid_pause_codes:
-                if sim.pause_state['code'] in LIMIT_PAUSES and now < datetime.fromisoformat(sim.pause_state['reset_at']):
-                    continue
-                paid = await billing_status(s, org.id)
-                eligible = paid['active'] and paid['available'] > 0
-            elif sim.pause_state['code'] in ('billing_model_unpriced', 'billing_image_unpriced'):
+            elif sim.pause_state['code'] in ('billing_model_unpriced', 'billing_image_unpriced', 'billing_model_unconfigured'):
                 eligible = False  # An operator must fix model configuration before explicit resume.
             elif sim.pause_state['code'] == 'platform_provider_unavailable':
                 health = await s.get(ProviderHealth, res.config_id or 'env:' + provider_name(res.settings))
@@ -306,21 +321,19 @@ async def tick(now=None):
             .where(Survey.status == 'paused', Simulation.status == 'completed'))).all()
     for survey, sim in surveys:
         pause_code = survey.pause_state.get('code')
-        if pause_code in LIMIT_PAUSES and now < datetime.fromisoformat(survey.pause_state['reset_at']):
+        if pause_code in paid_pause_codes:
+            if await paid_ready(sim, survey.pause_state, survey.seat_user_id):
+                await resume_survey(sim.org_id, sim.id, survey.id)
             continue
         async with accounting_session() as s:
-            org = await s.get(Organization, sim.org_id, with_for_update=True)
-            available = (await quotas.allowance(s, org, now))['available']
+            org = await s.get(Organization, sim.org_id, with_for_update=not settings.billing_enabled)
+            available = (await quotas.allowance(s, org, now,
+                user_id=survey.seat_user_id or sim.seat_user_id or sim.created_by))['available']
             from app.services.providers import resolve
-            res = await resolve(s, org.id, platform=(sim.config or {}).get('use_platform_tokens', False))
+            res = await resolve(s, org.id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                                simulation=True)
             config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
-        paid_resume = False
-        if pause_code in paid_pause_codes:
-            async with accounting_session() as s:
-                paid = await billing_status(s, org.id)
-                paid_resume = paid['active'] and paid['available'] > 0
-        if paid_resume or pause_code == 'workspace_tokens_exhausted' and available or (
-                pause_code not in LIMIT_PAUSES and config and config.last_status == 'ok'):
+        if pause_code == 'workspace_tokens_exhausted' and available or (config and config.last_status == 'ok'):
             await resume_survey(sim.org_id, sim.id, survey.id)
 
 
@@ -328,31 +341,37 @@ async def resume_survey(org_id, sim_id, survey_id):
     from app.services import jobs
     async with locks[org_id]:
         async with accounting_session() as s:
-            from app.services.billing import require_access
+            from app.services.billing import require_access, require_seat
             await require_access(s, org_id)
             sim = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id))).scalar_one()
             survey = (await s.execute(select(Survey).where(Survey.id == survey_id, Survey.simulation_id == sim.id).with_for_update())).scalar_one()
             if survey.status != 'paused':
                 return {'resumed': False}
+            await require_seat(s, org_id, survey.seat_user_id or sim.seat_user_id or sim.created_by,
+                               minimum=survey.pause_state.get('required_micros', 1))
             survey.status, survey.pause_state = 'queued', {}
     await jobs.enqueue('run_survey', survey_id=survey_id)
     return {'resumed': True}
 
 
-async def resume(org_id, sim_id, automatic=False):
+async def resume(org_id, sim_id, automatic=False, user_id=None):
     from app.services import jobs
     async with locks[org_id]:
         async with accounting_session() as s:
-            from app.services.billing import require_access
+            from app.services.billing import require_access, require_seat
             await require_access(s, org_id)
             sim = (await s.execute(select(Simulation).where(Simulation.id == sim_id, Simulation.org_id == org_id).with_for_update())).scalar_one()
             if sim.status != 'paused' or not sim.pause_state:
                 return {'resumed': False}
+            sim.seat_user_id = user_id or sim.seat_user_id or sim.created_by
+            await require_seat(s, org_id, sim.seat_user_id, minimum=sim.pause_state.get('required_micros', 1))
             stage = sim.pause_state['stage']
             from app.services.providers import resolve
-            res = await resolve(s, org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+            res = await resolve(s, org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                                simulation=True, user_id=sim.seat_user_id)
             if res.metered:
-                await quotas.check_tokens(s, await s.get(Organization, org_id, with_for_update=True))
+                await quotas.check_tokens(s, await s.get(Organization, org_id, with_for_update=True),
+                                          user_id=sim.seat_user_id)
             sim.pause_state = {}
             sim.status = {'build_graph': 'building_graph', 'prepare_environment': 'preparing', 'run_simulation': 'queued', 'generate_report': 'completed'}[stage]
             if stage == 'generate_report':

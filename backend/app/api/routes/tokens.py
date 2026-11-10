@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, get_sim, principal, role, superuser
+from app.core.config import settings
 from app.core.errors import AppError, NotFound, QuotaExceeded
 from app.db.base import utcnow
 from app.db.session import get_session
@@ -54,12 +55,12 @@ async def key_test(res):
 
 @router.get('/tokens')
 async def token_state(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
-    org = await s.get(Organization, p.org_id, with_for_update=True)
-    state = await quotas.allowance(s, org)
+    org = await s.get(Organization, p.org_id, with_for_update=not settings.billing_enabled)
+    state = await quotas.allowance(s, org, user_id=p.seat_user_id)
     res = await resolve(s, p.org_id)
     config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
     state['issue'] = None
-    if res.metered and not state['available']:
+    if not settings.billing_enabled and res.metered and not state['available']:
         state['issue'] = quotas.exhausted(state)
     if res.metered:
         health = await s.get(ProviderHealth, res.config_id or 'env:' + provider_name(res.settings))
@@ -74,7 +75,8 @@ async def token_state(p: Principal = Depends(principal), s: AsyncSession = Depen
 
 @router.post('/tokens/remind')
 async def remind(p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
-    state = await quotas.allowance(s, await s.get(Organization, p.org_id, with_for_update=True))
+    org = await s.get(Organization, p.org_id, with_for_update=not settings.billing_enabled)
+    state = await quotas.allowance(s, org, user_id=p.seat_user_id)
     existing = (await s.execute(select(TokenNotice).where(TokenNotice.org_id == p.org_id, TokenNotice.user_id == p.user_id,
         TokenNotice.kind == 'reset', TokenNotice.period == state['reset_at']))).scalar_one_or_none()
     if not existing:
@@ -96,7 +98,7 @@ async def topup_notify(p: Principal = Depends(role('member')), s: AsyncSession =
 
 
 @router.post('/tokens/topups/checkout')
-async def checkout(p: Principal = Depends(role('owner')), s: AsyncSession = Depends(get_session)):
+async def checkout(p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     from app.services.billing import checkout as create_checkout
     return await create_checkout(s, p, 'topup')
 
@@ -114,7 +116,8 @@ async def test_saved_key(config_id: str, p: Principal = Depends(role('admin')), 
 @router.post('/simulations/{sim_id}/tokens/resume')
 async def resume_tokens(sim_id: str, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
-    res = await resolve(s, p.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+    res = await resolve(s, p.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                        simulation=True, user_id=p.seat_user_id)
     if sim.pause_state.get('code') in ('provider_quota_exhausted', 'provider_invalid_key'):
         await s.close()
         result = await key_test(res)
@@ -123,23 +126,24 @@ async def resume_tokens(sim_id: str, p: Principal = Depends(role('member')), s: 
             raise QuotaExceeded(state['message'], code=state['code'], details=state)
     else:
         await s.close()
-    return await token_budget.resume(p.org_id, sim_id)
+    return await token_budget.resume(p.org_id, sim_id, user_id=p.seat_user_id)
 
 
 @router.post('/simulations/{sim_id}/tokens/use-platform')
 async def use_platform(sim_id: str, p: Principal = Depends(role('member')), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
-    res = await resolve(s, p.org_id, platform=True)
+    res = await resolve(s, p.org_id, platform=True, simulation=True, user_id=p.seat_user_id)
     if not res.metered:
         raise AppError('Kruvim tokens are not connected to a platform model yet.')
     completed = (await s.execute(select(func.count()).select_from(TokenCall).where(TokenCall.org_id == p.org_id,
         TokenCall.simulation_id == sim.id, TokenCall.namespace.like(sim.billing_epoch + ':%'), TokenCall.status == 'done'))).scalar()
-    await quotas.check_tokens(s, await s.get(Organization, p.org_id, with_for_update=True), max(1, sim.credits_estimate - completed))
+    org = await s.get(Organization, p.org_id, with_for_update=not settings.billing_enabled)
+    await quotas.check_tokens(s, org, max(1, sim.credits_estimate - completed), user_id=p.seat_user_id)
     sim.config = {**(sim.config or {}), 'use_platform_tokens': True}
     audit.record(s, 'tokens.use_platform', org_id=p.org_id, user_id=p.user_id, target=sim.id)
     await s.commit()
     await s.close()
-    return await token_budget.resume(p.org_id, sim_id)
+    return await token_budget.resume(p.org_id, sim_id, user_id=p.seat_user_id)
 
 
 class PlanIn(BaseModel):

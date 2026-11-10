@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, Conflict
 from app.models import Action, GraphEdge, GraphNode, Organization, Post, Report, SimAgent, SimEvent, Simulation
 from app.services import audit, jobs
+from app.services.billing import require_seat
 from app.services.events import bus
 from app.services.providers import resolve
 from app.services.quotas import check_start, check_tokens, estimate_credits
@@ -19,19 +20,25 @@ LOCKED = ("building_graph", "preparing", "queued", "running", "paused")
 _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
-async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
-    from app.services.billing import require_access
-    await require_access(s, sim.org_id)
+async def check_seat(s: AsyncSession, sim: Simulation, user_id: str | None = None):
+    user_id = user_id or sim.seat_user_id or sim.created_by
+    await require_seat(s, sim.org_id, user_id, minimum=1)
+    sim.seat_user_id = user_id
+
+
+async def queue_graph(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
+    await check_seat(s, sim, user_id)
     if sim.status in LOCKED:
         raise Conflict("A step is already running for this simulation.")
-    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
+    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                        simulation=True, user_id=sim.seat_user_id)
     if res.metered:
         org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
         overrides = (sim.config or {}).get('overrides', {})
         cfg = {'agents': {'voice': overrides.get('voice', 40), 'stakeholders': overrides.get('stakeholders', 5)},
                'time': {'rounds': int(overrides.get('hours', 24) * 60 / overrides.get('minutes_per_round', 60)), 'mean_activation': .3},
                'ab': bool((sim.content or {}).get('variant_b'))}
-        await check_tokens(s, org, estimate_credits(cfg)['total'])
+        await check_tokens(s, org, estimate_credits(cfg)['total'], user_id=sim.seat_user_id)
     from app.db.base import new_id
     sim.billing_epoch, sim.pause_state, sim.checkpoint = new_id(), {}, {}
     c = sim.content or {}
@@ -47,9 +54,8 @@ async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
     return sim.job_id
 
 
-async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
-    from app.services.billing import require_access
-    await require_access(s, sim.org_id)
+async def queue_environment(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
+    await check_seat(s, sim, user_id)
     if sim.status not in ("graph_ready", "ready", "completed", "failed", "cancelled"):
         raise Conflict("Build the graph first.")
     sim.status, sim.error = "preparing", None
@@ -68,13 +74,13 @@ async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None
 
 
 async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
-    from app.services.billing import require_access
-    await require_access(s, sim.org_id)
+    await check_seat(s, sim, user_id)
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
-    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
-    await check_start(s, org, sim.config, res.metered)
+    res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False),
+                        simulation=True, user_id=sim.seat_user_id)
+    await check_start(s, org, sim.config, res.metered, user_id=sim.seat_user_id)
     from app.db.base import new_id
     sim.billing_epoch, sim.pause_state, sim.checkpoint = new_id(), {}, {}
     sim.finished_at = None

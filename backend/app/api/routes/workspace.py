@@ -248,7 +248,7 @@ async def provider_models(body: ProviderIn, p: Principal = Depends(role("admin")
 @router.get("/usage")
 async def usage(p: Principal = Depends(principal), s: AsyncSession = Depends(get_session)):
     from app.services.quotas import allowance
-    tokens = await allowance(s, p.org)
+    tokens = await allowance(s, p.org, user_id=p.seat_user_id)
     await s.commit()
     month = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     by_kind = (await s.execute(select(UsageEvent.kind, func.sum(UsageEvent.quantity), func.sum(UsageEvent.input_tokens),

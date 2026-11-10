@@ -93,10 +93,13 @@ async def _check_assets(s: AsyncSession, p: Principal, project_id: str, content:
 
 @router.post("/projects/{project_id}/simulations")
 async def create_sim(project_id: str, body: SimulationCreate, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    from app.services.billing import require_seat
     await get_project(s, p, project_id)
+    await require_seat(s, p.org_id, p.seat_user_id, minimum=1)
     content = body.content.model_dump()
     await _check_assets(s, p, project_id, content)
-    sim = Simulation(org_id=p.org_id, project_id=project_id, created_by=p.user_id, name=body.name, requirement=body.requirement,
+    sim = Simulation(org_id=p.org_id, project_id=project_id, created_by=p.user_id, seat_user_id=p.seat_user_id,
+                     name=body.name, requirement=body.requirement,
                      content=content, audience=body.audience.model_dump(), publish_at=body.publish_at,
                      config={"overrides": body.overrides.model_dump(), "library_mode": body.library_mode})
     s.add(sim)
@@ -117,16 +120,17 @@ async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: Asy
         raise Conflict("Only a failed test can be retried.")
     sim.config = {**(sim.config or {}), "autopilot": True}
     if sim.status == "completed":
+        await lifecycle.check_seat(s, sim, p.seat_user_id)
         sim.report_status, sim.error = "queued", None
         await s.commit()
         sim.job_id = await jobs.enqueue("generate_report", sim_id=sim.id)
         await s.commit()
     elif (sim.config or {}).get("agents"):
-        await lifecycle.queue_run(s, sim, p.user_id)
+        await lifecycle.queue_run(s, sim, p.seat_user_id)
     elif (sim.ontology or {}).get("entity_types"):
-        await lifecycle.queue_environment(s, sim)
+        await lifecycle.queue_environment(s, sim, p.seat_user_id)
     else:
-        await lifecycle.queue_graph(s, sim)
+        await lifecycle.queue_graph(s, sim, p.seat_user_id)
     return {"status": "queued"}
 
 
@@ -183,21 +187,20 @@ async def clone_sim(sim_id: str, body: CloneIn | None = None, p: Principal = Dep
     mode "rerun": the same content and audience again, conditioned on today's live context (trend re-simulation)."""
     body = body or CloneIn()
     sim = await get_sim(s, p, sim_id)
+    if body.build:
+        from app.services.billing import require_seat
+        await require_seat(s, p.org_id, p.seat_user_id, minimum=1)
     new = await lifecycle.make_copy(s, sim, body.mode, body.changes, p.user_id, autopilot=body.build)
     if body.build:
-        await lifecycle.queue_graph(s, new)
+        await lifecycle.queue_graph(s, new, p.seat_user_id)
     return full(new)
 
 
 # ---- Step 1 · graph ------------------------------------------------------------------------------------------
-async def _start_graph(s: AsyncSession, sim: Simulation) -> str:
-    return await lifecycle.queue_graph(s, sim)
-
-
 @router.post("/simulations/{sim_id}/graph")
 async def build_graph(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
-    return {"ok": True, "job_id": await _start_graph(s, sim)}
+    return {"ok": True, "job_id": await lifecycle.queue_graph(s, sim, p.seat_user_id)}
 
 
 @router.get("/simulations/{sim_id}/graph")
@@ -216,7 +219,7 @@ async def graph_search(sim_id: str, q: str, p: Principal = Depends(principal), s
 @router.post("/simulations/{sim_id}/environment")
 async def prepare_environment(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
-    return {"ok": True, "job_id": await lifecycle.queue_environment(s, sim)}
+    return {"ok": True, "job_id": await lifecycle.queue_environment(s, sim, p.seat_user_id)}
 
 
 @router.patch("/simulations/{sim_id}/config")
@@ -272,7 +275,7 @@ async def agents(sim_id: str, p: Principal = Depends(principal), s: AsyncSession
 @router.post("/simulations/{sim_id}/start")
 async def start(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     sim = await get_sim(s, p, sim_id)
-    return {"ok": True, "job_id": await lifecycle.queue_run(s, sim, p.user_id)}
+    return {"ok": True, "job_id": await lifecycle.queue_run(s, sim, p.seat_user_id)}
 
 
 @router.post("/simulations/{sim_id}/control")
@@ -362,6 +365,7 @@ async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")),
         raise Conflict("Run the simulation first.")
     if sim.report_status in ("queued", "running"):
         raise Conflict("A report is already being written.")
+    await lifecycle.check_seat(s, sim, p.seat_user_id)
     sim.report_status = "queued"
     await s.commit()
     await jobs.enqueue("generate_report", sim_id=sim_id)
@@ -446,12 +450,13 @@ async def estimate_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(pr
     if sim.status != "completed":
         raise Conflict("Run the simulation first.")
     respondents, eligible = await select_respondents(s, sim_id, body.model_dump())
-    res = await resolve(s, p.org_id)
+    res = await resolve(s, p.org_id, simulation=True, user_id=p.seat_user_id)
     return survey_estimate(len(respondents), eligible, res, p.org.credits_balance)
 
 
 @router.post("/simulations/{sim_id}/surveys")
 async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    from app.services.billing import require_seat
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
         raise Conflict("Run the simulation first.")
@@ -459,7 +464,8 @@ async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role
     respondents, eligible = await select_respondents(s, sim_id, filters)
     if not respondents:
         raise AppError("No agents match these survey filters.")
-    res = await resolve(s, p.org_id)
+    await require_seat(s, p.org_id, p.seat_user_id, minimum=1)
+    res = await resolve(s, p.org_id, simulation=True, user_id=p.seat_user_id)
     if res.metered:
         await ensure_monthly_grant(s, p.org)
     estimate = survey_estimate(len(respondents), eligible, res, p.org.credits_balance)
@@ -468,11 +474,11 @@ async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role
             raise Conflict("Preview and confirm the current survey estimate before starting.", details=estimate)
     filters.update(agent_refs=[a.ref for a in respondents], n=len(respondents), estimate=estimate,
                    reserved_credits=estimate["max_credits"], provider_config_id=res.config_id, metered=res.metered)
-    sv = Survey(simulation_id=sim_id, question=body.question, filters=filters, status="queued")
+    sv = Survey(simulation_id=sim_id, question=body.question, filters=filters, status="queued", seat_user_id=p.seat_user_id)
     s.add(sv)
     await s.flush()
     if res.metered:
-        await check_tokens(s, p.org, estimate["max_credits"])
+        await check_tokens(s, p.org, estimate["max_credits"], user_id=p.seat_user_id)
     sv.filters = {**filters, "reserved_credits": 0}
     await s.commit()
     try:

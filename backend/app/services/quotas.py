@@ -95,12 +95,12 @@ async def ensure_monthly_grant(s: AsyncSession, org: Organization, now=None) -> 
         await ledger(s, org.id, plan(org)["monthly_credits"], "monthly_grant", now.strftime("%Y-%m"))
 
 
-async def allowance(s, org, now=None):
+async def allowance(s, org, now=None, *, user_id=None):
     """Daily cap on plan credits; purchased credits bypass the cap and never expire."""
     from app.core.config import settings
     if settings.billing_enabled:
         from app.services.billing import status
-        paid = await status(s, org.id)
+        paid = await status(s, org.id, user_id)
         return {'daily_limit': 0, 'daily_used': 0, 'daily_remaining': paid['available'],
             'monthly_remaining': paid['monthly_remaining'], 'topup_remaining': paid['purchased_remaining'],
             'available': paid['available'], 'reset_at': (paid['period_end'] or utcnow()).isoformat(),
@@ -151,18 +151,12 @@ def exhausted(state, needed=1, now=None):
                     {'id': 'remind', 'label': 'Remind me tomorrow', 'url': '/tokens/remind'}]}
 
 
-async def check_tokens(s, org, needed=1, now=None):
+async def check_tokens(s, org, needed=1, now=None, *, user_id=None):
     from app.core.config import settings
     if settings.billing_enabled:
-        from app.services.billing import require_access
-        await require_access(s, org.id)
-        state = await allowance(s, org, now)
-        if state['available'] <= 0:
-            raise QuotaExceeded('Your usage credits are exhausted. Buy more credits to continue.',
-                code='api_budget_exhausted', details={'code': 'api_budget_exhausted',
-                'message': 'Your usage credits are exhausted. Buy more credits to continue.',
-                'actions': [{'id': 'add_tokens', 'label': 'Buy credits', 'url': '/usage'}]})
-        return state  # Per-request dollar reservations, not call counts, enforce the cap.
+        from app.services.billing import require_seat
+        await require_seat(s, org.id, user_id, minimum=1)
+        return  # Monetary reservations enforce the balance when each request starts.
     state = await allowance(s, org, now)
     if state['available'] < needed:
         details = exhausted(state, needed, now)
@@ -173,7 +167,6 @@ async def check_tokens(s, org, needed=1, now=None):
 async def debit_call(s, org, amount=1):
     from app.core.config import settings
     if settings.billing_enabled:
-        await check_tokens(s, org)
         return {'daily': 0, 'topup': 0, 'period': ''}
     state = await check_tokens(s, org, amount)
     daily = min(amount, state['daily_remaining'])
@@ -194,7 +187,7 @@ async def refund_call(s, org, allocations):
     await ledger(s, org.id, amount, 'llm_call_refund')
 
 
-async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_key: bool) -> int:
+async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_key: bool, *, user_id=None) -> int:
     p = plan(org)
     a = cfg.get("agents", {})
     t = cfg.get("time", {})
@@ -210,5 +203,5 @@ async def check_start(s: AsyncSession, org: Organization, cfg: dict, platform_ke
         raise QuotaExceeded(f"Your plan runs {p['max_concurrent']} simulation(s) at a time. Wait for one to finish.", code="concurrency_limit")
     need = estimate_credits(cfg)["total"]
     if platform_key:   # only metered when Kruvim's own model key is used
-        await check_tokens(s, org, need)
+        await check_tokens(s, org, need, user_id=user_id)
     return need

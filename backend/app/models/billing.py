@@ -1,7 +1,7 @@
 """Durable payment fulfilment and integer-microdirham spending reservations."""
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, UTCDateTime, utcnow
@@ -22,6 +22,16 @@ class BillingAccount(Base):
     suspended: Mapped[bool] = mapped_column(default=False)
 
 
+class BillingSeat(Base):
+    __tablename__ = "billing_seats"
+    __table_args__ = (Index("ix_billing_seats_org_period", "org_id", "period_start"),)
+    org_id: Mapped[str] = mapped_column(ForeignKey("billing_accounts.org_id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    period_start: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    monthly_remaining: Mapped[int] = mapped_column(BigInteger, default=0)
+    topup_remaining: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
 class BillingOrder(IdMixin, Base):
     __tablename__ = "billing_orders"
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
@@ -33,6 +43,8 @@ class BillingOrder(IdMixin, Base):
     payment_id: Mapped[str | None] = mapped_column(String(100), unique=True)
     state: Mapped[str] = mapped_column(String(24), default="pending")
     budget_micros: Mapped[int] = mapped_column(BigInteger)
+    seat_user_id: Mapped[str | None] = mapped_column(String(32))
+    price_minor: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -63,6 +75,7 @@ class BillingUsageWindow(Base):
 class SpendReservation(IdMixin, Base):
     __tablename__ = "spend_reservations"
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    seat_user_id: Mapped[str | None] = mapped_column(String(32))
     period_start: Mapped[datetime | None] = mapped_column(UTCDateTime)
     monthly: Mapped[int] = mapped_column(BigInteger)
     topup: Mapped[int] = mapped_column(BigInteger)

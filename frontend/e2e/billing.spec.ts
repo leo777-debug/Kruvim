@@ -12,9 +12,12 @@ test("billing shows the paid plan and blocks unpaid simulation work", async ({ p
   await page.goto("/usage");
   await expect(page.getByRole("heading", { name: "Billing and credits", exact: true })).toBeVisible();
   await expect(page.getByText("AED 50", { exact: true })).toBeVisible();
-  await expect(page.getByText("2,500 extra credits · AED 10", { exact: true })).toBeVisible();
+  await expect(page.getByText("AED 20 one-time top-up", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Includes AED 10 of AI usage per seat/)).toBeVisible();
+  await expect(page.getByText(/Adds AED 10 of AI usage to your seat/)).toBeVisible();
+  await expect(page.getByText("AED 0.00 remaining", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Subscribe", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Buy extra credits", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Top up AI usage", exact: true })).toBeDisabled();
   await expect(page.getByText("Payments are being set up", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
   await page.screenshot({ path: test.info().outputPath("billing.png"), fullPage: true });

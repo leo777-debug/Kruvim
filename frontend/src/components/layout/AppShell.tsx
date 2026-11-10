@@ -13,14 +13,14 @@ import { Logo } from "./Logo";
 import { Menu } from "../ui/overlay";
 import { AlertsBell } from "@/features/monitoring/AlertsBell";
 import { Tip } from "../ui/primitives";
-import { BillingNotice, useBilling } from "@/features/settings/BillingPanel";
+import { BillingNotice, formatAed, useBilling } from "@/features/settings/BillingPanel";
 import { isNavActive, readCollapsedSections, visibleSections, writeCollapsedSections, type CollapsedSections, type NavIcon, type NavItemDefinition, type SectionId } from "./navigation";
 
 const ICONS: Record<NavIcon, LucideIcon> = { LayoutGrid, FolderKanban, Users2, Contact, Database, Gauge, HelpCircle, BarChart3, Settings, Shield };
 
 function WorkspaceBalance({ plan, credits }: { plan?: string; credits?: number }) {
   const billing = useBilling();
-  if (billing.data?.enabled) return <>{billing.data.active ? "Membership" : "Subscription needed"} · {fmt.k(billing.data.available)} credits</>;
+  if (billing.data?.enabled) return <>{billing.data.active ? "Membership" : "Subscription needed"} · {formatAed(billing.data.available_aed)} left</>;
   return <><span className="capitalize">{plan}</span> plan · {fmt.k(credits)} credits</>;
 }
 

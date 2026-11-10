@@ -35,6 +35,7 @@ class ProviderSettings:
     price_cached: float | None = None
     price_out: float | None = None
     billing_org_id: str | None = None
+    billing_user_id: str | None = None
     billing_metered: bool = False
 
 

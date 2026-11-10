@@ -12,6 +12,8 @@ from app.core.crypto import decrypt
 from app.models import ProviderConfig
 from app.services.llm import ProviderSettings
 
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
 
 @dataclass
 class Resolved:
@@ -19,8 +21,9 @@ class Resolved:
     source: str          # org | platform | env | dryrun
     config_id: str | None
 
-    def for_billing(self, org_id):
+    def for_billing(self, org_id, user_id=None):
         self.settings.billing_org_id = org_id
+        self.settings.billing_user_id = user_id
         self.settings.billing_metered = self.metered
         return self
 
@@ -36,23 +39,48 @@ def to_settings(c: ProviderConfig) -> ProviderSettings:
                             json_mode=bool(c.json_mode), price_in=c.price_in, price_cached=c.price_cached, price_out=c.price_out)
 
 
-async def resolve(s: AsyncSession, org_id: str | None, platform=False) -> Resolved:
+async def resolve(s: AsyncSession, org_id: str | None, platform=False, *, simulation=False, user_id=None) -> Resolved:
     from app.services.token_budget import current
     work = current.get()
     if work and work.res and work.org_id == org_id:
         return work.res
+    if work and work.org_id == org_id:
+        simulation = simulation or bool(work.simulation_id)
+        user_id = work.seat_user_id if user_id is None else user_id
+    if settings.billing_enabled and org_id and simulation:
+        return await paid_openai(s, org_id, user_id)
     if org_id and not platform:
         c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id == org_id, ProviderConfig.is_default.is_(True)))
                              .order_by(ProviderConfig.created_at.desc()).limit(1))).scalar_one_or_none()
         if c is not None:
-            return Resolved(to_settings(c), "org", c.id).for_billing(org_id)
+            return Resolved(to_settings(c), "org", c.id).for_billing(org_id, user_id)
     c = (await s.execute(select(ProviderConfig).where(and_(ProviderConfig.org_id.is_(None), ProviderConfig.is_default.is_(True)))
                          .order_by(ProviderConfig.created_at.desc()).limit(1))).scalar_one_or_none()
     if c is not None:
-        return Resolved(to_settings(c), "platform", c.id).for_billing(org_id)
+        return Resolved(to_settings(c), "platform", c.id).for_billing(org_id, user_id)
     if settings.llm_provider != "dryrun":
         return Resolved(ProviderSettings(provider=settings.llm_provider, preset=settings.llm_preset, base_url=settings.llm_base_url,
                                          api_key=settings.llm_api_key, voice_model=settings.llm_voice_model,
                                          report_model=settings.llm_report_model, vision_model=settings.llm_vision_model,
-                                         concurrency=settings.llm_concurrency), "env", None).for_billing(org_id)
+                                         concurrency=settings.llm_concurrency), "env", None).for_billing(org_id, user_id)
     return Resolved(ProviderSettings(), "dryrun", None)
+
+
+async def paid_openai(s, org_id, user_id):
+    key = settings.billing_openai_api_key
+    if (not key and settings.llm_provider == "openai"
+            and settings.llm_base_url.rstrip("/") == OPENAI_BASE_URL):
+        key = settings.llm_api_key
+    config_id = None
+    if not key:
+        config = await s.scalar(select(ProviderConfig).where(
+            ProviderConfig.org_id.is_(None), ProviderConfig.is_default.is_(True),
+            ProviderConfig.provider == "openai",
+            ProviderConfig.base_url.in_((OPENAI_BASE_URL, OPENAI_BASE_URL + "/")),
+        ).order_by(ProviderConfig.created_at.desc()).limit(1))
+        if config:
+            key, config_id = decrypt(config.api_key_enc), config.id
+    model = settings.billing_openai_model
+    return Resolved(ProviderSettings(provider="openai", preset="openai", base_url=OPENAI_BASE_URL,
+        api_key=key, voice_model=model, report_model=model, concurrency=settings.llm_concurrency),
+        "platform" if config_id else "env", config_id).for_billing(org_id, user_id)
