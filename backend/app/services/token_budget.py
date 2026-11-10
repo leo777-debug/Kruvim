@@ -257,8 +257,10 @@ async def pause(sim_id, state, stage):
 
 async def tick(now=None):
     """Local-midnight reminders and automatic resumptions; called by API and workers."""
+    from app.services.billing import status as billing_status
     from app.services.spend_budget import LIMIT_PAUSES
 
+    paid_pause_codes = (*LIMIT_PAUSES, 'api_budget_exhausted', 'subscription_required', 'billing_seats_exceeded')
     now = now or utcnow()
     async with accounting_session() as s:
         reminders = (await s.execute(select(TokenNotice).where(TokenNotice.kind == 'reset', TokenNotice.delivered_at.is_(None),
@@ -285,10 +287,9 @@ async def tick(now=None):
             config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
             if sim.pause_state['code'] == 'workspace_tokens_exhausted':
                 eligible = state['available'] > 0
-            elif sim.pause_state['code'] in LIMIT_PAUSES:
-                eligible = now >= datetime.fromisoformat(sim.pause_state['reset_at'])
-            elif sim.pause_state['code'] in ('api_budget_exhausted', 'subscription_required', 'billing_seats_exceeded'):
-                from app.services.billing import status as billing_status
+            elif sim.pause_state['code'] in paid_pause_codes:
+                if sim.pause_state['code'] in LIMIT_PAUSES and now < datetime.fromisoformat(sim.pause_state['reset_at']):
+                    continue
                 paid = await billing_status(s, org.id)
                 eligible = paid['active'] and paid['available'] > 0
             elif sim.pause_state['code'] in ('billing_model_unpriced', 'billing_image_unpriced'):
@@ -304,9 +305,8 @@ async def tick(now=None):
         surveys = (await s.execute(select(Survey, Simulation).join(Simulation, Simulation.id == Survey.simulation_id)
             .where(Survey.status == 'paused', Simulation.status == 'completed'))).all()
     for survey, sim in surveys:
-        if survey.pause_state.get('code') in LIMIT_PAUSES:
-            if now >= datetime.fromisoformat(survey.pause_state['reset_at']):
-                await resume_survey(sim.org_id, sim.id, survey.id)
+        pause_code = survey.pause_state.get('code')
+        if pause_code in LIMIT_PAUSES and now < datetime.fromisoformat(survey.pause_state['reset_at']):
             continue
         async with accounting_session() as s:
             org = await s.get(Organization, sim.org_id, with_for_update=True)
@@ -315,12 +315,12 @@ async def tick(now=None):
             res = await resolve(s, org.id, platform=(sim.config or {}).get('use_platform_tokens', False))
             config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
         paid_resume = False
-        if survey.pause_state.get('code') in ('api_budget_exhausted', 'subscription_required', 'billing_seats_exceeded'):
-            from app.services.billing import status as billing_status
+        if pause_code in paid_pause_codes:
             async with accounting_session() as s:
                 paid = await billing_status(s, org.id)
                 paid_resume = paid['active'] and paid['available'] > 0
-        if paid_resume or survey.pause_state.get('code') == 'workspace_tokens_exhausted' and available or config and config.last_status == 'ok':
+        if paid_resume or pause_code == 'workspace_tokens_exhausted' and available or (
+                pause_code not in LIMIT_PAUSES and config and config.last_status == 'ok'):
             await resume_survey(sim.org_id, sim.id, survey.id)
 
 
