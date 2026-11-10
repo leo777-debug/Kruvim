@@ -39,11 +39,11 @@ def signed(event, *, event_id="evt_1", stamp=None):
     return raw, {"webhook-id": event_id, "webhook-timestamp": stamp, "webhook-signature": "v1," + signature}
 
 
-async def seed_subscription(org_id, *, remaining=10_000_000):
+async def seed_subscription(org_id, *, remaining=10_000_000, suffix="test"):
     now = utcnow()
     async with session_scope() as s:
         a = await billing.account(s, org_id)
-        a.customer_id, a.subscription_id, a.status = "cus_test", "sub_test", "active"
+        a.customer_id, a.subscription_id, a.status = f"cus_{suffix}", f"sub_{suffix}", "active"
         a.period_start, a.period_end = now, now + timedelta(days=30)
         a.monthly_remaining = remaining
     return now
@@ -196,6 +196,75 @@ async def test_model_requests_settle_actual_usage_and_timeout_does_not_retry(aut
         await llm.complete(system="test", user="hello", role="voice", max_tokens=100, usage=Usage())
     assert len(requests) == 2
     await llm.aclose()
+
+
+async def test_workspace_ai_rate_limit_blocks_provider_calls_until_next_minute(auth, payments, monkeypatch):
+    _, data = auth
+    org_id = data["orgs"][0]["id"]
+    await seed_subscription(org_id)
+    now = utcnow().replace(second=0, microsecond=0)
+    monkeypatch.setattr(spend_budget, "utcnow", lambda: now)
+    monkeypatch.setattr(settings, "billing_ai_calls_per_minute", 1)
+    monkeypatch.setattr(settings, "billing_model_prices", {"test-model": {"input": .1, "output": .4}})
+    llm = make_llm(ProviderSettings(provider="openai", base_url="https://model.invalid/v1", voice_model="test-model",
+                                    billing_org_id=org_id, billing_metered=True))
+    await llm.client.aclose()
+    calls = []
+
+    async def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            "choices": [{"message": {"content": "ok"}}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as llm.client:
+        async def complete():
+            return await llm.complete(system="test", user="hello", role="voice", max_tokens=100, usage=Usage())
+
+        assert await complete() == "ok"
+        with pytest.raises(BudgetPause) as blocked:
+            await complete()
+        assert blocked.value.state["code"] == "ai_rate_limited"
+        assert len(calls) == 1
+        now += timedelta(minutes=1)
+        assert await complete() == "ok"
+        assert len(calls) == 2
+
+
+async def test_platform_spend_cap_is_shared_and_releases_only_unused_reservations(client, auth, payments, monkeypatch):
+    _, data = auth
+    first = data["orgs"][0]["id"]
+    signup = await client.post("/auth/register", json={"email": "second@example.com",
+        "password": "correct-horse-battery", "name": "Second", "org_name": "Second"})
+    assert signup.status_code == 200, signup.text
+    second = signup.json()["orgs"][0]["id"]
+    await seed_subscription(first)
+    await seed_subscription(second, suffix="second")
+    monkeypatch.setattr(settings, "billing_platform_monthly_budget_aed", 10)
+    now = utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(spend_budget, "utcnow", lambda: now)
+
+    results = await asyncio.gather(spend_budget.reserve(first, 7_000_000), spend_budget.reserve(second, 7_000_000),
+                                   return_exceptions=True)
+    winner = next(i for i, result in enumerate(results) if isinstance(result, str))
+    loser = 1 - winner
+    assert isinstance(results[loser], BudgetPause)
+    assert results[loser].state["code"] == "platform_budget_exhausted"
+    blocked_org = (first, second)[loser]
+    async with session_scope() as s:
+        assert (await s.get(BillingAccount, blocked_org)).monthly_remaining == 10_000_000
+    await asyncio.gather(*(spend_budget.settle(results[winner], 4_000_000) for _ in range(2)))
+    outstanding = await spend_budget.reserve(blocked_org, 6_000_000)
+    with pytest.raises(BudgetPause) as blocked:
+        await spend_budget.reserve(blocked_org, 1)
+    assert blocked.value.state["code"] == "platform_budget_exhausted"
+
+    now = (now + timedelta(days=32)).replace(day=1)
+    await spend_budget.reserve(blocked_org, 4_000_000)
+    await spend_budget.settle(outstanding, 1_000_000)
+    await spend_budget.reserve(blocked_org, 1_000_000)
+    with pytest.raises(BudgetPause) as blocked:
+        await spend_budget.reserve((first, second)[winner], 6_000_000)
+    assert blocked.value.state["code"] == "platform_budget_exhausted"
 
 
 async def test_checkout_uses_server_catalog_and_cannot_grant_access(client, auth, payments, monkeypatch):

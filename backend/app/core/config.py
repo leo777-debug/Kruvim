@@ -95,6 +95,8 @@ class Settings(BaseSettings):
     billing_topup_price_aed: int = Field(default=10, ge=1)
     billing_monthly_budget_aed: float = Field(default=10, gt=0)
     billing_topup_budget_aed: float = Field(default=2.5, gt=0)
+    billing_ai_calls_per_minute: int = Field(default=120, ge=1)
+    billing_platform_monthly_budget_aed: float = Field(default=100, gt=0, le=1_000_000)
     # Per-million USD rates, keyed by model id. Missing rates block platform calls.
     # Each entry: {"input": ..., "output": ..., "cached": ...}.
     billing_model_prices: dict[str, dict[str, float]] = Field(default_factory=dict)

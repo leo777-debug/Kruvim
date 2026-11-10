@@ -6,6 +6,7 @@ import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from datetime import datetime
 from functools import wraps
 from inspect import signature
 from typing import get_type_hints
@@ -16,7 +17,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.core.config import settings
 from app.core.crypto import decrypt, encrypt
-from app.core.errors import QuotaExceeded
+from app.core.errors import AppError, QuotaExceeded, RateLimited
 from app.db.base import new_id, utcnow
 from app.db.session import session_scope
 from app.models import (
@@ -63,6 +64,10 @@ def interactive_budget(needed):
                 async with scope(work):
                     return await fn(*args, **kwargs)
             except BudgetPause as exc:
+                if exc.state['code'] == 'ai_rate_limited':
+                    raise RateLimited(exc.state['message'], code=exc.state['code'], details=exc.state) from exc
+                if exc.state['code'] == 'platform_budget_exhausted':
+                    raise AppError(exc.state['message'], status=503, code=exc.state['code'], details=exc.state) from exc
                 raise QuotaExceeded(exc.state['message'], code=exc.state['code'], details=exc.state) from exc
         hints = get_type_hints(fn)
         wrapper.__signature__ = signature(fn).replace(parameters=[param.replace(annotation=hints.get(param.name, param.annotation))
@@ -195,10 +200,13 @@ class Work:
             caller_usage = kwargs['usage']
             usage = Usage()
             kwargs = {**kwargs, 'usage': usage}
+            from app.services.spend_budget import LIMIT_PAUSES
+            from app.services.spend_budget import call as paid_call
             try:
-                from app.services.spend_budget import call as paid_call
                 response = await paid_call(llm, fn, kwargs)
             except BaseException as exc:
+                if isinstance(exc, BudgetPause) and exc.state['code'] in LIMIT_PAUSES:
+                    self.paused = exc.state
                 async with locks[self.org_id]:
                     async with accounting_session() as s:
                         receipt = await s.get(TokenCall, receipt_id, with_for_update=True)
@@ -249,6 +257,8 @@ async def pause(sim_id, state, stage):
 
 async def tick(now=None):
     """Local-midnight reminders and automatic resumptions; called by API and workers."""
+    from app.services.spend_budget import LIMIT_PAUSES
+
     now = now or utcnow()
     async with accounting_session() as s:
         reminders = (await s.execute(select(TokenNotice).where(TokenNotice.kind == 'reset', TokenNotice.delivered_at.is_(None),
@@ -275,6 +285,8 @@ async def tick(now=None):
             config = await s.get(ProviderConfig, res.config_id) if res.config_id else None
             if sim.pause_state['code'] == 'workspace_tokens_exhausted':
                 eligible = state['available'] > 0
+            elif sim.pause_state['code'] in LIMIT_PAUSES:
+                eligible = now >= datetime.fromisoformat(sim.pause_state['reset_at'])
             elif sim.pause_state['code'] in ('api_budget_exhausted', 'subscription_required', 'billing_seats_exceeded'):
                 from app.services.billing import status as billing_status
                 paid = await billing_status(s, org.id)
@@ -292,6 +304,10 @@ async def tick(now=None):
         surveys = (await s.execute(select(Survey, Simulation).join(Simulation, Simulation.id == Survey.simulation_id)
             .where(Survey.status == 'paused', Simulation.status == 'completed'))).all()
     for survey, sim in surveys:
+        if survey.pause_state.get('code') in LIMIT_PAUSES:
+            if now >= datetime.fromisoformat(survey.pause_state['reset_at']):
+                await resume_survey(sim.org_id, sim.id, survey.id)
+            continue
         async with accounting_session() as s:
             org = await s.get(Organization, sim.org_id, with_for_update=True)
             available = (await quotas.allowance(s, org, now))['available']

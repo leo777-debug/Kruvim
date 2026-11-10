@@ -53,12 +53,20 @@ class BillingGrant(IdMixin, Base):
     reversed: Mapped[bool] = mapped_column(default=False)
 
 
+class BillingUsageWindow(Base):
+    __tablename__ = "billing_usage_windows"
+    scope: Mapped[str] = mapped_column(String(48), primary_key=True)
+    bucket: Mapped[int] = mapped_column(Integer)
+    used: Mapped[int] = mapped_column(BigInteger)
+
+
 class SpendReservation(IdMixin, Base):
     __tablename__ = "spend_reservations"
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     period_start: Mapped[datetime | None] = mapped_column(UTCDateTime)
     monthly: Mapped[int] = mapped_column(BigInteger)
     topup: Mapped[int] = mapped_column(BigInteger)
+    platform_bucket: Mapped[int | None] = mapped_column(Integer)
     actual: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(24), default="reserved")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
