@@ -61,6 +61,10 @@ from implementing checkout.
 6. Apply migrations to the intended database: `python -m alembic upgrade head` from `backend/`.
    Back up the database before a production migration. Restart both API and workers with
    the same billing configuration.
+   If migrations run as an administrator and the API uses a separate database role,
+   give that server role the same grants and RLS policy on `billing_seats` as on
+   `billing_accounts`. The billing preview uses its dedicated `kruvim_billing_preview`
+   role for both tables.
 7. Sign in as the workspace owner and open **Billing and credits** at `/usage`. Complete
    test checkout and confirm each paid seat receives AED 10 after the verified webhook.
    Check an OpenAI debit and an insufficient-balance pause. Buy the AED 20 top-up from
