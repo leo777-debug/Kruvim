@@ -278,7 +278,7 @@ async def test_checkout_uses_server_catalog_and_cannot_grant_access(client, auth
     async def fake_dodo(method, path, **kw):
         seen.append((method, path, kw))
         if method == "GET":
-            return {"price": {"type": "recurring_price", "price": 5000, "currency": "AED",
+            return {"price": {"type": "recurring_price", "price": 5000, "currency": "AED", "tax_inclusive": True,
                               "payment_frequency_count": 1, "payment_frequency_interval": "Month"}}
         return {"session_id": "cks_test", "checkout_url": "https://test.checkout.dodopayments.com/session/cks_test"}
     monkeypatch.setattr(billing, "dodo", fake_dodo)
@@ -396,7 +396,7 @@ async def test_paid_openai_usage_blocks_only_the_spent_seat_and_member_can_top_u
 
     async def dodo_request(method, path, **kwargs):
         if path == "/products/p_topup":
-            return {"price": {"type": "one_time_price", "price": 2000, "currency": "AED"}}
+            return {"price": {"type": "one_time_price", "price": 2000, "currency": "AED", "tax_inclusive": True}}
         if path == "/checkouts":
             assert kwargs["body"]["customer"]["email"] == "member@example.com"
             return {"session_id": "cks_member", "checkout_url": "https://test.checkout.dodopayments.com/session/cks_member"}

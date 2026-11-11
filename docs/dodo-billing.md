@@ -23,9 +23,10 @@ from implementing checkout.
    eligibility, the accepted ID, payout bank account, exact AED pricing, and applicable fees.
 2. In Dodo test mode, create a fixed recurring product in AED: **5000 minor units per seat**,
    billing every **1 month**, with no trial, discount, purchasing-power-parity reduction,
-   or usage-based charges. Use a sufficiently long total subscription duration (Dodo
+   or usage-based charges. Turn on tax-inclusive pricing. Use a sufficiently long total subscription duration (Dodo
    recommends 20 years for subscriptions that renew until cancelled).
-3. Create a fixed one-time AED product for **2000 minor units**, with pay-what-you-want off.
+3. Create a fixed one-time AED product for **2000 minor units**, with tax-inclusive pricing
+   on and pay-what-you-want off.
    Top-ups grant local Kruvim credits; do not attach a second Dodo credit ledger to the
    products unless replacing the local ledger explicitly.
 4. Add an HTTPS webhook pointing to:
@@ -68,7 +69,7 @@ from implementing checkout.
    balance is credited only once.
 8. Repeat product/webhook creation in live mode; test ids and signing keys do not carry
    over. Switch `KRUVIM_DODO_ENVIRONMENT=live_mode` only after merchant approval and
-   testing of the real configuration. Confirm whether tax-inclusive pricing is desired.
+   testing of the real configuration.
 
 Checkout validates the catalog's AED amount and billing interval before redirecting.
 It deliberately refuses a product priced in another currency rather than silently

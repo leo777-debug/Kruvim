@@ -234,7 +234,8 @@ async def checkout(s, p, kind, seats=1):
     pricing = product.get("price") or {}
     expected_type = "recurring_price" if kind == "subscription" else "one_time_price"
     if (pricing.get("type") != expected_type or pricing.get("currency") != "AED"
-            or pricing.get("price") != price * 100 or pricing.get("pay_what_you_want")
+            or pricing.get("price") != price * 100 or pricing.get("tax_inclusive") is not True
+            or pricing.get("pay_what_you_want")
             or pricing.get("discount", 0) or pricing.get("discount_bps", 0)
             or pricing.get("purchasing_power_parity")
             or kind == "subscription" and (pricing.get("payment_frequency_interval") not in ("Month", "month")
@@ -308,10 +309,12 @@ async def _subscription(s, sub):
     return a, order
 
 
-def verify_amount(payment, expected):
+def verify_amount(payment, order, *, seats=1):
     total = int(payment.get("total_amount", 0))
-    tax = int(payment.get("tax") or 0)
-    if payment.get("currency") != "AED" or tax < 0 or total not in (expected, expected + tax):
+    expected = (order.price_minor or (5000 if order.kind == "subscription" else 1000)) * seats
+    # Older checkouts could add tax to the quoted amount.
+    legacy_tax = int(payment.get("tax") or 0) if order.price_minor is None else 0
+    if payment.get("currency") != "AED" or legacy_tax < 0 or total not in (expected, expected + legacy_tax):
         raise ValueError("Unexpected payment currency or amount")
 
 
@@ -347,7 +350,7 @@ async def _payment(s, payment, sub=None):
         seats = int(sub["quantity"])
         if payment["charge_type"] == "new" and seats != order.quantity:
             raise ValueError("Initial paid seat quantity mismatch")
-        verify_amount(payment, (order.price_minor or 5000) * seats)
+        verify_amount(payment, order, seats=seats)
         amount = 0
         if not a.period_start or start > a.period_start:
             a.seats = seats
@@ -379,7 +382,7 @@ async def _payment(s, payment, sub=None):
         if (order.session_id and payment.get("checkout_session_id")
                 and order.session_id != payment["checkout_session_id"]):
             raise ValueError("Credit pack checkout mismatch")
-        verify_amount(payment, order.price_minor or 1000)
+        verify_amount(payment, order)
         amount = order.budget_micros
         user_id = order.seat_user_id or await primary_seat_user(s, a.org_id)
         if user_id:

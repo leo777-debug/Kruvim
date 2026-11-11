@@ -92,7 +92,7 @@ def survey_budget(fn):
         except BudgetPause as exc:
             async with session_scope() as s:
                 survey = await s.get(Survey, survey_id)
-                survey.status, survey.pause_state = 'paused', {**exc.state, 'stage': 'run_survey'}
+                survey.status, survey.pause_state = 'paused', {**public_pause_state(exc.state), 'stage': 'run_survey'}
     return wrapper
 
 
@@ -247,7 +247,15 @@ async def scope(work):
         current.reset(token)
 
 
+def public_pause_state(state):
+    if state['code'] != 'api_budget_exhausted':
+        return state
+    state = {k: v for k, v in state.items() if k != 'available_aed'}
+    return {**state, 'message': "This test needs more AI usage. Top up or wait for the next successful renewal."}
+
+
 async def pause(sim_id, state, stage):
+    state = public_pause_state(state)
     async with session_scope() as s:
         sim = await s.get(Simulation, sim_id)
         sim.status = 'paused'

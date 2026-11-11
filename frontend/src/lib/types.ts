@@ -48,6 +48,7 @@ export interface Simulation extends SimSummary {
   card: Record<string, any>;
   config: Record<string, any>;
   usage: Record<string, any>;
+  pause_state?: { code?: string };
   results: Record<string, any>;
   seed: number;
 }

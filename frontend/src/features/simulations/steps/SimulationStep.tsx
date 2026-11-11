@@ -28,7 +28,11 @@ export function SimulationStep({ sim, stream, refetch, onAgent }: { sim: Simulat
 
   async function control(cmd: string, extra: any = {}) {
     try {
-      await api(`/simulations/${sim.id}/control`, { json: { cmd, ...extra } });
+      if (cmd === "resume" && sim.pause_state?.code) {
+        await api(`/simulations/${sim.id}/tokens/resume`, { method: "POST" });
+      } else {
+        await api(`/simulations/${sim.id}/control`, { json: { cmd, ...extra } });
+      }
       if (cmd === "inject") toast.success("Event injected. Agents will see it next round.");
       refetch();
     } catch (e) {

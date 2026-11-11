@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { LiveGraph, type GraphHandle } from "@/components/graph/LiveGraph";
 import { Button } from "@/components/ui/button";
 import { Menu } from "@/components/ui/overlay";
-import { Badge, Switch } from "@/components/ui/primitives";
+import { Badge, Callout, Switch } from "@/components/ui/primitives";
+import { formatAed, useBilling } from "@/features/settings/BillingPanel";
 import { api, API, ApiError } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { GEdge, GNode, Simulation } from "@/lib/types";
@@ -46,6 +47,7 @@ export default function SimulationPage() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
   const orgId = useAuth((s) => s.orgId);
+  const billing = useBilling();
   const graphRef = useRef<GraphHandle>(null);
   const [step, setStep] = useState<number | null>(null);
   const [scheduling, setScheduling] = useState(false);
@@ -64,6 +66,9 @@ export default function SimulationPage() {
   const refetch = useCallback(() => { qc.invalidateQueries({ queryKey: [orgId, "sim", simId] }); }, [qc, orgId, simId]);
   const stream = useSimulationStream(simId, graphRef, (t) => {
     refetch();
+    if (t === "simulation.token_paused" || t === "report.completed") {
+      void qc.invalidateQueries({ queryKey: [orgId, "billing"] });
+    }
     if (t === "simulation.completed") { toast.success("Your audience has finished. Writing your results."); setStep((current) => current === 3 ? 4 : current); }
     if (t === "report.completed") toast.success("Report ready");
     if (t.endsWith(".failed")) toast.error("A step failed. See the details on the page.");
@@ -128,7 +133,11 @@ export default function SimulationPage() {
   }
 
   const showGraph = cur <= 3;
-  if (!technical) return <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6"><div className="mb-5 flex flex-wrap items-start justify-between gap-3"><h1 className="min-w-0 break-words text-xl font-semibold">{sim.name}</h1><Button onClick={() => setTechnical(true)}>See how it works</Button></div><div className="mb-5 flex flex-wrap gap-2"><Button onClick={() => setStep(4)}>Results</Button><Button disabled={reach < 5} onClick={() => setStep(5)}>Interviews</Button>{sim.status === "completed" && <Button onClick={() => { setTechnical(true); setStep(4); }}>Details</Button>}</div>{cur === 5 && reach === 5 ? <InteractionStep sim={sim} stream={stream} /> : <SimpleResults sim={sim} stream={stream} refetch={refetch} onAgent={setAgentRef} onDetails={() => { setTechnical(true); setStep(4); }} />}<AgentSheet simId={sim.id} agentRef={agentRef} onClose={() => setAgentRef(null)} onChat={() => { setAgentRef(null); setStep(5); }} /></div>;
+  const usagePause = sim.pause_state?.code === "api_budget_exhausted" && <Callout tone="warn" title="AI usage needed" className="mb-4">
+    <p>{billing.data && `Your seat has ${formatAed(billing.data.available_aed)} of AI usage left. `}Top up or wait for your next successful renewal.</p>
+    <Link to="/usage" className="mt-2 inline-block font-semibold underline underline-offset-4">Top up AI usage</Link>
+  </Callout>;
+  if (!technical) return <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6"><div className="mb-5 flex flex-wrap items-start justify-between gap-3"><h1 className="min-w-0 break-words text-xl font-semibold">{sim.name}</h1><Button onClick={() => setTechnical(true)}>See how it works</Button></div>{usagePause}<div className="mb-5 flex flex-wrap gap-2"><Button onClick={() => setStep(4)}>Results</Button><Button disabled={reach < 5} onClick={() => setStep(5)}>Interviews</Button>{sim.status === "completed" && <Button onClick={() => { setTechnical(true); setStep(4); }}>Details</Button>}</div>{cur === 5 && reach === 5 ? <InteractionStep sim={sim} stream={stream} /> : <SimpleResults sim={sim} stream={stream} refetch={refetch} onAgent={setAgentRef} onDetails={() => { setTechnical(true); setStep(4); }} />}<AgentSheet simId={sim.id} agentRef={agentRef} onClose={() => setAgentRef(null)} onChat={() => { setAgentRef(null); setStep(5); }} /></div>;
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-line bg-panel px-4 pt-4 sm:px-6">
@@ -189,6 +198,7 @@ export default function SimulationPage() {
         </div>
       </div>
 
+      {usagePause && <div className="px-4 pt-4 sm:px-6">{usagePause}</div>}
       {(sim.status === "failed" || sim.report_status === "failed") && <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-neg/30 bg-neg/5 px-5 py-3 text-sm"><span>{sim.error || "This test could not finish. Try again."}</span><Button onClick={async () => { try { await api(`/simulations/${simId}/retry`, { method: "POST" }); refetch(); } catch (e) { toast.error(e instanceof Error ? e.message : "Retry failed"); } }}>Retry</Button></div>}
       <StepIntro step={cur} sim={sim} />
       <div className={cn("min-h-0 flex-1", showGraph ? "flex flex-col overflow-y-auto lg:grid lg:grid-cols-[minmax(380px,0.9fr)_minmax(0,1.3fr)] lg:overflow-hidden" : "overflow-y-auto")}>
