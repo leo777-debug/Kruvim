@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Logo } from "@/components/layout/Logo";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { savePassword } from "@/lib/passwords";
 import type { Session } from "@/lib/types";
 
 function Shell({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
@@ -33,17 +34,25 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const nav = useNavigate();
   const loc = useLocation() as { state?: { from?: string } };
   const setSession = useAuth((s) => s.setSession);
-  const [f, setF] = useState({ email: "", password: "", name: "", org_name: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [saveInBrowser, setSaveInBrowser] = useState(true);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
+    // Read the form itself so browser autofill works even without a change event.
+    const data = new FormData(e.currentTarget as HTMLFormElement);
+    const email = String(data.get("email") || "").trim();
+    const password = String(data.get("password") || "");
     setBusy(true);
     setErr(null);
     try {
-      const s = await api<Session>(`/auth/${mode}`, { json: mode === "login" ? { email: f.email, password: f.password } : f });
+      const s = await api<Session>(`/auth/${mode}`, { json: mode === "login" ? { email, password } : {
+        email, password, name: String(data.get("name") || ""), org_name: String(data.get("organization") || ""),
+      } }, false);
       setSession(s);
+      if (saveInBrowser) void savePassword(email, password, s.user.name || undefined);
       nav(loc.state?.from || "/home", { replace: true });
     } catch (ex) {
       setErr(ex instanceof ApiError ? ex.message : "Something went wrong.");
@@ -52,23 +61,30 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     }
   }
 
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   return (
     <Shell title={mode === "login" ? "Sign in" : "Create your workspace"} subtitle={mode === "login" ? "Sign in to your workspace." : "The free plan includes 2,000 credits a month."}>
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} autoComplete="on" className="space-y-4">
         {mode === "register" && (
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Your name"><Input value={f.name} onChange={set("name")} autoComplete="name" /></Field>
-            <Field label="Workspace"><Input value={f.org_name} onChange={set("org_name")} placeholder="Acme Media" /></Field>
+            <Field label="Your name"><Input name="name" autoComplete="name" /></Field>
+            <Field label="Workspace"><Input name="organization" autoComplete="organization" placeholder="Acme Media" /></Field>
           </div>
         )}
-        <Field label="Email"><Input type="email" required value={f.email} onChange={set("email")} autoComplete="email" /></Field>
+        {/* Keep browser-managed values in the DOM: rerenders must not replace autofill. */}
+        <Field label="Email"><Input id="auth-email" name="email" type="email" required autoComplete="username" autoCapitalize="none" spellCheck={false} /></Field>
         <Field label="Password" hint={mode === "register" ? "10+ characters" : undefined}>
-          <Input type="password" required minLength={mode === "register" ? 10 : undefined} value={f.password} onChange={set("password")}
+          <Input id="auth-password" name="password" type="password" required minLength={mode === "register" ? 10 : undefined} maxLength={200}
             autoComplete={mode === "login" ? "current-password" : "new-password"} />
         </Field>
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-2 text-[13px] text-fg">
+            <input type="checkbox" checked={saveInBrowser} onChange={(e) => setSaveInBrowser(e.target.checked)} className="accent-brand" />
+            Save password in this browser
+          </label>
+          <p className="text-xs text-muted">Your browser may ask to save your password for future sign-ins. You control saved passwords in your browser settings.</p>
+        </div>
         {err && <div className="rounded-md border border-neg/25 bg-neg/[0.06] px-3 py-2 text-[13px] text-neg">{err}</div>}
-        <Button variant="primary" size="lg" className="w-full" loading={busy}>{mode === "login" ? "Sign in" : "Create account"}</Button>
+        <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>{mode === "login" ? "Sign in" : "Create account"}</Button>
       </form>
       <div className="mt-6 border-t border-line pt-4 text-center text-[13px] text-muted">
         {mode === "login" ? <>New to Kruvim? <Link className="text-brand hover:underline" to="/register">Create an account</Link></>
