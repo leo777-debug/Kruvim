@@ -220,14 +220,22 @@ async def retrieve(org_id, project_id, query, personas, limit=3, *, mode="privat
                 "id": "library:" + entry.id, "source": "workspace_library", "title": entry.title,
                 "summary": entry.data, "region": entry.region, "language": entry.language,
                 "tags": entry.tags, "source_weight": 1, "folder_id": folder.id, "folder": folder.name,
+                "dataset_file_id": hashlib.sha256((entry.filename or "Typed row").encode()).hexdigest(),
                 "filename": (entry.filename or "Typed row") if folder.org_id == org_id else "Shared evidence",
                 "revision": entry.revision, "visibility": folder.visibility,
                 "provenance": {"label": "Admin baseline; not independently verified" if group == "baseline"
                     else "User-supplied evidence; not independently verified",
                     "workspace_private": folder.visibility == "private", "library_group": group}}))
+    from app.services.dataset_context import audience_scope, compact_selection, prepare_candidates
+    prepare_candidates(candidates)
     candidates.sort(key=lambda item: (-item[0], item[2]["id"]))
+    selections = {}
     result = []
     for person in personas:
+        scope = audience_scope(person)
+        if scope in selections:
+            result.append(list(selections[scope]))
+            continue
         matching = [(group, evidence) for _, group, evidence in candidates if personal_match(evidence, person)]
         selected = []
         # Preserve a place for each relevant source group instead of allowing a large
@@ -238,5 +246,6 @@ async def retrieve(org_id, project_id, query, personas, limit=3, *, mode="privat
                 selected.append(item)
         chosen = {e["id"] for e in selected}
         selected.extend(e for _, e in matching if e["id"] not in chosen)
-        result.append(selected[:limit])
+        selections[scope] = compact_selection(selected[:limit])
+        result.append(list(selections[scope]))
     return result
