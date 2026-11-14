@@ -26,7 +26,7 @@ class Resolved:
 
     @property
     def metered(self) -> bool:
-        return self.source in ("platform", "env") and self.settings.provider != "dryrun"
+        return not settings.paywall_paused and self.source in ("platform", "env") and self.settings.provider != "dryrun"
 
 
 def to_settings(c: ProviderConfig) -> ProviderSettings:

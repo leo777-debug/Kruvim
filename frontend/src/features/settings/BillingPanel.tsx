@@ -9,6 +9,7 @@ import { can, useAuth } from "@/lib/auth";
 import { fmt } from "@/lib/utils";
 
 export interface BillingState {
+  paused?: boolean;
   enabled: boolean;
   configured: boolean;
   environment: "test_mode" | "live_mode";

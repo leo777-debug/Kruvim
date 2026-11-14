@@ -81,7 +81,7 @@ async def status(s, org_id):
     usable = active(a) and member_count <= a.seats
     monthly = max(0, a.monthly_remaining) if usable else 0
     total = max(0, monthly + a.topup_remaining) if usable else 0
-    return {"enabled": settings.billing_enabled, "configured": configured(), "provider": "dodo",
+    return {"paused": settings.paywall_paused, "enabled": settings.billing_enabled, "configured": configured(), "provider": "dodo",
         "environment": settings.dodo_environment, "active": usable, "status": a.status,
         "review_required": a.suspended, "seats": a.seats, "members": member_count,
         "period_end": a.period_end, "can_manage": bool(a.customer_id),

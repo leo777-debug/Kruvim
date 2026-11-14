@@ -1,3 +1,4 @@
+import { useBilling } from "../settings/BillingPanel";
 import { useQuery } from "@tanstack/react-query";
 import { Check, FolderPlus, Plus } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const orgId = useAuth((s) => s.orgId);
   const isPlatformAdmin = useAuth(s => !!s.user?.is_superuser);
   const nav = useNavigate();
+  const billing = useBilling();
   const sims = useQuery({ queryKey: [orgId, "sims"], queryFn: () => api<SimSummary[]>("/simulations?limit=50"), refetchInterval: 10000 });
   const usage = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
   const world = useQuery({ queryKey: ["world", "MENA"], queryFn: () => api("/datapool/world?regions=AE,SA,EG,JO,MA,US"), staleTime: 300_000 });
@@ -38,7 +40,7 @@ export default function DashboardPage() {
   const sources = Object.entries(pool.data?.last_24h?.by_source || {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][];
 
   return (
-    <Page title="Overview" subtitle="Simulations, live data coverage and credit usage for this workspace."
+    <Page title="Overview" subtitle="Simulations and live data coverage for this workspace."
       actions={<><Button onClick={() => nav("/projects?new=1")}><FolderPlus className="h-4 w-4" />New project</Button>
         <Button variant="primary" onClick={() => nav("/projects")}><Plus className="h-4 w-4" />New simulation</Button></>}>
       {dry && (
@@ -67,7 +69,7 @@ export default function DashboardPage() {
       <Card className="grid grid-cols-2 divide-line md:grid-cols-4 md:divide-x">
         <Stat className="p-4" label="Simulations" value={fmt.n(list.length)} sub={`${running} in progress`} />
         <Stat className="p-4" label="Mean projected opinion" value={done.length ? fmt.s2(done.reduce((a, s) => a + s.score!, 0) / done.length) : "–"} sub={`across ${done.length} completed runs`} />
-        <Stat className="p-4" label="Credit balance" value={fmt.n(usage.data?.credits_balance)} sub={usage.data ? `${usage.data.limits.label} plan · ${usage.data.metered ? "metered" : "own key or dry run"}` : ""} />
+        {!billing.data?.paused && <Stat className="p-4" label="Credit balance" value={fmt.n(usage.data?.credits_balance)} sub={usage.data ? `${usage.data.limits.label} plan · ${usage.data.metered ? "metered" : "own key or dry run"}` : ""} />}
         <Stat className="p-4" label="Signals collected" value={fmt.n(pool.data?.signals_total)} sub={`${fmt.n(pool.data?.archive?.snapshots)} hourly snapshots archived`} />
       </Card>
 

@@ -34,6 +34,8 @@ async def checkout(body: CheckoutIn, p: Principal = Depends(role("owner")), s: A
 
 @router.post("/portal")
 async def portal(p: Principal = Depends(role("owner")), s: AsyncSession = Depends(get_session)):
+    if settings.paywall_paused:
+        raise AppError("Payments are temporarily unavailable.", status=503)
     if p.via != "session":
         raise Forbidden("Sign in as the workspace owner to manage billing.")
     a = await billing.account(s, p.org_id)

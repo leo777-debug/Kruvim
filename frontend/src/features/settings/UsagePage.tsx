@@ -12,6 +12,7 @@ export default function UsagePage() {
   const q = useQuery({ queryKey: [orgId, "usage"], queryFn: () => api("/usage") });
   const billing = useBilling();
   if (billing.data?.enabled || billing.isError) return <Page title="Billing and credits" subtitle="Manage your membership, included usage, and extra credits."><BillingPanel /></Page>;
+  if (billing.data?.paused) return <Page title="Usage" subtitle="Payments are temporarily paused. No subscription or credits are required.">{null}</Page>;
   const u = q.data;
   if (!u) return null;
   const calls = u.month.reduce((a: number, m: any) => a + m.calls, 0);

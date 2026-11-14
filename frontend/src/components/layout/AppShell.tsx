@@ -20,6 +20,7 @@ const ICONS: Record<NavIcon, LucideIcon> = { LayoutGrid, FolderKanban, Users2, C
 
 function WorkspaceBalance({ plan, credits }: { plan?: string; credits?: number }) {
   const billing = useBilling();
+  if (billing.data?.paused) return <>Workspace</>;
   if (billing.data?.enabled) return <>{billing.data.active ? "Membership" : "Subscription needed"} · {fmt.k(billing.data.available)} credits</>;
   return <><span className="capitalize">{plan}</span> plan · {fmt.k(credits)} credits</>;
 }
@@ -102,6 +103,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
   const [dark, setDark] = useTheme();
   const { pathname } = useLocation();
   const navigationId = useId();
+  const billing = useBilling();
 
   async function logout() {
     const rt = refreshToken();
@@ -137,7 +139,7 @@ function Sidebar({ onClose, collapsed, onToggle }: { onClose?: () => void; colla
         ]} />
       </div>
       <nav aria-label="Main navigation" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {visibleSections(!!user?.is_superuser).map((section) => {
+        {visibleSections(!!user?.is_superuser).map(section => ({ ...section, items: section.items.filter(item => !billing.data?.paused || item.to !== "/usage") })).map((section) => {
           if (section.id === "main") return <div key={section.id} className="space-y-px">{section.items.map((item) => <NavItem key={item.to} {...item} />)}</div>;
           const current = section.items.find((item) => isNavActive(item, pathname));
           const isCollapsed = !!collapsed[section.id];

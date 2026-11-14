@@ -6,7 +6,7 @@ import tempfile
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -84,7 +84,15 @@ class Settings(BaseSettings):
     llm_concurrency: int = 8
 
     # Dodo hosted checkout. Keep keys on the API/worker only.
+    paywall_paused: bool = False
     billing_enabled: bool = True
+
+    @model_validator(mode="after")
+    def pause_paywall(self):
+        if self.paywall_paused:
+            self.billing_enabled = False
+        return self
+
     dodo_environment: str = "test_mode"
     dodo_api_key: str = ""
     dodo_webhook_key: str = ""
