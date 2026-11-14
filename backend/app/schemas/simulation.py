@@ -84,6 +84,8 @@ class AudienceIn(BaseModel):
 
 
 class OverridesIn(BaseModel):
+    active_per_round: int | None = Field(default=None, ge=1, le=256)
+    initial_reaction_sample: int | None = Field(default=None, ge=10, le=2000)
     voice: int = Field(default=40, ge=10, le=2000)
     crowd: int = Field(default=3000, ge=0, le=250_000)
     stakeholders: int = Field(default=5, ge=0, le=30)

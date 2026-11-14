@@ -16,9 +16,9 @@ import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
 import { cn, fmt } from "@/lib/utils";
 
 const DEPTH = {
-  quick: { label: "Quick", voice: 40, crowd: 1500, stakeholders: 3, hours: 12, minutes_per_round: 60 },
-  standard: { label: "Standard", voice: 100, crowd: 4000, stakeholders: 5, hours: 24, minutes_per_round: 60 },
-  deep: { label: "Deep", voice: 250, crowd: 15000, stakeholders: 8, hours: 48, minutes_per_round: 60 },
+  quick: { label: "Quick", voice: 40, crowd: 1500, stakeholders: 3, hours: 12, minutes_per_round: 60, active_per_round: 20, initial_reaction_sample: 40 },
+  standard: { label: "Standard", voice: 100, crowd: 4000, stakeholders: 5, hours: 24, minutes_per_round: 60, active_per_round: 20, initial_reaction_sample: 40 },
+  deep: { label: "Deep", voice: 250, crowd: 15000, stakeholders: 8, hours: 48, minutes_per_round: 60, active_per_round: 20, initial_reaction_sample: 40 },
 } as const;
 const WHEN = { now: "Now", schedule: "Scheduled", backtest: "Backtest" } as const;
 const GROUP_ICON: Record<string, typeof FileVideo> = { Video: FileVideo, Audio: FileAudio, Image: FileImage, Text: FileText };
@@ -369,7 +369,8 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
 
           {more && (<Section title="Depth" desc="How many agents and how much simulated time. More depth means more detail and more model calls. Every value can be changed in step 2.">
             <Segmented size="md" value={depth} onChange={(d) => { setDepth(d); setOv({ ...ov, ...DEPTH[d] }); }} options={Object.entries(DEPTH).map(([k, v]) => ({ value: k as keyof typeof DEPTH, label: v.label }))} />
-            <div className="grid gap-3 sm:grid-cols-2">{[{key: "voice", label: "People giving detailed feedback", min: 10, max: 2000}, {key: "crowd", label: "Wider audience sample", min: 0, max: 250000}, {key: "stakeholders", label: "Additional accounts", min: 0, max: 30}, {key: "hours", label: "Simulated hours", min: 1, max: 168}, {key: "minutes_per_round", label: "Minutes per round", min: 15, max: 240}].map((item) => <Field key={item.key} label={item.label}><Input type="number" min={item.min} max={item.max} value={ov[item.key]} onChange={(e) => setOv({...ov, [item.key]: Number(e.target.value)})} /></Field>)}</div>
+            <div className="grid gap-3 sm:grid-cols-2">{[{key: "active_per_round", label: "Maximum active speakers per round", min: 1, max: 256}, {key: "initial_reaction_sample", label: "Initial reaction sample", min: 10, max: 2000}, {key: "voice", label: "People giving detailed feedback", min: 10, max: 2000}, {key: "crowd", label: "Wider audience sample", min: 0, max: 250000}, {key: "stakeholders", label: "Additional accounts", min: 0, max: 30}, {key: "hours", label: "Simulated hours", min: 1, max: 168}, {key: "minutes_per_round", label: "Minutes per round", min: 15, max: 240}].map((item) => <Field key={item.key} label={item.label}><Input type="number" min={item.min} max={item.max} value={ov[item.key] ?? ""} onChange={(e) => setOv({...ov, [item.key]: Number(e.target.value)})} /></Field>)}</div>
+            <p className="text-xs text-muted">Each round samples speakers using their activity and local time, up to your limit. Other speakers remain available for later rounds. The initial sample limits first impressions; it does not remove audience members. Retries, memory and reports add model calls.</p>
             <KV className="max-w-md" rows={[
               [<span className="inline-flex items-center gap-1.5">Voice agents <InfoTip term="voice" /></span>, fmt.n(ov.voice)],
               [<span className="inline-flex items-center gap-1.5">Crowd agents <InfoTip term="crowd" /></span>, fmt.n(ov.crowd)],

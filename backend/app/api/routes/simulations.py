@@ -91,6 +91,12 @@ async def _check_assets(s: AsyncSession, p: Principal, project_id: str, content:
             raise AppError("One of the referenced files does not belong to this project.")
 
 
+@router.post("/simulations/estimate")
+async def estimate_simulation(body: SimulationCreate, p: Principal = Depends(principal)):
+    from app.services.simulation.activation import estimate
+    return estimate({"overrides": body.overrides.model_dump()})
+
+
 @router.post("/projects/{project_id}/simulations")
 async def create_sim(project_id: str, body: SimulationCreate, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     await get_project(s, p, project_id)

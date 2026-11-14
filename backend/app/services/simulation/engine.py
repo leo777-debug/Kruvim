@@ -178,6 +178,15 @@ class Engine:
         return region(code)["curve"][self.local(code, r).hour]
 
     # ------------------------------------------------------------------------------------------------
+    def select_round_agents(self, r: int) -> list[str]:
+        from .activation import active_limit
+        sampled = bool((self.cfg.get("overrides") or {}).get("initial_reaction_sample"))
+        eligible = [a for a in self.agents.values()
+                    if a.reaction or a.kind == "stakeholder" or sampled or getattr(self, "strict_provider", False)]
+        selected = [a.ref for a in eligible if self.rng.random() < a.cfg['activity'] * self.curve(a.region, r)]
+        self.rng.shuffle(selected)
+        return selected[:active_limit(self.cfg)]
+
     async def load(self):
         async with session_scope() as s:
             sim = await s.get(Simulation, self.sim_id)
@@ -300,6 +309,15 @@ class Engine:
                 for _, u in sorted(ranked, key=lambda x: (-x[0], x[1].ref))[:6]]
 
     # ---- round 0: first exposure ------------------------------------------------------------------------
+    def first_voices(self):
+        voices = [a for a in self.agents.values() if a.kind == "voice"]
+        from .activation import initial_sample
+        limit = initial_sample(self.cfg)
+        if limit < len(voices):
+            rng = np.random.default_rng(self.seed + 9181)
+            return [voices[int(i)] for i in rng.choice(len(voices), limit, replace=False)]
+        return voices
+
     async def first_exposure(self):
         await self.emit("round.start", self.round_meta(0))
         if not getattr(self, "creator", None):
@@ -333,7 +351,7 @@ class Engine:
                 self.writer.edge(f"agent:{a.ref}", f"ent:{slug(a.persona['entity'])}", "represents", f"{a.name} speaks for {a.persona['entity']}")
         await self.writer.flush("agents joined")
 
-        voices = [a for a in self.agents.values() if a.kind == "voice"]
+        voices = self.first_voices()
         cards = {"A": self.card} | ({"B": self.card_b} if self.card_b else {})
         plab = platform_label(self.platform_key)
         systems = {v: reaction_system(card_block(c), self.world_block, len(c["segments"]), plab, len(c.get("poll_options") or []))
@@ -800,8 +818,7 @@ class Engine:
                     await self.inject(ev['text'], source=ev.get('source', 'scheduled'))
             await self.handle_control()
             await self.emit('round.start', self.round_meta(r))
-            llm_agents = [a for a in self.agents.values() if a.reaction or a.kind == 'stakeholder']
-            self._round_active = [a.ref for a in llm_agents if self.rng.random() < a.cfg['activity'] * self.curve(a.region, r)]
+            self._round_active = self.select_round_agents(r)
         if self._round_phase == 'actions':
             tasks = [asyncio.create_task(self.agent_turn(self.agents[ref])) for ref in self._round_active if ref not in self._round_done]
             paused = None
@@ -924,6 +941,10 @@ class Engine:
                            "following": sorted(a.following), "muted": sorted(a.muted), "comment_votes": a.comment_votes, "memory": a.memory[-8:]}, followers=a.followers))
         from .analytics import finalize
         results = await asyncio.to_thread(finalize, self)
+        from .activation import active_limit, initial_sample
+        results["activation_policy"] = {"active_per_round_limit": active_limit(self.cfg),
+            "initial_reaction_sample": initial_sample(self.cfg), "registered_speakers": len(self.agents),
+            "method": "Seeded activity and local-hour sampling; cap is a maximum, not a participation guarantee."}
         results["runtime_seconds"] = round(time.time() - t0, 1)
         results["stopped_early"] = stopped
         results["reliability"] = {"fallback_calls": len(self.failures), "failed_provider_calls": self.usage.failed,
