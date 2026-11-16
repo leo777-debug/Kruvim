@@ -40,7 +40,7 @@ class RefreshIn(BaseModel):
 class AcceptInviteIn(BaseModel):
     token: str
     name: str = ""
-    password: str | None = Field(default=None, min_length=10, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
 
 
 class ChangePasswordIn(BaseModel):

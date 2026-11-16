@@ -123,19 +123,20 @@ async def change_password(body: ChangePasswordIn, user: User = Depends(current_u
 
 @router.post("/invites/accept", response_model=SessionOut)
 async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession = Depends(get_session)):
-    inv = (await s.execute(select(Invite).where(Invite.token_hash == sha256(body.token)))).scalar_one_or_none()
+    await hit(f"auth:{client_ip(request)}", settings.rate_limit_auth_per_minute)
+    inv = (await s.execute(select(Invite).where(Invite.token_hash == sha256(body.token)).with_for_update())).scalar_one_or_none()
     now = utcnow()
     if not inv or inv.accepted_at or (inv.expires_at.replace(tzinfo=now.tzinfo) if inv.expires_at.tzinfo is None else inv.expires_at) < now:
         raise NotFound("This invite is invalid or has expired.")
+    await hit(f"auth:{inv.email}", settings.rate_limit_auth_per_minute)
     user = (await s.execute(select(User).where(User.email == inv.email))).scalar_one_or_none()
     if user is None:
-        if not body.password:
-            raise Conflict("Choose a password to create your account.", code="password_required")
         user = User(email=inv.email, name=body.name or inv.email.split("@")[0], password_hash=hash_password(body.password))
         s.add(user)
         await s.flush()
-    elif body.password and not verify_password(body.password, user.password_hash):
-        raise Unauthorized("Wrong password for the existing account.")
+    # Inviting admins receive the raw link; it cannot authenticate an existing account.
+    elif not verify_password(body.password, user.password_hash) or not user.is_active:
+        raise Unauthorized("Wrong password or account disabled.")
     exists = (await s.execute(select(Membership).where(and_(Membership.org_id == inv.org_id, Membership.user_id == user.id)))).scalar_one_or_none()
     if not exists:
         if settings.billing_enabled:
@@ -146,5 +147,5 @@ async def accept_invite(body: AcceptInviteIn, request: Request, s: AsyncSession 
                 raise Conflict("This workspace needs another paid seat before accepting this invitation.")
         s.add(Membership(org_id=inv.org_id, user_id=user.id, role=inv.role))
     inv.accepted_at = now
-    audit.record(s, "invite.accepted", org_id=inv.org_id, user_id=user.id, target=inv.email)
+    audit.record(s, "invite.accepted", org_id=inv.org_id, user_id=user.id, target=inv.email, ip=client_ip(request))
     return await _session(s, user, request, inv.org_id)

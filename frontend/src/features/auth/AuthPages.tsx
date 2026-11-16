@@ -98,13 +98,16 @@ export function InvitePage() {
   const { token } = useParams();
   const nav = useNavigate();
   const setSession = useAuth((s) => s.setSession);
-  const [f, setF] = useState({ name: "", password: "" });
   const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (busy) return;
+    const data = new FormData(e.currentTarget as HTMLFormElement);
     setBusy(true);
     try {
-      const s = await api<Session>("/auth/invites/accept", { json: { token, name: f.name, password: f.password || null } });
+      const s = await api<Session>("/auth/invites/accept", { json: {
+        token, name: String(data.get("name") || ""), password: String(data.get("password") || ""),
+      } }, false);
       setSession(s);
       toast.success("Welcome to the workspace");
       nav("/home");
@@ -115,10 +118,10 @@ export function InvitePage() {
     }
   }
   return (
-    <Shell title="Join workspace" subtitle="Set a password to accept the invitation (or enter your existing one).">
+    <Shell title="Join workspace" subtitle="Already have an account? Enter its password. New to Kruvim? Choose a password with at least 10 characters.">
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Your name"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="Password"><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+        <Field label="Your name"><Input name="name" autoComplete="name" /></Field>
+        <Field label="Password"><Input name="password" type="password" required minLength={10} maxLength={200} /></Field>
         <Button variant="primary" size="lg" className="w-full" loading={busy}>Accept invite</Button>
       </form>
     </Shell>
