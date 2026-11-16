@@ -11,6 +11,7 @@ import httpx
 
 from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
 from .errors import ProviderFailure, classify, retry_delay
+from .pacing import for_provider
 
 
 class OpenAICompatLLM(BaseLLM):
@@ -33,6 +34,7 @@ class OpenAICompatLLM(BaseLLM):
         self.json_ok = bool(s.json_mode)
         self.temp_ok = True
         self.max_tokens_key = "max_tokens"
+        self.rate_limits = {}
 
     async def complete(self, *, system, user, role, max_tokens, usage: Usage, json_out=True, images=None, temperature=None):
         model = self.model_for("vision" if images else role)
@@ -57,8 +59,14 @@ class OpenAICompatLLM(BaseLLM):
                 if json_out and self.json_ok:
                     body["response_format"] = {"type": "json_object"}
                 t0 = time.time()
+                gate = for_provider(self.base, self.s.api_key)
                 try:
+                    await gate.wait()
                     r = await self.client.post(self.base + "/chat/completions", json=body)
+                    gate.observe(r)
+                    self.rate_limits.update({k: r.headers[k][:100] for k in (
+                        'x-ratelimit-limit-req-minute', 'x-ratelimit-limit-req-second',
+                        'x-ratelimit-limit-tokens-minute', 'retry-after') if k in r.headers})
                 except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                     if attempt < attempts - 1:
                         await asyncio.sleep(min(8, 1.5 * 2 ** attempt))
@@ -90,7 +98,7 @@ class OpenAICompatLLM(BaseLLM):
                     if changed:
                         continue
                     usage.fail(self.name, role)
-                    raise LLMError('The model provider rejected this request. Check the model settings.')
+                    raise ProviderFailure(issue, r.text[:2000])
                 if r.status_code in (401, 403):
                     usage.fail(self.name, role)
                     raise ProviderFailure(classify(r.status_code, settings=self.s), r.text[:2000])

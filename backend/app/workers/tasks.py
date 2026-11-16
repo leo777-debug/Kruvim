@@ -19,6 +19,7 @@ from app.services.content import ContentError, build_card, document_text, prepar
 from app.services.events import bus
 from app.services.interaction import survey as run_survey_fn
 from app.services.llm import LLMAuthError, LLMError, Usage, make_llm
+from app.services.llm.errors import ProviderFailure
 from app.services.providers import resolve
 from app.services.report import generate as generate_report_fn
 from app.services.simulation import Engine, agent_detail
@@ -27,7 +28,7 @@ from app.services.token_budget import survey_budget
 from app.services.watchdog import bounded_job, job_lease
 
 log = logging.getLogger("kruvim.jobs")
-USER_ERRORS = (ContentError, LLMAuthError, LLMError, ValueError, QuotaExceeded)
+USER_ERRORS = (ContentError, LLMAuthError, LLMError, ProviderFailure, ValueError, QuotaExceeded)
 
 
 def _now():
@@ -54,9 +55,13 @@ async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed")
     msg = str(exc) if isinstance(exc, USER_ERRORS) else "This step could not finish. Retry the test; contact support if it happens again."
     if not isinstance(exc, USER_ERRORS):
         log.error("job failed\n%s", traceback.format_exc(), extra={"simulation_id": sim_id, "job": stage})
+    if isinstance(exc, ProviderFailure):
+        log.warning("Provider failure: provider=%s category=%s http_status=%s stage=%s",
+                    exc.provider, exc.category, exc.status, stage, extra={"simulation_id": sim_id})
     await _set(sim_id, status=status, error=msg[:2000])
     await bus.publish(sim_id, f"{stage}.failed", {"message": msg[:2000]})
     await monitoring.on_failed(sim_id, msg)
+    return {"status": "error"}
 
 
 async def _autopilot(sim_id: str, step: str, attempt: int = 0) -> None:
@@ -158,7 +163,7 @@ async def build_graph(ctx, sim_id: str):
         job_lease.set(None)
         await _autopilot(sim_id, "environment")
     except Exception as exc:
-        await _fail(sim_id, "graph", exc)
+        return await _fail(sim_id, "graph", exc)
     finally:
         JOBS_RUNNING.labels("graph").dec()
         if llm:
@@ -191,7 +196,7 @@ async def prepare_environment(ctx, sim_id: str):
         job_lease.set(None)
         await _autopilot(sim_id, "run")
     except Exception as exc:
-        await _fail(sim_id, "env", exc)
+        return await _fail(sim_id, "env", exc)
     finally:
         JOBS_RUNNING.labels("environment").dec()
         if llm:
@@ -250,7 +255,7 @@ async def run_simulation(ctx, sim_id: str):
         await enqueue("generate_report", sim_id=sim_id)
     except Exception as exc:
         SIMULATIONS.labels("failed").inc()
-        await _fail(sim_id, "simulation", exc)
+        return await _fail(sim_id, "simulation", exc)
     finally:
         JOBS_RUNNING.labels("simulation").dec()
         if llm:
@@ -262,7 +267,7 @@ async def run_simulation(ctx, sim_id: str):
 async def generate_report(ctx, sim_id: str):
     JOBS_RUNNING.labels("report").inc()
     usage = Usage()
-    llm = None
+    res = llm = None
     try:
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
@@ -284,7 +289,11 @@ async def generate_report(ctx, sim_id: str):
             rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id, Report.status == "running"))).scalars().first()
             if rep:
                 rep.status, rep.error = "failed", msg[:2000]
+            if res:
+                sim = await s.get(Simulation, sim_id)
+                sim.usage = {**(sim.usage or {}), "report": usage.as_dict(res.settings)}
         await bus.publish(sim_id, "report.failed", {"message": msg[:2000]})
+        return {"status": "error"}
     finally:
         JOBS_RUNNING.labels("report").dec()
         if llm:

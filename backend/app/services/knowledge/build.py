@@ -9,7 +9,7 @@ import re
 
 from app.services.content.card import heuristic_entities
 from app.services.datapool.context import tokens
-from app.services.llm import BaseLLM, LLMAuthError, Usage
+from app.services.llm import BaseLLM, Usage
 from app.services.population.regions import INTEREST_LABELS
 
 from .store import GraphWriter, slug
@@ -76,18 +76,13 @@ async def generate_ontology(requirement: str, card: dict, seeds: list[tuple[str,
     user = json.dumps({"question": requirement, "content": {"title": card.get("title"), "summary": card.get("summary"),
                                                             "entities": card.get("entities"), "keywords": card.get("keywords")},
                        "background": [{"name": n, "excerpt": t[:1500]} for n, t in seeds[:4]]}, ensure_ascii=False)
-    try:
-        d = await llm.complete_json(system=ONTOLOGY_SYSTEM, user=user, role="ontology", max_tokens=1500, usage=usage, temperature=0.2)
-        ets = [e for e in d.get("entity_types", []) if isinstance(e, dict) and e.get("name")][:12]
-        rts = [r for r in d.get("relation_types", []) if isinstance(r, dict) and r.get("name")][:14]
-        if len(ets) >= 3 and len(rts) >= 3:
-            return {"entity_types": ets, "relation_types": rts, "analysis_focus": str(d.get("analysis_focus") or ""),
-                    "by": llm.model_for("ontology")}
-    except LLMAuthError:
-        raise
-    except Exception:
-        pass
-    return {**DEFAULT_ONTOLOGY, "by": "default (model output unusable)"}
+    d = await llm.complete_json(system=ONTOLOGY_SYSTEM, user=user, role="ontology", max_tokens=1500, usage=usage, temperature=0.2)
+    ets = [e for e in d.get("entity_types", []) if isinstance(e, dict) and e.get("name")][:12]
+    rts = [r for r in d.get("relation_types", []) if isinstance(r, dict) and r.get("name")][:14]
+    if len(ets) >= 3 and len(rts) >= 3:
+        return {"entity_types": ets, "relation_types": rts, "analysis_focus": str(d.get("analysis_focus") or ""),
+                "by": llm.model_for("ontology")}
+    raise ValueError("The model returned an incomplete ontology. Retry the graph step or choose another model.")
 
 
 _PLACES = {"dubai", "abu dhabi", "riyadh", "jeddah", "cairo", "amman", "casablanca", "london", "new york", "mumbai", "uae", "saudi arabia",
@@ -127,15 +122,10 @@ async def extract(text: str, ontology: dict, llm: BaseLLM, usage: Usage, known: 
         return _dry_extract(text, known)
     etypes = ", ".join(e["name"] for e in ontology["entity_types"])
     rtypes = ", ".join(r["name"] for r in ontology["relation_types"])
-    try:
-        d = await llm.complete_json(system=EXTRACT_SYSTEM.format(etypes=etypes, rtypes=rtypes), user=text, role="extract",
-                                    max_tokens=2500, usage=usage, temperature=0.1)
-        return {"entities": [e for e in d.get("entities", []) if isinstance(e, dict) and e.get("name")][:20],
-                "relations": [r for r in d.get("relations", []) if isinstance(r, dict) and r.get("source") and r.get("target")][:30]}
-    except LLMAuthError:
-        raise
-    except Exception:
-        return _dry_extract(text, known)
+    d = await llm.complete_json(system=EXTRACT_SYSTEM.format(etypes=etypes, rtypes=rtypes), user=text, role="extract",
+                                max_tokens=2500, usage=usage, temperature=0.1)
+    return {"entities": [e for e in d.get("entities", []) if isinstance(e, dict) and e.get("name")][:20],
+            "relations": [r for r in d.get("relations", []) if isinstance(r, dict) and r.get("source") and r.get("target")][:30]}
 
 
 async def build(sim_id: str, requirement: str, cards: dict, seeds: list[tuple[str, str]], snaps: dict,

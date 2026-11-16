@@ -21,7 +21,7 @@ from app.services.creator import audience_weights, weighted_sample
 from app.services.datapool import listen
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
-from app.services.llm import BaseLLM, LLMAuthError, Usage
+from app.services.llm import BaseLLM, Usage
 from app.services.population import get_population, stratified_sample
 from app.services.population.regions import PLATFORMS, REGIONS, region
 from app.services.quotas import estimate_credits
@@ -150,15 +150,10 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
         if llm.is_dry:
             stakes = dry.stakeholders(ents, regions_in, d["stakeholders"])
         else:
-            try:
-                out = await llm.complete_json(system=STAKEHOLDER_SYSTEM, role="persona", max_tokens=2000, usage=usage, user=json.dumps({
-                    "question": requirement, "content": card.get("summary"), "regions": regions_in, "max": d["stakeholders"],
-                    "entities": [{"name": e["label"], "type": e["type"], "summary": e["summary"][:400], "neighbourhood": neighbours.get(e["key"], {})} for e in ents[:40]]}, ensure_ascii=False))
-                stakes = [x for x in out.get("stakeholders", []) if isinstance(x, dict) and x.get("name")][: d["stakeholders"]]
-            except LLMAuthError:
-                raise
-            except Exception:
-                stakes = dry.stakeholders(ents, regions_in, d["stakeholders"])
+            out = await llm.complete_json(system=STAKEHOLDER_SYSTEM, role="persona", max_tokens=2000, usage=usage, user=json.dumps({
+                "question": requirement, "content": card.get("summary"), "regions": regions_in, "max": d["stakeholders"],
+                "entities": [{"name": e["label"], "type": e["type"], "summary": e["summary"][:400], "neighbourhood": neighbours.get(e["key"], {})} for e in ents[:40]]}, ensure_ascii=False))
+            stakes = [x for x in out.get("stakeholders", []) if isinstance(x, dict) and x.get("name")][: d["stakeholders"]]
     entity_by_name = {e["label"].casefold(): e for e in ents}
     grounded = []
     for st in stakes:
@@ -179,16 +174,11 @@ async def prepare(sim_id: str, llm: BaseLLM, usage: Usage, progress) -> dict:
     if llm.is_dry:
         gen = dry.config(d["hours"])
     else:
-        try:
-            gen = await llm.complete_json(system=CONFIG_SYSTEM, role="config", max_tokens=1500, usage=usage, temperature=0.4,
-                                          user=json.dumps({"question": requirement, "content": {"title": card.get("title"), "summary": card.get("summary"),
-                                                                                                 "topics": card.get("topic_labels")},
-                                                           "hours": d["hours"], "regions": regions_in,
-                                                           "live_context": {c: v.get("brief") for c, v in context.items()}}, ensure_ascii=False))
-        except LLMAuthError:
-            raise
-        except Exception:
-            gen = dry.config(d["hours"])
+        gen = await llm.complete_json(system=CONFIG_SYSTEM, role="config", max_tokens=1500, usage=usage, temperature=0.4,
+                                      user=json.dumps({"question": requirement, "content": {"title": card.get("title"), "summary": card.get("summary"),
+                                                                                             "topics": card.get("topic_labels")},
+                                                       "hours": d["hours"], "regions": regions_in,
+                                                       "live_context": {c: v.get("brief") for c, v in context.items()}}, ensure_ascii=False))
     base = dry.config(d["hours"])
 
     def clamp(v, lo, hi, dflt):

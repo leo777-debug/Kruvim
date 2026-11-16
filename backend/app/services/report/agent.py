@@ -128,14 +128,9 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
     if llm.is_dry:
         outline = _dry_outline(sim)
     else:
-        try:
-            outline = await llm.complete_json(system=OUTLINE_SYSTEM, role="report", max_tokens=1500, usage=usage, temperature=0.3,
-                                              user=json.dumps({"question": sim.requirement, "content": sim.card.get("title"),
-                                                               "overview": json.loads(overview) if overview.startswith("{") else overview}, ensure_ascii=False))
-        except LLMAuthError:
-            raise
-        except Exception:
-            outline = _dry_outline(sim)
+        outline = await llm.complete_json(system=OUTLINE_SYSTEM, role="report", max_tokens=1500, usage=usage, temperature=0.3,
+                                          user=json.dumps({"question": sim.requirement, "content": sim.card.get("title"),
+                                                           "overview": json.loads(overview) if overview.startswith("{") else overview}, ensure_ascii=False))
     outline["summary"] = tb.cite(str(outline.get("summary") or ""))
     sections_plan = [x for x in outline.get("sections", []) if isinstance(x, dict) and x.get("title")][:5] or _dry_outline(sim)["sections"]
     async with session_scope() as s:

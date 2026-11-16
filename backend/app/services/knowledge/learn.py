@@ -57,7 +57,7 @@ async def learn_round(writer, posts, llm, usage):
         except LLMAuthError:
             raise
         except Exception:
-            data = rule_extract(posts)
+            raise
     model_claims = data.get("claims") if isinstance(data.get("claims"), list) else []
     grounded = [c for c in model_claims[:40] if isinstance(c, dict) and isinstance(c.get("statement"), str)
                 and isinstance(c.get("post_ids"), list) and any(isinstance(i, int) and i in sources for i in c["post_ids"])]

@@ -56,8 +56,8 @@ async def run_job(job_id: str, request: Request):
         error = "Unsupported cloud job"
     else:
         try:
-            await getattr(tasks, name)({"job_id": job_id}, **payload)
-            error = ""
+            result = await getattr(tasks, name)({"job_id": job_id}, **payload)
+            error = "Workflow stage failed; see the simulation error." if isinstance(result, dict) and result.get("status") == "error" else ""
         except Exception as exc:
             import logging
             logging.getLogger("kruvim.cloud").exception("Cloud job failed")

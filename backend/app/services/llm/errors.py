@@ -45,6 +45,7 @@ class ClassifiedError:
     category: str
     retryable: bool
     provider: str
+    status: int | None = None
 
 
 def classify(status, payload=None, *, settings=None, network_error=False):
@@ -75,14 +76,22 @@ def classify(status, payload=None, *, settings=None, network_error=False):
         category = 'rate_limited'
     else:
         category = 'request_error'
-    return ClassifiedError(category, category in ('rate_limited', 'provider_down'), provider)
+    return ClassifiedError(category, category in ('rate_limited', 'provider_down'), provider, status)
 
 
 class ProviderFailure(Exception):
     def __init__(self, classified, raw=''):
         self.category, self.provider = classified.category, classified.provider
         self.raw = raw
-        super().__init__('The model provider could not answer. Check its status in Settings.')
+        self.status = classified.status
+        label = PROVIDERS.get(self.provider, {'label': 'Model provider'})['label']
+        messages = {'rate_limited': 'is rate limiting requests. Wait and retry, or reduce parallel requests in Settings.',
+                    'quota_exhausted': 'has no available API credit or quota. Check the provider account.',
+                    'invalid_key': 'rejected the API key. Check it in Settings.',
+                    'provider_down': 'is temporarily unavailable. Retry this step.',
+                    'request_error': 'rejected this request. Check the model and endpoint in Settings.'}
+        status = f' (HTTP {self.status})' if self.status is not None else ''
+        super().__init__(f'{label}{status} {messages[self.category]}')
 
 
 def retry_delay(headers, fallback):

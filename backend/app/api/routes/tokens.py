@@ -49,7 +49,8 @@ async def key_test(res):
         'rate_limited': f'{label} is receiving too many requests. Wait and try again.',
         'provider_down': f'{label} is unavailable right now. Try again later.',
         'request_error': 'Check the endpoint and model in Settings.'}
-    return {'ok': status == 'ok', 'status': status, 'message': messages[status], 'checked_at': utcnow().isoformat()}
+    return {'ok': status == 'ok', 'status': status, 'message': messages[status], 'checked_at': utcnow().isoformat(),
+            'rate_limits': getattr(llm, 'rate_limits', {})}
 
 
 @router.get('/tokens')
