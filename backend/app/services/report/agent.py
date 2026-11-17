@@ -91,7 +91,24 @@ def _tools_text() -> str:
 async def _react(llm: BaseLLM, usage: Usage, tb: Toolbox, system: str, task: str, emit, min_calls: int, max_calls: int) -> tuple[str, list]:
     transcript = task
     used = []
+    observations = []
     for step in range(max_calls + 2):
+        if len(used) >= max_calls:
+            # Tool selection needs structured output; prose does not. A separate
+            # writing request avoids asking smaller models to JSON-escape a whole
+            # Markdown section while still carrying a tool-selection grammar.
+            context = system.split('=== REPORT ===', 1)[1][:12000] if '=== REPORT ===' in system else ''
+            prompt = json.dumps({'task': task[:8000], 'report': context, 'evidence': observations}, ensure_ascii=False)
+            for attempt, budget in enumerate((2200, 4400)):
+                text = await llm.complete(system='Write the final answer in Markdown, using only the supplied evidence. '
+                    'Do not return JSON or request more tools. Use 150-350 words for a report section; answer follow-ups concisely. '
+                    'Cite only supplied [node:...] and [edge:...] references. Preserve uncertainty and do not invent numbers. '
+                    'Do not add a section heading.', user=prompt + ('\nKeep the answer shorter and complete every sentence.' if attempt else ''),
+                    role='report', max_tokens=budget, json_out=False, usage=usage, temperature=0.3)
+                if text.strip() and not getattr(text, 'truncated', False):
+                    await emit({'step': step, 'thought': 'Compose the answer from the gathered evidence.', 'final': True})
+                    return text.strip(), used
+            raise LLMError('The analyst answer was cut off. Retry the report or choose another model.')
         d = await llm.complete_json(system=system, user=transcript, role="report", max_tokens=2200, usage=usage, temperature=0.3)
         thought = str(d.get("thought") or "")[:600]
         if d.get("final") and (len(used) >= min_calls or step >= max_calls):
@@ -104,6 +121,7 @@ async def _react(llm: BaseLLM, usage: Usage, tb: Toolbox, system: str, task: str
         inp = d.get("input") if isinstance(d.get("input"), dict) else {}
         obs = await tb.call(tool, inp)
         used.append({"tool": tool, "input": inp})
+        observations.append({'tool': tool, 'input': inp, 'observation': obs[:4000]})
         await emit({"step": step, "thought": thought, "tool": tool, "input": inp, "observation": obs[:700]})
         transcript += f"\n\n[step {step}] thought: {thought}\naction: {tool} {json.dumps(inp, ensure_ascii=False)}\nobservation: {obs}"
         if len(used) < min_calls:
@@ -114,18 +132,26 @@ async def _react(llm: BaseLLM, usage: Usage, tb: Toolbox, system: str, task: str
 async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
     async with session_scope() as s:
         sim = await s.get(Simulation, sim_id)
-        rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id, Report.status == 'running')
+        rep = (await s.execute(select(Report).where(Report.simulation_id == sim_id)
             .order_by(Report.created_at.desc()).limit(1))).scalar_one_or_none()
+        if rep is not None and (rep.status not in ('running', 'failed') or rep.model != llm.model_for('report')):
+            rep = None
         if rep is None:
             rep = Report(simulation_id=sim_id, status="running", model=llm.model_for("report"))
             s.add(rep)
+        rep.status = 'running'
+        rep.error = None
         await s.flush()
         rep_id = rep.id
+        saved_plan, saved_sections = copy.deepcopy(rep.outline or []), copy.deepcopy(rep.sections or [])
+        saved_title, saved_summary = rep.title, rep.summary
     tb = Toolbox(sim, llm, usage)
     await bus.publish(sim_id, "report.started", {"report_id": rep_id})
     overview = await tb.call("simulation_stats", {"section": "overview"})
     overview_refs = set(tb.node_ids)
-    if llm.is_dry:
+    if saved_plan:
+        outline = {'title': saved_title, 'summary': saved_summary, 'sections': saved_plan}
+    elif llm.is_dry:
         outline = _dry_outline(sim)
     else:
         outline = await llm.complete_json(system=OUTLINE_SYSTEM, role="report", max_tokens=1500, usage=usage, temperature=0.3,
@@ -133,18 +159,32 @@ async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
                                                            "overview": json.loads(overview) if overview.startswith("{") else overview}, ensure_ascii=False))
     outline["summary"] = tb.cite(str(outline.get("summary") or ""))
     sections_plan = [x for x in outline.get("sections", []) if isinstance(x, dict) and x.get("title")][:5] or _dry_outline(sim)["sections"]
+    sections = []
+    for index, section in enumerate(saved_sections):
+        if index >= len(sections_plan) or section.get('title') != sections_plan[index]['title'] or not section.get('content'):
+            break
+        sections.append(section)
+    async with session_scope() as s:
+        row = await s.get(Report, rep_id)
+        row.title, row.summary, row.outline, row.sections = outline.get('title') or 'Simulation report', outline['summary'], sections_plan, sections
     async with session_scope() as s:
         labels = await source_labels(s, sim_id, sim.org_id, [outline["summary"]])
     readable_summary = render_section(outline["summary"], labels)
     await bus.publish(sim_id, "report.outline", {"title": outline.get("title"), "summary": outline.get("summary"),
                                                  "rendered_summary": readable_summary["rendered_content"], "summary_sources": readable_summary["sources"],
                                                  "sections": [x["title"] for x in sections_plan]})
-    sections = []
     system = REACT_SYSTEM.format(tools=_tools_text(), min_calls=2, max_calls=5)
     for i, sec in enumerate(sections_plan):
         tb.node_ids, tb.edge_ids = set(overview_refs), set()
         async def emit(payload, i=i):
             await bus.publish(sim_id, "report.log", {"section": i, **payload})
+
+        if i < len(sections):
+            content = sections[i]['content']
+            async with session_scope() as s:
+                labels = await source_labels(s, sim_id, sim.org_id, [content])
+            await bus.publish(sim_id, 'report.section', {'index': i, 'title': sec['title'], 'content': content, **render_section(content, labels)})
+            continue
 
         if llm.is_dry:
             content, used = await _dry_section(tb, sec, emit)
