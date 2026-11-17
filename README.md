@@ -14,6 +14,8 @@ Content + question ──► 1 Knowledge graph ──► 2 Environment ──►
                                                 crowd, config     live events
 ```
 
+Selected content files and background documents are prepared locally in the browser. Users review extracted text and resized images before those derived values are sent to cloud analysis and simulation; original files are not uploaded by this workflow. See [formats, privacy and local limits](docs/browser-local-processing.md) and the [actual verification report](docs/browser-local-verification-2026-11-17.md).
+
 ## How it works
 
 **Population.** One million agents are rows in NumPy arrays, not running models: age, sex, region, origin, language,

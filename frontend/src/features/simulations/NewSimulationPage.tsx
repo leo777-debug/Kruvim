@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, FileAudio, FileImage, FileText, FileUp, FileVideo, Plus, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, FileAudio, FileImage, FileText, FileVideo, Plus, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -9,7 +9,11 @@ import { Dialog, Select } from "@/components/ui/overlay";
 import { RegionPicker } from "@/components/ui/RegionPicker";
 import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
 import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
-import { api, ApiError, uploadAsset } from "@/lib/api";
+import { api } from "@/lib/api";
+import { LocalNotice, LocalReview } from "@/components/LocalReview";
+import { LocalDocuments } from "@/components/LocalDocuments";
+import { prepareFile, orderedImages } from "@/lib/local/prepare";
+import type { PreparedFile } from "@/lib/local/types";
 import { useAuth } from "@/lib/auth";
 import { useReference } from "@/lib/queries";
 import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
@@ -25,7 +29,7 @@ const GROUP_ICON: Record<string, typeof FileVideo> = { Video: FileVideo, Audio: 
 const OCEAN = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"] as const;
 const COMPARE = { none: "No comparison", version: "Another version of mine", competitor: "A competitor's content" } as const;
 
-interface Variant { title: string; text: string; transcript: string; description: string; asset_id: string | null; asset_ids: string[]; poll_options: string[]; file?: File | null; files?: File[] }
+interface Variant { title: string; text: string; transcript: string; description: string; asset_id: string | null; asset_ids: string[]; poll_options: string[]; local_media?: PreparedFile["local_media"]; file?: File | null; files?: File[] }
 const blank = (): Variant => ({ title: "", text: "", transcript: "", description: "", asset_id: null, asset_ids: [], poll_options: ["", ""], file: null, files: [] });
 
 function Section({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
@@ -72,6 +76,11 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   const [ov, setOv] = useState<any>({ ...DEPTH.quick, platforms: ["feed", "forum"], listening: true });
   const [count, setCount] = useState<{ n: number; regions: Record<string, number> } | null>(null);
   const [busy, setBusy] = useState(false);
+  const localController = useRef<AbortController>();
+  const [localProgress, setLocalProgress] = useState("");
+  const [localError, setLocalError] = useState("");
+  const [review, setReview] = useState<{ a: PreparedFile; b: PreparedFile | null; build: boolean }>();
+  useEffect(() => () => localController.current?.abort(), []);
   const [more, setMore] = useState(false);
   const [link, setLink] = useState("");
   const [linkNote, setLinkNote] = useState("");
@@ -127,10 +136,6 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     return project.id;
   }
 
-  async function upload(file: File, kind: string): Promise<Asset> {
-    return uploadAsset(await ensureProject(), file, kind);
-  }
-
   function validate(v: Variant, label: string): string | null {
     if (!f) return "Choose a format.";
     if (f.poll) {
@@ -139,17 +144,34 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
       return null;
     }
     if (type === "text" && !v.text.trim() && !v.file && !v.asset_id) return `${label}: paste text or upload a document.`;
-    if (f.multi && !(v.files?.length || v.asset_ids.length) && !v.description.trim()) return `${label}: add the slides or describe each one.`;
-    if (type === "image" && !f.multi && !v.file && !v.asset_id && !v.description.trim()) return `${label}: add an image or describe it.`;
+    if (f.multi && !(v.files?.length || v.asset_ids.length || v.local_media?.images.length) && !v.description.trim()) return `${label}: add the slides or describe each one.`;
+    if (type === "image" && !f.multi && !v.file && !v.asset_id && !v.local_media?.images.length && !v.description.trim()) return `${label}: add an image or describe it.`;
     if ((type === "video" || type === "audio") && !v.file && !v.asset_id && !v.transcript.trim()) return `${label}: add a file or a transcript.`;
     return null;
   }
 
-  async function payload(v: Variant, kind: string) {
-    let asset_id = v.asset_id, asset_ids = v.asset_ids;
-    if (v.file) asset_id = (await upload(v.file, kind)).id;
-    if (v.files?.length) asset_ids = [...asset_ids, ...(await Promise.all(v.files.map((x) => upload(x, kind)))).map((a) => a.id)];
-    return { title: v.title, text: v.text, transcript: v.transcript, description: v.description, asset_id, asset_ids,
+  async function prepareVariant(v: Variant, signal: AbortSignal): Promise<PreparedFile> {
+    const out: PreparedFile = { text: v.text, transcript: v.transcript, local_media: v.local_media ? { ...v.local_media, images: [...v.local_media.images] } : { images: [] }, notes: [] };
+    if (v.file) out.local_media = { images: [] };
+    const files = v.files?.length ? v.files : v.file ? [v.file] : [];
+    for (const file of files) {
+      const local = await prepareFile(file, signal, setLocalProgress, v.transcript);
+      if (local.text) out.text = [out.text, local.text].filter(Boolean).join("\n\n");
+      if (local.transcript) out.transcript = local.transcript;
+      if (local.local_media.duration) out.local_media.duration = local.local_media.duration;
+      out.local_media.images.push(...local.local_media.images);
+      out.notes.push(...local.notes);
+    }
+    if (out.text.length > 60000) throw new Error("Combined document text exceeds 60,000 characters. Shorten the pasted text or split the document.");
+    if (out.local_media.images.length + v.asset_ids.length > 10) throw new Error("A carousel supports at most 10 slides. Remove some before preparing.");
+    out.local_media.images = orderedImages(out.local_media.images);
+    return out;
+  }
+
+  function payload(v: Variant, prepared: PreparedFile) {
+    return { title: v.title, text: prepared.text, transcript: prepared.transcript, description: v.description,
+      asset_id: v.file ? null : v.asset_id, asset_ids: v.asset_ids,
+      local_media: prepared.local_media.images.length || prepared.local_media.duration ? prepared.local_media : undefined,
       poll_options: f?.poll ? v.poll_options.filter((o) => o.trim()) : [] };
   }
 
@@ -158,11 +180,25 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
     if (err) return toast.error(err);
     if (followers !== "" && (!Number.isInteger(Number(followers)) || Number(followers) < 0 || Number(followers) > 2_000_000_000)) return toast.error("Enter a whole follower count between 0 and 2 billion, or leave it blank.");
     if (!aud.regions.length) return toast.error("Select at least one region.");
+    setBusy(true); setLocalError("");
+    const ctrl = new AbortController(); localController.current = ctrl;
+    try {
+      const a = await prepareVariant(A, ctrl.signal);
+      const b = compare !== "none" ? await prepareVariant(B, ctrl.signal) : null;
+      ctrl.signal.throwIfAborted();
+      setReview({ a, b, build });
+    } catch (e) { setLocalError(e instanceof Error ? e.message : "Local processing failed. Paste text or a transcript instead."); }
+    finally { setBusy(false); setLocalProgress(""); }
+  }
+
+  async function sendReviewed() {
+    if (!review) return;
+    const { build } = review;
     setBusy(true);
     try {
       const projectId = await ensureProject();
-      const a = await payload(A, "content");
-      const b = compare !== "none" ? await payload(B, "content_b") : null;
+      const a = payload(A, review.a);
+      const b = review.b ? payload(B, review.b) : null;
       const body = {
         name: name || A.title || A.text.slice(0, 60) || A.transcript.slice(0, 60) || A.file?.name || "Untitled test", requirement: req,
         content: { format, platform, goal, source_url: link || undefined, creator_subject: creatorSubject || "workspace", creator_followers: followers === "" ? null : Number(followers), ...a, seed_asset_ids: seeds.map((s) => s.id), b_kind: compare === "competitor" ? "competitor" : "version",
@@ -172,12 +208,13 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
         publish_at: when === "now" || !at ? null : new Date(at).toISOString(),
         overrides: ov,
       };
+      if (new TextEncoder().encode(JSON.stringify(body)).length > 3_500_000) throw new Error("Selected cloud payload exceeds 3.5 MB. Remove images or shorten text in the review. Original files were not sent.");
       const sim = edit ? await api<Simulation>(`/simulations/${simId}`, { method: "PATCH", json: body })
         : await api<Simulation>(`/projects/${projectId}/simulations`, { json: body });
       if (build) await api(`/simulations/${sim.id}/autopilot`, { method: "POST" });
       nav(`/simulations/${sim.id}`);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Could not save");
+      toast.error(e instanceof Error ? e.message : "Could not save");
     } finally { setBusy(false); }
   }
 
@@ -202,7 +239,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
         </ol>
       )}
       <div className={cn("grid gap-5", more && "xl:grid-cols-[minmax(0,1fr)_340px]")}>
-        <Card>
+        <fieldset disabled={busy} className="contents"><Card>
           {more && (<Section title="Content type" desc="Pick what you are testing. Each format is judged the way people actually encounter it.">
             <div className="space-y-3">
               {groups.map((g) => {
@@ -227,7 +264,9 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
             </div>
           </Section>)}
 
-          <Section title="Content" desc={f ? `Upload the ${f.label.toLowerCase()} or paste its text. Timed subtitles enable the second-by-second attention curve.` : undefined}>
+          <Section title="Content" desc={f ? `Choose the ${f.label.toLowerCase()} locally or paste its text. Timed subtitles enable the second-by-second attention curve.` : undefined}>
+            <p className="text-xs text-muted">Files are prepared on this device before a review step. Speech processing downloads a local model (~40 MB) on first use. Only reviewed text and resized images go to cloud AI analysis.</p>
+            <LocalNotice />
             <Field label="Content link" hint="Optional public article or document"><div className="flex flex-wrap gap-2"><Input className="min-w-0 flex-1" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" /><Button disabled={busy || !link} onClick={async () => { setBusy(true); try { const out = await api<{text: string; title: string; note: string}>(`/projects/${await ensureProject()}/import-link`, {json: {url: link}}); pickFormat("article"); setA({...blank(), text: out.text, title: out.title}); setLinkNote(out.note); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not import link"); } finally {setBusy(false);} }}>Import link</Button></div>{linkNote && <p className="mt-1 text-xs text-muted">{linkNote}</p>}</Field>
             {!more && <Field label="Content format"><Select value={format} onChange={pickFormat} options={formats.map((f) => ({ value: f.key, label: f.label }))} /></Field>}
             {f && <VariantForm v={A} set={setA} f={f} anyFile={home} onFile={(file) => {pickFormat(file.type.startsWith("video/") ? "short_video" : file.type.startsWith("audio/") ? "podcast" : file.type.startsWith("image/") ? "image_post" : "article");}} label={compare !== "none" ? "Your content" : undefined} />}
@@ -259,7 +298,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
           </Section>)}
 
           {more && (<Section title="Background" desc="Briefs, brand guidelines, competitor notes or prior research. Used to build the knowledge graph and stakeholder accounts.">
-            <SeedPicker projectAssets={(project.data?.assets || []).filter((a: Asset) => a.kind === "seed")} selected={seeds} setSelected={setSeeds} upload={(file) => upload(file, "seed")} onUploaded={() => project.refetch()} />
+            <SeedPicker projectAssets={(project.data?.assets || []).filter((a: Asset) => a.kind === "seed")} selected={seeds} setSelected={setSeeds} project={ensureProject} onUploaded={() => project.refetch()} />
           </Section>)}
 
           {!more && <Section title="Platform" desc="Where will you share it?"><Field label="Platform"><Select value={platform} onChange={(v) => { setPlatform(v); setPlatformTouched(true); }} options={(ref.data?.platforms || []).map((p) => ({ value: p.key, label: p.label }))} /></Field></Section>}
@@ -374,7 +413,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
               [<span className="inline-flex items-center gap-1.5">Stakeholder accounts <InfoTip term="stakeholder" /></span>, ov.stakeholders],
               ["Simulated time", `${ov.hours} h · ${Math.round((ov.hours * 60) / ov.minutes_per_round)} rounds`]]} />
           </Section>)}
-        </Card>
+        </Card></fieldset>
 
         <div>
           <Card className="sticky top-6">
@@ -389,8 +428,8 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
                 ["Advanced filters", advancedCount || "None"], ["Background files", seeds.length]]} />
             </div></>}
             <div className="space-y-2 border-t border-line p-4">
-              <Button variant="primary" className="w-full" onClick={() => submit(true)} loading={busy}>Test it</Button>
-              <Button className="w-full" onClick={() => submit(false)} loading={busy}>Save as draft</Button>
+              <Button variant="primary" className="w-full" onClick={() => submit(true)} loading={busy}>Prepare and review test</Button>
+              <Button className="w-full" onClick={() => submit(false)} loading={busy}>Prepare and review draft</Button>
               <p className="pt-1 text-xs leading-relaxed text-muted">Kruvim reads your content, shows it to your chosen audience and writes the results automatically.</p>
             </div>
           </Card>
@@ -398,6 +437,18 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
       </div>
       <SaveTemplateDialog open={saveTpl} onClose={() => setSaveTpl(false)} filters={cleanAud(aud)} onSaved={() => templates.refetch()} />
       {home && <section className="mt-8"><h2 className="mb-3 text-base font-semibold">Recent tests</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{recent.data?.map((s) => <Link key={s.id} to={`/simulations/${s.id}`} className="card min-w-0 p-4 hover:bg-raised"><h3 className="truncate font-medium">{s.name}</h3><div className="mt-3 flex justify-between gap-2 text-sm"><span>{s.score != null ? `${s.score.toFixed(1)} / 10` : "In progress"}</span><span className="text-muted">{fmt.date(s.created_at)}</span></div></Link>)}</div>{recent.data?.length === 0 && <p className="text-sm text-muted">Your first test will appear here.</p>}</section>}
+      <div className="mt-4 space-y-2"><LocalNotice />
+        {localProgress && <div role="status">{localProgress} <Button onClick={() => localController.current?.abort()}>Cancel local processing</Button></div>}
+        {localError && <p role="alert" className="text-sm text-neg">{localError} Original files were not uploaded. You can remove the file and paste text or a transcript.</p>}
+      </div>
+      <Dialog open={!!review} onOpenChange={open => { if (!open && !busy) setReview(undefined); }} title="Review before cloud analysis" description="Review the extracted content and remove unnecessary images. Originals stay on your device."
+        footer={<><Button disabled={busy} onClick={() => setReview(undefined)}>Discard preparation</Button><Button loading={busy} disabled={!review?.a.text.trim() && !review?.a.transcript.trim() && !review?.a.local_media.images.length && !A.description.trim() && !A.asset_id} onClick={sendReviewed}>Send reviewed content to cloud</Button></>}>
+        {review && <><h3>Version A</h3><LocalReview value={review.a} set={a => setReview({ ...review, a })} />
+          {review.b && <><h3>Version B</h3><LocalReview value={review.b} set={b => setReview({ ...review, b })} /></>}
+          {!!seeds.length && <p className="text-xs">{seeds.length} selected background documents already stored in the cloud will also be used.</p>}
+          {!!A.description && <p>Creator description: {A.description}</p>}
+        </>}
+      </Dialog>
     </Page>
   );
 }
@@ -415,7 +466,7 @@ function SaveTemplateDialog({ open, onClose, filters, onSaved }: { open: boolean
       await api("/audience-templates", { json: { ...v, filters } });
       toast.success("Audience saved");
       onSaved(); onClose();
-    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not save"); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
   }
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="Save audience" description="Reuse this audience in future simulations. Shared audiences appear in every workspace's library."
@@ -438,7 +489,7 @@ function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant
   const titleLabel = f.key === "thumbnail" ? "Video title shown next to the thumbnail" : f.poll ? "Poll title (optional)" : type === "text" ? "Headline or first line" : "Title or opening line";
   const transcriptLabel = f.key === "song" ? "Lyrics" : f.key === "podcast" ? "Transcript or show notes" : "Transcript, subtitles or script";
   const descLabel = f.multi ? "Slide captions, one per line" : f.key === "thumbnail" ? "What the thumbnail shows" : type === "image" ? "Caption and description" : "On-screen description";
-  const existingSlides = v.asset_ids.length;
+  const existingSlides = v.asset_ids.length + (v.local_media?.images.length || 0);
   const slides = v.files || [];
   const move = (i: number, d: number) => { const s = [...slides]; const j = i + d; if (j < 0 || j >= s.length) return; [s[i], s[j]] = [s[j], s[i]]; set({ ...v, files: s }); };
   return (
@@ -447,9 +498,9 @@ function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant
       <Field label={titleLabel} hint={f.poll ? "Optional" : undefined}><Input value={v.title} onChange={(e) => set({ ...v, title: e.target.value })} placeholder={f.key === "thumbnail" ? "I tried working out while fasting for 30 days" : "3-minute apartment workout"} /></Field>
 
       {!f.poll && !f.multi && (
-        <Field label={anyFile ? "Upload content" : `${f.label} file`} hint={anyFile ? "Video, audio, image, PDF, Word, text or Markdown" : type === "text" ? "PDF, Word (.docx), text or Markdown" : type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
+        <Field label={anyFile ? "Choose content locally" : `${f.label} file`} hint={anyFile ? "Video, audio, image, PDF, Word, text or Markdown" : type === "text" ? "PDF, Word (.docx), text or Markdown" : type === "image" ? "PNG, JPG or WebP" : "Optional if you paste a transcript"}>
           <div onClick={() => input.current?.click()} onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const x = e.dataTransfer.files[0]; if (x) {onFile?.(x); set({ ...v, file: x });} }}
+            onDrop={(e) => { e.preventDefault(); const x = e.dataTransfer.files[0]; if (x) {onFile?.(x); set({ ...v, file: x, local_media: undefined });} }}
             className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-line-strong bg-panel px-3.5 py-3 hover:bg-raised/50">
             <Upload className="h-4 w-4 text-faint" />
             <div className="min-w-0 flex-1 text-[13px]">
@@ -457,8 +508,8 @@ function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant
                 : v.asset_id ? <span className="text-muted">A file is attached. Drop a new one to replace it.</span>
                   : <span className="text-muted">{anyFile ? "Drop your content here or " : `Drop a ${type} file here or `}<span className="text-brand">browse</span></span>}
             </div>
-            {(v.file || v.asset_id) && <button type="button" onClick={(e) => { e.stopPropagation(); set({ ...v, file: null, asset_id: null }); }} className="rounded p-0.5 text-muted hover:text-fg" aria-label="Remove file"><X className="h-4 w-4" /></button>}
-            <input ref={input} aria-label={`${label || "Content"} file`} type="file" accept={accept} className="hidden" onChange={(e) => {const file = e.target.files?.[0]; if (file) onFile?.(file); set({ ...v, file: file || null });}} />
+            {(v.file || v.asset_id) && <button type="button" onClick={(e) => { e.stopPropagation(); set({ ...v, file: null, asset_id: null, local_media: undefined }); }} className="rounded p-0.5 text-muted hover:text-fg" aria-label="Remove file"><X className="h-4 w-4" /></button>}
+            <input ref={input} aria-label={`${label || "Content"} file`} type="file" accept={accept} className="hidden" onChange={(e) => {const file = e.target.files?.[0]; if (file) onFile?.(file); set({ ...v, file: file || null, local_media: undefined });}} />
           </div>
         </Field>
       )}
@@ -484,13 +535,13 @@ function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant
 
       {(type === "video" || type === "audio") && (
         <Field label={transcriptLabel} help={f.key === "song" ? "Lyrics let agents judge the words; without them they react to the description only." :
-          "SRT or VTT timestamps drive the attention curve. A plain script is timed at 2.5 words per second. Without either, the file is transcribed when faster-whisper is installed on the server."}>
+          "SRT or VTT timestamps drive the attention curve. A plain script is timed at 2.5 words per second. Without either, Whisper runs locally in a browser worker after its first-use model download. Review the resulting subtitles before sending to cloud analysis."}>
           <Textarea value={v.transcript} onChange={(e) => set({ ...v, transcript: e.target.value })} className="min-h-[140px]" />
         </Field>
       )}
       {(type === "video" || type === "image" || f.key === "song") && (
         <Field label={f.key === "song" ? "Genre, mood and where it would be used" : descLabel} hint={type === "image" && !f.multi ? undefined : "Optional"}
-          help={type === "audio" ? undefined : "Frames and images are analysed automatically when the connected provider has a vision model."}>
+          help={type === "audio" ? undefined : "Selected resized images are sent only after review to the backend vision provider. This AI analysis runs in the cloud."}>
           <Textarea value={v.description} onChange={(e) => set({ ...v, description: e.target.value })} className="min-h-[72px]" />
         </Field>
       )}
@@ -520,9 +571,7 @@ function VariantForm({ v, set, f, label, anyFile = false, onFile }: { v: Variant
   );
 }
 
-function SeedPicker({ projectAssets, selected, setSelected, upload, onUploaded }: { projectAssets: Asset[]; selected: Asset[]; setSelected: (a: Asset[]) => void; upload: (f: File) => Promise<Asset>; onUploaded: () => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+function SeedPicker({ projectAssets, selected, setSelected, project, onUploaded }: { projectAssets: Asset[]; selected: Asset[]; setSelected: (a: Asset[]) => void; project: () => Promise<string>; onUploaded: () => void }) {
   const all = [...projectAssets, ...selected.filter((s) => !projectAssets.some((p) => p.id === s.id))];
   return (
     <div className="space-y-2">
@@ -534,17 +583,7 @@ function SeedPicker({ projectAssets, selected, setSelected, upload, onUploaded }
           })}
         </div>
       ) : <p className="text-[13px] text-muted">This project has no background documents yet.</p>}
-      <Button size="sm" loading={busy} onClick={() => input.current?.click()}><FileUp className="h-3.5 w-3.5" />Upload documents</Button>
-      <input ref={input} type="file" multiple accept=".pdf,.md,.txt,.csv,.json" className="hidden" onChange={async (e) => {
-        const files = Array.from(e.target.files || []);
-        setBusy(true);
-        try {
-          const added: Asset[] = [];
-          for (const x of files) added.push(await upload(x));
-          setSelected([...selected, ...added]);
-          onUploaded();
-        } catch (ex) { toast.error(ex instanceof ApiError ? ex.message : "Upload failed"); } finally { setBusy(false); }
-      }} />
+      <LocalDocuments project={project} onSaved={asset => { setSelected([...selected, asset]); onUploaded(); }} />
     </div>
   );
 }

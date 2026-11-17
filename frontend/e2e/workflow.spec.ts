@@ -11,7 +11,7 @@ test("short video completes, report opens and an interview is selected", async (
   page.on("response", (r) => { if (r.url().includes("/api/v1/") && r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
   // Obtain the visible project's link through the UI; no auth fixture bypass.
@@ -28,7 +28,8 @@ test("short video completes, report opens and an interview is selected", async (
   const quick = page.getByRole("button", { name: "Quick", exact: true });
   if (await quick.count()) await quick.click();
   // The original editor and simple mode expose the same primary action.
-  await page.getByRole("button", { name: /Create.*build|Test it/ }).click();
+  await page.getByRole("button", { name: /Prepare and review test/ }).click();
+  await page.getByRole("button", { name: "Send reviewed content to cloud" }).click();
   await expect(page).toHaveURL(/simulations\/[a-f0-9]+/);
   const sid = new URL(page.url()).pathname.split("/").at(-1)!;
   await expect(page.getByRole("button", { name: "See how it works", exact: true })).toBeVisible();

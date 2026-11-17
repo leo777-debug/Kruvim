@@ -35,3 +35,5 @@ Thumbs.db
 # Local verification artifacts
 frontend/browser-*.png
 backend/verification-results.json
+frontend/test-results*/
+frontend/playwright-report/

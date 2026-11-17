@@ -92,21 +92,30 @@ def prepare(v: dict, files: dict[str, str], work_dir: str) -> dict:
     out = {"type": ctype, "title": v.get("title") or "", "description": (v.get("description") or "").strip(),
            "segments": [], "duration": None, "images": [], "timed": ctype in ("video", "audio"), "notes": [],
            "poll_options": [o for o in (v.get("poll_options") or []) if o]}
+    local = v.get("local_media") or {}
+    local_images = [("image/jpeg", im["data"].split(",", 1)[1]) for im in local.get("images", [])]
+    out["selected_image_times"] = [im.get("time") for im in local.get("images", [])]
+    if local.get("duration"):
+        out["duration"] = local["duration"]
+    if local:
+        out["notes"].append("Files prepared locally in the browser; analysis and simulation use the configured backend provider.")
     slides = [files[a] for a in (v.get("asset_ids") or []) if a in files]
-    if ctype == "image" and (slides or len(v.get("asset_ids") or []) > 1):
+    if ctype == "image" and (slides or len(v.get("asset_ids") or []) > 1 or len(local_images) > 1):
         captions = [x.strip() for x in out["description"].splitlines() if x.strip()]
-        n = max(len(slides), len(captions))
+        n = max(len(local_images) + len(slides), len(captions))
         if n == 0:
             raise ContentError("Upload the carousel slides or describe each one on its own line.")
-        out["images"] = [b64file(sp) for sp in slides[:10]]
+        out["images"] = ([b64file(sp) for sp in slides] + local_images)[:10]
         out["segments"] = [{"text": (captions[k] if k < len(captions) else f"Slide {k + 1}") + (f" — {text}" if k == 0 and text else "")}
                            for k in range(min(n, 10))]
         out["timed"] = False
         return out
     if ctype == "image":
+        if local_images:
+            out["images"] = local_images
         if fpath:
             out["images"] = [b64file(fpath)]
-        if not fpath and not out["description"] and not text:
+        if not fpath and not local_images and not out["description"] and not text:
             raise ContentError("Upload an image or describe it.")
         out["segments"] = [{"text": " ".join(x for x in [text, out["description"]] if x) or "(image only)"}]
         out["timed"] = False
@@ -132,6 +141,15 @@ def prepare(v: dict, files: dict[str, str], work_dir: str) -> dict:
             out["notes"].append("Segment timings estimated from the script at 2.5 words/second.")
         if not out["duration"] and out["segments"]:
             out["duration"] = out["segments"][-1].get("end")
+        if local_images and ctype == "video":
+            out["images"] = local_images
+            for im in local.get("images", []):
+                for segment in out["segments"]:
+                    if segment.get("start", 0) <= im.get("time", 0) <= segment.get("end", 0):
+                        segment["local_frame"] = True
+                        break
+            times = ", ".join(f"{im.get('time', 0):.2f}s" for im in local.get("images", []))
+            out["notes"].append(f"Selected browser frames in order at: {times}. Sparse visual coverage only.")
         if fpath and ctype == "video" and has_video_stream(fpath):
             mids = [(s["start"] + s["end"]) / 2 for s in out["segments"]][:10]
             frames = extract_frames(fpath, mids, os.path.join(work_dir, "frames"))
@@ -306,7 +324,7 @@ async def build_card(prep: dict, meta: dict, llm: BaseLLM, usage: Usage) -> dict
             "poll_options": prep.get("poll_options") or [],
             "goal": meta.get("goal") or "", "duration": prep["duration"], "timed": prep["timed"], "description": prep["description"],
             "notes": list(prep["notes"]), "readability": flesch(full), "word_count": len(full.split()),
-            "segments": [{"i": i, "start": s.get("start"), "end": s.get("end"), "text": s["text"], "has_frame": bool(s.get("frame"))}
+            "segments": [{"i": i, "start": s.get("start"), "end": s.get("end"), "text": s["text"], "has_frame": bool(s.get("frame") or s.get("local_frame"))}
                          for i, s in enumerate(segs)]}
     images = list(prep["images"])
     frames = [s["frame"] for s in segs if s.get("frame")][:8]
@@ -333,6 +351,7 @@ async def build_card(prep: dict, meta: dict, llm: BaseLLM, usage: Usage) -> dict
                  for i, s in enumerate(segs)]
         user = (f"Title: {card['title']}\nType: {card['type']}\nTarget platform: {meta.get('platform')}\nCreator goal: {meta.get('goal') or '-'}\n"
                 f"Creator's description: {prep['description'] or '-'}\n"
+                + (f"Selected image timestamps in attachment order (seconds; null means a slide): {prep.get('selected_image_times', [])}\n" if prep.get("selected_image_times") else "")
                 + (f"Images attached: {len(images)}\n" if images else "") + "\nSegments:\n" + "\n".join(lines))
         d = await llm.complete_json(system=CARD_SYSTEM, user=user, role="content", max_tokens=2500, usage=usage,
                                     images=images or None, temperature=0.2)

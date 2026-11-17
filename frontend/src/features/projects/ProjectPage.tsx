@@ -1,13 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { LineSimple } from "@/components/charts";
 import { Card, CardHeader, Empty, KV, Skeleton } from "@/components/ui/primitives";
-import { api, ApiError, uploadAsset } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { LocalDocuments } from "@/components/LocalDocuments";
 import { can, useAuth } from "@/lib/auth";
 import type { Asset } from "@/lib/types";
 import { fmt } from "@/lib/utils";
@@ -22,7 +23,6 @@ export default function ProjectPage() {
   const orgId = useAuth((s) => s.orgId);
   const nav = useNavigate();
   const qc = useQueryClient();
-  const input = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [batchErrors, setBatchErrors] = useState<{ id: string; error?: string }[]>([]);
@@ -39,13 +39,6 @@ export default function ProjectPage() {
       await q.refetch();
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not start batch"); }
     finally { setRunning(false); }
-  }
-  async function upload(files: FileList | null) {
-    for (const f of Array.from(files || [])) {
-      try { await uploadAsset(projectId!, f, "seed"); toast.success(`${f.name} added`); }
-      catch (e) { toast.error(e instanceof ApiError ? e.message : "Upload failed"); }
-    }
-    qc.invalidateQueries({ queryKey: [orgId, "project", projectId] });
   }
   async function remove(a: Asset) {
     if (!confirm(`Delete ${a.filename}?`)) return;
@@ -79,9 +72,8 @@ export default function ProjectPage() {
           </Card>
         )}
         <Card className="h-fit overflow-hidden">
-          <CardHeader title="Background documents" subtitle="Briefs, brand guidelines and research. Added to every simulation's knowledge graph." divider
-            actions={<Button size="sm" onClick={() => input.current?.click()}><Upload className="h-3.5 w-3.5" />Upload</Button>} />
-          <input ref={input} type="file" multiple className="hidden" accept=".pdf,.md,.txt,.csv,.json" onChange={(e) => upload(e.target.files)} />
+          <CardHeader title="Background documents" subtitle="Extracted text is saved in the cloud for simulation context. Original documents stay on your device." divider />
+          <div className="p-3"><LocalDocuments project={async () => projectId!} onSaved={() => { qc.invalidateQueries({ queryKey: [orgId, "project", projectId] }); }} /></div>
           {seeds.length === 0 ? <div className="px-4 py-6 text-[13px] text-muted">No documents. PDF, Markdown, text, CSV and JSON are supported.</div> : (
             <table className="dt">
               <thead><tr><th>File</th><th className="!text-right">Size</th><th className="w-8" /></tr></thead>
@@ -94,7 +86,7 @@ export default function ProjectPage() {
               ))}</tbody>
             </table>
           )}
-          {contentFiles > 0 && <div className="border-t border-line px-4 py-2.5 text-xs text-muted">{contentFiles} content file{contentFiles === 1 ? "" : "s"} uploaded through simulations</div>}
+          {contentFiles > 0 && <div className="border-t border-line px-4 py-2.5 text-xs text-muted">{contentFiles} content attachment{contentFiles === 1 ? "" : "s"} attached through simulations</div>}
         </Card>
         </div>
       </div>

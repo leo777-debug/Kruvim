@@ -10,12 +10,52 @@ from app.schemas.creator import FollowerSplit
 ContentType = Literal["video", "audio", "image", "text"]
 
 
+class LocalImage(BaseModel):
+    data: str = Field(max_length=350_000)
+    time: float | None = Field(default=None, ge=0, le=86400, allow_inf_nan=False)
+    order: int = Field(ge=0, le=9)
+
+    @model_validator(mode="after")
+    def _image(self):
+        import base64
+        import io
+        from PIL import Image
+        prefix = "data:image/jpeg;base64,"
+        if not self.data.startswith(prefix):
+            raise ValueError("Only locally resized JPEG images are accepted")
+        try:
+            raw = base64.b64decode(self.data[len(prefix):], validate=True)
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format != "JPEG" or max(image.size) > 1024:
+                    raise ValueError("Image must be JPEG and at most 1024 pixels")
+                image.verify()
+        except Exception as exc:
+            raise ValueError("Invalid resized image") from exc
+        return self
+
+
+class LocalMedia(BaseModel):
+    duration: float | None = Field(default=None, gt=0, le=86400, allow_inf_nan=False)
+    images: list[LocalImage] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def _bounds(self):
+        if [x.order for x in self.images] != sorted(set(x.order for x in self.images)):
+            raise ValueError("Images must have unique ascending order")
+        if sum(len(x.data) for x in self.images) > 1_500_000:
+            raise ValueError("Selected images exceed 1.5 MB. Remove images or resize further")
+        if any(x.time is not None and (self.duration is None or x.time > self.duration) for x in self.images):
+            raise ValueError("Frame timestamp exceeds duration")
+        return self
+
+
 class VariantIn(BaseModel):
     type: ContentType | None = None
     title: str = Field(default="", max_length=300)
     text: str = Field(default="", max_length=60_000)
     transcript: str = Field(default="", max_length=120_000)
     description: str = Field(default="", max_length=8000)
+    local_media: LocalMedia | None = None
     asset_id: str | None = None
     asset_ids: list[str] = Field(default_factory=list, max_length=10)        # carousel slides, in order
     poll_options: list[str] = Field(default_factory=list, max_length=6)

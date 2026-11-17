@@ -4,9 +4,12 @@ import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
+  worker: { format: "es" },
+  optimizeDeps: { include: ["fflate", "pdfjs-dist", "@huggingface/transformers"] },
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   server: {
     port: 5173,
+    watch: { ignored: ["**/test-results*/**", "**/playwright-report/**"] },
     proxy: { "/api": { target: process.env.KRUVIM_API_URL || "http://127.0.0.1:8000", changeOrigin: true } },
   },
   preview: {

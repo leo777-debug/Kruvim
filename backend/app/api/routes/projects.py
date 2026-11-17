@@ -53,6 +53,26 @@ def validate_upload(filename, mime, kind, size):
         raise AppError(f"Upload a nonempty file up to {settings.max_upload_mb} MB.", code="too_large", status=413)
 
 
+class ExtractedTextIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+    text: str = Field(min_length=1, max_length=60_000)
+
+
+@router.post("/projects/{project_id}/assets/extracted-text")
+async def save_extracted_text(project_id: str, body: ExtractedTextIn, p: Principal = Depends(role("member")),
+                              s: AsyncSession = Depends(get_session)):
+    await get_project(s, p, project_id)
+    if not body.text.strip():
+        raise AppError("Extracted document text is empty.")
+    # No object-store object exists for locally extracted documents.
+    a = Asset(org_id=p.org_id, project_id=project_id, kind="seed", filename=body.filename,
+              mime="text/plain", size=len(body.text.encode("utf-8")), storage_key="",
+              text_excerpt=body.text, uploaded_by=p.user_id)
+    s.add(a)
+    await s.commit()
+    return asset_out(a)
+
+
 class UploadIn(BaseModel):
     filename: str = Field(min_length=1, max_length=300)
     mime: str = Field(default="application/octet-stream", min_length=1, max_length=120)
@@ -163,7 +183,8 @@ async def delete_project(project_id: str, p: Principal = Depends(role("admin")),
     if running:
         raise AppError("Stop running simulations before deleting the project.", code="conflict", status=409)
     for a in (await s.execute(select(Asset).where(Asset.project_id == pr.id))).scalars():
-        await storage.delete(a.storage_key)
+        if a.storage_key:
+            await storage.delete(a.storage_key)
     await s.delete(pr)
     audit.record(s, "project.delete", org_id=p.org_id, user_id=p.user_id, target=pr.name)
     await s.commit()
@@ -213,7 +234,8 @@ async def delete_asset(asset_id: str, p: Principal = Depends(role("member")), s:
     a = (await s.execute(select(Asset).where(and_(Asset.id == asset_id, Asset.org_id == p.org_id)))).scalar_one_or_none()
     if not a:
         raise NotFound("Asset not found.")
-    await storage.delete(a.storage_key)
+    if a.storage_key:
+        await storage.delete(a.storage_key)
     await s.delete(a)
     await s.commit()
     return {"ok": True}
