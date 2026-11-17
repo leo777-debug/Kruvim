@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, get_project, principal, role
@@ -40,6 +41,78 @@ ALLOWED = {
 }
 SEED_EXT = {".txt", ".md", ".pdf", ".docx", ".csv", ".json", ".srt", ".vtt"}
 DOC_EXT = {".txt", ".md", ".pdf", ".docx"}
+
+
+def validate_upload(filename, mime, kind, size):
+    if kind not in ALLOWED:
+        raise AppError("kind must be content, content_b or seed")
+    ext = os.path.splitext(filename)[1].lower()
+    if not any(mime.startswith(m) for m in ALLOWED[kind]) and not (kind == "seed" and ext in SEED_EXT) and ext not in DOC_EXT:
+        raise AppError(f"File type {mime} is not accepted for {kind}.", code="unsupported_media", status=415)
+    if size <= 0 or size > settings.max_upload_mb * 1024 * 1024:
+        raise AppError(f"Upload a nonempty file up to {settings.max_upload_mb} MB.", code="too_large", status=413)
+
+
+class UploadIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+    mime: str = Field(default="application/octet-stream", min_length=1, max_length=120)
+    kind: str = "content"
+    size: int = Field(gt=0)
+
+
+class CompleteUploadIn(BaseModel):
+    ticket: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/projects/{project_id}/assets/upload")
+async def authorize_upload(project_id: str, body: UploadIn, p: Principal = Depends(role("member")),
+                           s: AsyncSession = Depends(get_session)):
+    await get_project(s, p, project_id)
+    mime = body.mime.lower().split(";")[0].strip()
+    validate_upload(body.filename, mime, body.kind, body.size)
+    if settings.storage_backend == "local" and not settings.serverless:
+        return {"transport": "local", "max_size": settings.max_upload_mb * 1024 * 1024}
+    from app.services.upload_tickets import issue
+    asset_id = uuid.uuid4().hex
+    ext = os.path.splitext(body.filename)[1].lower()[:10]
+    key = f"{p.org_id}/{project_id}/{asset_id}{ext}"
+    target = await storage.signed_upload(key, mime, body.size)
+    ticket = issue({"org": p.org_id, "sub": p.user_id, "project": project_id, "id": asset_id, "key": key,
+                    "filename": body.filename, "mime": mime, "kind": body.kind, "size": body.size})
+    return {"transport": "direct", **target, "ticket": ticket}
+
+
+@router.post("/projects/{project_id}/assets/complete")
+async def complete_upload(project_id: str, body: CompleteUploadIn, p: Principal = Depends(role("member")),
+                          s: AsyncSession = Depends(get_session)):
+    await get_project(s, p, project_id)
+    from app.services.upload_tickets import verify
+    data = verify(body.ticket, p.org_id, p.user_id, project_id)
+    existing = await s.get(Asset, data["id"])
+    if existing:
+        return asset_out(existing)
+    actual = await storage.info(data["key"])
+    if actual["size"] != data["size"] or actual["mime"].split(";")[0].strip().lower() != data["mime"]:
+        raise AppError("Stored file does not match the authorized upload. Please upload again.", status=422)
+    validate_upload(data["filename"], data["mime"], data["kind"], actual["size"])
+    excerpt = ""
+    if data["kind"] == "seed" or os.path.splitext(data["filename"])[1].lower() in DOC_EXT:
+        try:
+            excerpt = document_text(await storage.get(data["key"]), data["filename"])
+        except ContentError as exc:
+            raise AppError(str(exc), code="unreadable", status=422)
+    a = Asset(id=data["id"], org_id=p.org_id, project_id=project_id, kind=data["kind"], filename=data["filename"],
+              mime=data["mime"], size=actual["size"], storage_key=data["key"], text_excerpt=excerpt, uploaded_by=p.user_id)
+    s.add(a)
+    try:
+        await s.commit()
+    except IntegrityError:
+        await s.rollback()
+        existing = await s.get(Asset, data["id"])
+        if not existing:
+            raise
+        return asset_out(existing)
+    return asset_out(a)
 
 
 def _project(pr: Project, sims: int = 0, last=None) -> dict:
@@ -106,6 +179,8 @@ def asset_out(a: Asset) -> dict:
 async def upload_asset(project_id: str, file: UploadFile = File(...), kind: str = Form("content"),
                        p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
     pr = await get_project(s, p, project_id)
+    if settings.serverless:
+        raise AppError("Upload directly to storage using the upload authorization endpoint.", status=400)
     if kind not in ALLOWED:
         raise AppError("kind must be content, content_b or seed")
     mime = (file.content_type or "application/octet-stream").lower()

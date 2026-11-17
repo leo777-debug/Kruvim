@@ -7,7 +7,7 @@ import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { LineSimple } from "@/components/charts";
 import { Card, CardHeader, Empty, KV, Skeleton } from "@/components/ui/primitives";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, uploadAsset } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import type { Asset } from "@/lib/types";
 import { fmt } from "@/lib/utils";
@@ -42,10 +42,7 @@ export default function ProjectPage() {
   }
   async function upload(files: FileList | null) {
     for (const f of Array.from(files || [])) {
-      const fd = new FormData();
-      fd.append("file", f);
-      fd.append("kind", "seed");
-      try { await api(`/projects/${projectId}/assets`, { method: "POST", body: fd }); toast.success(`${f.name} added`); }
+      try { await uploadAsset(projectId!, f, "seed"); toast.success(`${f.name} added`); }
       catch (e) { toast.error(e instanceof ApiError ? e.message : "Upload failed"); }
     }
     qc.invalidateQueries({ queryKey: [orgId, "project", projectId] });

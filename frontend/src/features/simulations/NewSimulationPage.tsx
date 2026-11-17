@@ -9,7 +9,7 @@ import { Dialog, Select } from "@/components/ui/overlay";
 import { RegionPicker } from "@/components/ui/RegionPicker";
 import { UaeAudienceFilters } from "@/components/ui/UaeAudienceFilters";
 import { Card, CheckRow, Field, InfoTip, Input, KV, RangeSlider, Segmented, Switch, Textarea } from "@/components/ui/primitives";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, uploadAsset } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useReference } from "@/lib/queries";
 import type { Asset, Format, Simulation, SimSummary } from "@/lib/types";
@@ -128,10 +128,7 @@ export default function NewSimulationPage({ home = false }: { home?: boolean }) 
   }
 
   async function upload(file: File, kind: string): Promise<Asset> {
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("kind", kind);
-    return api<Asset>(`/projects/${await ensureProject()}/assets`, { method: "POST", body: fd });
+    return uploadAsset(await ensureProject(), file, kind);
   }
 
   function validate(v: Variant, label: string): string | null {

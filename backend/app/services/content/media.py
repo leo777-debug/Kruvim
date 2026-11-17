@@ -74,9 +74,15 @@ def transcribe(path: str) -> list[dict]:
     except ImportError:
         raise ContentError("This file needs a transcript. Paste one (plain text, SRT or VTT) or enable local transcription "
                            "(install faster-whisper on the worker).")
-    model = WhisperModel(os.environ.get("KRUVIM_WHISPER_MODEL", "small"), device="auto", compute_type="int8")
-    segments, _ = model.transcribe(path, vad_filter=True)
-    return [{"start": s.start, "end": s.end, "text": s.text.strip()} for s in segments if s.text.strip()]
+    try:
+        model = WhisperModel(os.environ.get("KRUVIM_WHISPER_MODEL", "small"), device="auto", compute_type="int8")
+        segments, _ = model.transcribe(path, vad_filter=True)
+        cues = [{"start": s.start, "end": s.end, "text": s.text.strip()} for s in segments if s.text.strip()]
+    except Exception as exc:
+        raise ContentError("Could not transcribe this file. Paste a transcript or check the worker's transcription setup.") from exc
+    if not cues:
+        raise ContentError("No speech was detected. Add a transcript or script for this video/audio.")
+    return cues
 
 
 def extract_frames(path: str, times: list[float], out_dir: str) -> list[str]:

@@ -6,6 +6,28 @@ import os
 import tempfile
 
 from app.core.config import settings
+from app.core.errors import AppError
+
+
+async def signed_upload(key: str, mime: str, size: int) -> dict:
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import signed_upload as cloud_sign
+        return await cloud_sign(key, mime, size)
+    if settings.storage_backend == "s3":
+        url = await asyncio.to_thread(_s3().generate_presigned_url, "put_object",
+            Params={"Bucket": settings.s3_bucket, "Key": key, "ContentType": mime, "IfNoneMatch": "*"}, ExpiresIn=7200)
+        return {"url": url, "method": "PUT", "headers": {"Content-Type": mime, "If-None-Match": "*"}}
+    raise AppError("Direct uploads require cloud storage.", status=503)
+
+
+async def info(key: str) -> dict:
+    if settings.storage_backend == "supabase":
+        from app.services.supabase_storage import info as cloud_info
+        return await cloud_info(key)
+    if settings.storage_backend == "s3":
+        data = await asyncio.to_thread(_s3().head_object, Bucket=settings.s3_bucket, Key=key)
+        return {"size": data["ContentLength"], "mime": data["ContentType"]}
+    return {"size": os.path.getsize(_local_path(key)), "mime": "application/octet-stream"}
 
 
 def _local_path(key: str) -> str:

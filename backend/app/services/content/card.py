@@ -115,7 +115,7 @@ def prepare(v: dict, files: dict[str, str], work_dir: str) -> dict:
         cues = parse_subtitles(transcript) if transcript and looks_like_subtitles(transcript) else []
         if fpath:
             out["duration"] = probe_duration(fpath)
-            if not cues and not transcript:
+            if not cues and not transcript and not text:
                 cues = transcribe(fpath)
                 out["notes"].append("Transcribed locally with faster-whisper.")
         if cues:
@@ -134,8 +134,14 @@ def prepare(v: dict, files: dict[str, str], work_dir: str) -> dict:
             out["duration"] = out["segments"][-1].get("end")
         if fpath and ctype == "video" and has_video_stream(fpath):
             mids = [(s["start"] + s["end"]) / 2 for s in out["segments"]][:10]
-            for s, p in zip(out["segments"], extract_frames(fpath, mids, os.path.join(work_dir, "frames"))):
-                s["frame"] = p
+            frames = extract_frames(fpath, mids, os.path.join(work_dir, "frames"))
+            for path in frames:
+                index = int(os.path.basename(path).split("_")[1].split(".")[0])
+                out["segments"][index]["frame"] = path
+            if len(frames) < len(mids):
+                out["notes"].append("Some video frames could not be extracted; visual coverage is incomplete.")
+        elif fpath and ctype == "video":
+            out["notes"].append("Video frames were not extracted. Check FFmpeg/ffprobe and the uploaded video; visuals were not analysed.")
         return out
     if not text and fpath:
         with open(fpath, "rb") as fh:
@@ -309,6 +315,8 @@ async def build_card(prep: dict, meta: dict, llm: BaseLLM, usage: Usage) -> dict
     if not llm.has_vision() and (images or frames):
         card["notes"].append("No vision model configured: visuals were not analysed.")
         images = []
+    card["visual_analysis"] = {"status": "analysed" if images and not llm.is_dry else "not_analysed",
+                               "images": len(images) if not llm.is_dry else 0}
     if llm.is_dry:
         for s in card["segments"]:
             s["label"], s["note"] = _label(s["text"]), ""

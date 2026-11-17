@@ -36,6 +36,25 @@ async def get(key):
     return (await request("GET", "object/" + object_path(key))).content
 
 
+async def signed_upload(key, mime, size):
+    bucket = (await request("GET", "bucket/" + quote(settings.supabase_bucket, safe=""))).json()
+    limit = bucket.get("file_size_limit")
+    if limit and size > int(limit):
+        raise AppError(f"Storage currently accepts files up to {int(limit) / (1024 * 1024):g} MB. Choose a smaller file.",
+                       code="too_large", status=413)
+    response = await request("POST", "object/upload/sign/" + object_path(key), json={})
+    url = response.json()["url"]
+    return {"url": settings.supabase_url.rstrip("/") + "/storage/v1" + url,
+            "method": "PUT", "headers": {"Content-Type": mime, "x-upsert": "false"}}
+
+
+async def info(key):
+    data = (await request("GET", "object/info/" + object_path(key))).json()
+    metadata = data.get("metadata") or {}
+    return {"size": int(metadata.get("size", data.get("size", -1))),
+            "mime": metadata.get("mimetype", data.get("contentType", ""))}
+
+
 async def delete(key):
     await request("DELETE", "object/" + quote(settings.supabase_bucket, safe=""), json={"prefixes": [key]})
 

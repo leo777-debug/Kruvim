@@ -1,5 +1,5 @@
 import { refreshToken, useAuth } from "./auth";
-import type { Session, SimEvent } from "./types";
+import type { Asset, Session, SimEvent } from "./types";
 
 export const API = "/api/v1";
 
@@ -142,4 +142,29 @@ export function streamEvents(simId: string, onEvent: (e: SimEvent) => void, opts
     stopped = true;
     ctrl?.abort();
   };
+}
+
+
+/** File bytes go straight to the signed storage URL. App requests contain metadata only. */
+export async function uploadAsset(projectId: string, file: File, kind = "content"): Promise<Asset> {
+  const path = `/projects/${projectId}/assets`;
+  const target = await api<{ transport: "local" | "direct"; url: string; method: string; headers: Record<string, string>; ticket: string }>(`${path}/upload`, {
+    json: { filename: file.name, mime: file.type || "application/octet-stream", size: file.size, kind },
+  });
+  if (target.transport === "local") {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("kind", kind);
+    return api<Asset>(path, { method: "POST", body });
+  }
+  // Never use api() here: app Authorization and workspace headers must stay on our origin.
+  const response = await fetch(target.url, { method: target.method, headers: target.headers, body: file, credentials: "omit" });
+  if (!response.ok) throw new ApiError(response.status, "storage_upload", "File upload failed. Please try again.");
+  try {
+    return await api<Asset>(`${path}/complete`, { json: { ticket: target.ticket } });
+  } catch (error) {
+    // Completion is idempotent; retry a transient response without resending the file.
+    if (error instanceof ApiError && error.status < 500) throw error;
+    return api<Asset>(`${path}/complete`, { json: { ticket: target.ticket } });
+  }
 }
