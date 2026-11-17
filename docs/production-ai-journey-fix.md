@@ -10,4 +10,6 @@ Provider errors retain a safe provider label, error category and HTTP status in 
 
 Failed report usage is retained. Worker tasks report failure to the cloud delivery wrapper, so failed stages no longer leave cloud-job rows marked done. Model choices and custom OpenAI-compatible endpoints remain available; this does not set a shared platform provider or change billing.
 
+Live report verification also exposed truncated JSON. The common JSON helper now increases the output allowance on its one retry when an answer is incomplete, up to 8,192 tokens (without shrinking an already larger allowance). OpenAI-compatible and Anthropic output-limit metadata survives encrypted receipt replay, so a length-limited response cannot be accepted merely because a partial object happens to parse. An unfinished analyst section fails explicitly instead of being marked complete with placeholder text.
+
 Regression coverage includes live-model failure without substituted entities/reactions/environment/report outlines, cloud-job error state, safe provider-error reporting, retry/pacing behavior, and the existing complete mock-provider workflow. Live production verification is recorded separately with its actual outcome.

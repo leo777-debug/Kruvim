@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .base import BaseLLM, CompletionText, LLMAuthError, LLMError, ProviderSettings, Usage
 from .errors import ProviderFailure, classify, retry_delay
 
 _FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
@@ -91,7 +91,8 @@ class AnthropicLLM(BaseLLM):
         cached = int(u.cache_read_input_tokens or 0)
         total_in = int((u.input_tokens or 0) + cached + (u.cache_creation_input_tokens or 0))
         usage.add(self.name, model, role, total_in, cached, int(u.output_tokens or 0), time.time() - t0)
-        return "".join(b.text for b in resp.content if b.type == "text")
+        return CompletionText("".join(b.text for b in resp.content if b.type == "text"),
+                              truncated=resp.stop_reason == "max_tokens")
 
     async def list_models(self) -> list[str]:
         return [m.id async for m in self.client.models.list()]

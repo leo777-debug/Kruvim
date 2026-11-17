@@ -215,7 +215,8 @@ class Work:
                         u = receipt.usage
                         kwargs['usage'].add(llm.name, llm.model_for(kwargs['role']), kwargs['role'], u.get('input_tokens', 0),
                             u.get('cached_tokens', 0), u.get('output_tokens', 0), 0)
-                        return decrypt(receipt.response_enc)
+                        from app.services.llm.base import CompletionText
+                        return CompletionText(decrypt(receipt.response_enc), truncated=u.get('output_truncated', False))
                     if self.paused:
                         raise BudgetPause(self.paused)
                     try:
@@ -259,6 +260,7 @@ class Work:
                 receipt = await s.get(TokenCall, receipt_id, with_for_update=True)
                 receipt.response_enc, receipt.status = encrypt(response), 'done'
                 receipt.usage = usage.as_dict(self.res.settings)
+                receipt.usage['output_truncated'] = bool(getattr(response, 'truncated', False))
                 if self.res.metered and self.simulation_id:
                     await s.execute(update(Simulation).where(Simulation.id == self.simulation_id,
                         Simulation.org_id == self.org_id).values(credits_charged=Simulation.credits_charged + 1))

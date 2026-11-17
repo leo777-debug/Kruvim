@@ -18,6 +18,14 @@ class LLMAuthError(LLMError):
     """Configuration problem (bad key, unknown model, unreachable endpoint): abort the job."""
 
 
+class CompletionText(str):
+    """Keep provider output-limit metadata through accounting and receipt replay."""
+    def __new__(cls, value, *, truncated=False):
+        result = super().__new__(cls, value)
+        result.truncated = bool(truncated)
+        return result
+
+
 @dataclass
 class ProviderSettings:
     provider: str = "dryrun"
@@ -177,19 +185,25 @@ class BaseLLM:
     async def complete_json(self, *, system: str, user: str, role: str, max_tokens: int, usage: Usage,
                             images: list | None = None, temperature: float | None = None, operation_key=None):
         prompt = user
+        token_budget = max_tokens
         last: Exception | None = None
         for attempt in range(2):
-            text = await self.complete(system=system, user=prompt, role=role, max_tokens=max_tokens, usage=usage,
+            text = await self.complete(system=system, user=prompt, role=role, max_tokens=token_budget, usage=usage,
                                        json_out=True, images=images, temperature=temperature,
                                        operation_key=f'{operation_key}:{attempt}' if operation_key else None)
             try:
+                if getattr(text, "truncated", False):
+                    raise ValueError("unterminated provider output: token limit reached")
                 result = extract_json(text)
                 if not isinstance(result, dict):
                     raise ValueError("expected a JSON object")
                 return result
             except Exception as exc:
                 last = exc
-                prompt = user + "\n\nYour previous reply could not be parsed. Reply with ONE valid JSON object and nothing else."
+                if "unterminated" in str(exc).lower():
+                    token_budget = max(max_tokens, min(8192, max_tokens * 2))
+                prompt = user + "\n\nYour previous reply could not be parsed or was incomplete. Reply with ONE complete valid JSON object "
+                prompt += "and nothing else. Keep prose concise, but complete every required field and close all strings and brackets."
         usage.fail(self.name, role)
         raise LLMError(f"model did not return valid JSON: {last}")
 

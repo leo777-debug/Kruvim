@@ -9,7 +9,7 @@ import time
 
 import httpx
 
-from .base import BaseLLM, LLMAuthError, LLMError, ProviderSettings, Usage
+from .base import BaseLLM, CompletionText, LLMAuthError, LLMError, ProviderSettings, Usage
 from .errors import ProviderFailure, classify, retry_delay
 from .pacing import for_provider
 
@@ -147,7 +147,8 @@ class OpenAICompatLLM(BaseLLM):
                     msg = data["choices"][0]["message"]
                 except (KeyError, IndexError):
                     raise LLMError("The model provider returned an unexpected response.")
-                return msg.get("content") or msg.get("reasoning_content") or ""
+                return CompletionText(msg.get("content") or msg.get("reasoning_content") or "",
+                                      truncated=data["choices"][0].get("finish_reason") == "length")
         raise LLMError("unreachable")
 
     async def list_models(self) -> list[str]:

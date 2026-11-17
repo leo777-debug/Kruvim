@@ -14,7 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.db.session import session_scope
 from app.models import Report, Simulation
 from app.services.events import bus
-from app.services.llm import BaseLLM, LLMAuthError, Usage
+from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
 
 from .citations import render_section, source_labels
 from .tools import TOOL_SPECS, Toolbox
@@ -108,7 +108,7 @@ async def _react(llm: BaseLLM, usage: Usage, tb: Toolbox, system: str, task: str
         transcript += f"\n\n[step {step}] thought: {thought}\naction: {tool} {json.dumps(inp, ensure_ascii=False)}\nobservation: {obs}"
         if len(used) < min_calls:
             transcript += f"\n(You have used {len(used)} tool(s); use at least {min_calls}.)"
-    return "(The analyst could not complete this section.)", used
+    raise LLMError("The analyst did not finish this section. Retry the report or choose another model.")
 
 
 async def generate(sim_id: str, llm: BaseLLM, usage: Usage) -> Report:
