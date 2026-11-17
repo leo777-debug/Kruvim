@@ -33,7 +33,7 @@ from app.services.datapool.retrieval import embed
 from app.services.events import bus
 from app.services.knowledge import GraphWriter, slug
 from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
-from app.services.llm.errors import BudgetPause
+from app.services.llm.errors import BudgetPause, StageYield
 from app.services.population import get_population, persona_text, platform_label, topic_match
 from app.services.population.regions import PLATFORMS, REGIONS, STANCES, region
 
@@ -908,14 +908,14 @@ class Engine:
             if self._resume_phase == 'first':
                 await self.first_exposure()
                 self._resume_phase = 'rounds'
-        except BudgetPause:
+        except (BudgetPause, StageYield):
             await self.save_checkpoint()
             raise
         try:
             begin = self.round if getattr(self, '_round_phase', 'done') != 'done' and self.round else self.round + 1
             for r in range(max(1, begin), self.rounds + 1):
                 await self.run_round(r)
-        except BudgetPause:
+        except (BudgetPause, StageYield):
             await self.save_checkpoint()
             raise
         except Stopped:

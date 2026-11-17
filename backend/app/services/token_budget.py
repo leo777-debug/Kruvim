@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -35,7 +36,7 @@ from app.models import (
     User,
 )
 from app.services import quotas
-from app.services.llm.errors import PROVIDERS, BudgetPause, ProviderFailure, provider_name
+from app.services.llm.errors import PROVIDERS, BudgetPause, ProviderFailure, StageYield, provider_name
 
 current = ContextVar('token_work', default=None)
 locks = defaultdict(asyncio.Lock)
@@ -160,9 +161,42 @@ async def provider_status(res, category='ok', raw=''):
 
 
 class Work:
-    def __init__(self, org_id, simulation_id, namespace, res=None):
+    def __init__(self, org_id, simulation_id, namespace, res=None, *, continuation=False, deadline_seconds=None):
         self.org_id, self.simulation_id, self.namespace, self.res = org_id, simulation_id, namespace, res
         self.paused = None
+        self.continuation, self.started_at, self.yielded = continuation, time.monotonic(), False
+        self.deadline_seconds = deadline_seconds
+
+    def request_budget(self, wait=0):
+        if not self.continuation or not settings.serverless or settings.redis_url:
+            return
+        limit = max(10, (self.deadline_seconds or settings.simulation_max_duration_seconds) - 60)
+        if self.yielded or time.monotonic() - self.started_at + wait >= limit:
+            self.yielded = True
+            raise StageYield(wait)
+
+    async def summarize(self, usage):
+        """Count durable upstream receipts once, including earlier invocations."""
+        if not self.res:
+            return
+        async with accounting_session() as s:
+            receipts = (await s.execute(select(TokenCall).where(TokenCall.org_id == self.org_id,
+                TokenCall.namespace == self.namespace))).scalars().all()
+        if not receipts:
+            return
+        fields = ('calls', 'failed', 'input_tokens', 'output_tokens', 'cached_tokens', 'seconds')
+        for field in fields:
+            setattr(usage, field, 0)
+        usage.by_role = {}
+        for receipt in receipts:
+            saved = receipt.usage or {}
+            for field in fields:
+                value = saved.get(field, int(receipt.status == 'done') if field == 'calls' else 0)
+                setattr(usage, field, getattr(usage, field) + value)
+            for role, values in saved.get('by_role', {}).items():
+                total = usage.by_role.setdefault(role, {'calls': 0, 'input': 0, 'cached': 0, 'output': 0, 'model': values.get('model', '')})
+                for field in ('calls', 'input', 'cached', 'output'):
+                    total[field] += values.get(field, 0)
 
     async def call(self, llm, fn, kwargs, operation_key=None):
         if not self.res or llm.is_dry:
@@ -213,6 +247,7 @@ class Work:
                         org = await s.get(Organization, self.org_id, with_for_update=True)
                         await quotas.refund_call(s, org, receipt.allocations)
                         receipt.allocations, receipt.status = {}, 'failed'
+                        receipt.usage = usage.as_dict(self.res.settings)
                 if isinstance(exc, ProviderFailure):
                     await provider_status(self.res, exc.category, exc.raw)
                     if exc.category in ('quota_exhausted', 'invalid_key'):
@@ -223,7 +258,7 @@ class Work:
             async with accounting_session() as s:
                 receipt = await s.get(TokenCall, receipt_id, with_for_update=True)
                 receipt.response_enc, receipt.status = encrypt(response), 'done'
-                receipt.usage = {field: getattr(usage, field) for field in ('input_tokens', 'output_tokens', 'cached_tokens')}
+                receipt.usage = usage.as_dict(self.res.settings)
                 if self.res.metered and self.simulation_id:
                     await s.execute(update(Simulation).where(Simulation.id == self.simulation_id,
                         Simulation.org_id == self.org_id).values(credits_charged=Simulation.credits_charged + 1))

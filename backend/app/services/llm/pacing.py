@@ -22,6 +22,9 @@ class Gate:
                 await asyncio.sleep(delay)
             self.next_at = time.monotonic() + self.interval
 
+    def remaining(self):
+        return max(0, self.next_at - time.monotonic())
+
     def observe(self, response):
         for header, window in (('x-ratelimit-limit-req-minute', 60), ('x-ratelimit-limit-req-second', 1)):
             try:

@@ -58,6 +58,8 @@ class AnthropicLLM(BaseLLM):
             t0 = time.time()
             for attempt in range(4):
                 try:
+                    if work := current.get():
+                        work.request_budget()
                     if model in _FALLBACK_MODELS and not self.custom_base:
                         resp = await self.client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
                     else:

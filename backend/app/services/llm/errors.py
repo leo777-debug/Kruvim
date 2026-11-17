@@ -110,3 +110,10 @@ class BudgetPause(BaseException):
     def __init__(self, state):
         self.state = state
         super().__init__(state['message'])
+
+
+class StageYield(BaseException):
+    """Continue a background stage in a fresh invocation before its deadline."""
+    def __init__(self, delay=0):
+        self.delay = max(0, min(60, float(delay)))
+        super().__init__('Continuing this stage in the next worker invocation.')

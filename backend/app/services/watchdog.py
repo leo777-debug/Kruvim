@@ -35,6 +35,12 @@ async def fail_expired(sim_id, token):
 def bounded_job(fn):
     @wraps(fn)
     async def wrapper(ctx, sim_id, **kw):
+        # Delayed cloud jobs otherwise wait for the ten-minute scheduler. Start the
+        # continuation immediately and honor its short provider cooldown here.
+        resume_delay = min(60, max(0, float(kw.pop('_resume_delay', 0))))
+        if resume_delay:
+            await asyncio.sleep(resume_delay)
+        runtime_limit = max(30, settings.simulation_max_duration_seconds - resume_delay)
         from app.db.base import new_id
         token = new_id()
         inherited = job_lease.set(None)
@@ -44,16 +50,30 @@ def bounded_job(fn):
                 job_lease.reset(inherited)
                 return
             row.execution_token = token
-            row.job_deadline = utcnow() + timedelta(seconds=settings.simulation_max_duration_seconds)
+            row.job_deadline = utcnow() + timedelta(seconds=runtime_limit)
         job_lease.set((sim_id, token))
-        from app.services.llm.errors import BudgetPause
+        from app.services.llm.errors import BudgetPause, StageYield
         from app.services.token_budget import Work, current, pause
-        work_token = current.set(Work(row.org_id, sim_id, f'{row.billing_epoch}:{fn.__name__}'))
+        work_token = current.set(Work(row.org_id, sim_id, f'{row.billing_epoch}:{fn.__name__}', continuation=True,
+                                      deadline_seconds=runtime_limit))
         try:
-            async with asyncio.timeout(settings.simulation_max_duration_seconds):
+            async with asyncio.timeout(runtime_limit):
                 return await fn(ctx, sim_id, **kw)
         except BudgetPause as exc:
             await pause(sim_id, exc.state, fn.__name__)
+        except StageYield as exc:
+            job_lease.set(None)
+            from app.services import jobs
+            async with session_scope() as s:
+                sim = await s.get(Simulation, sim_id)
+                sim.progress = {**(sim.progress or {}), 'continuing_stage': fn.__name__}
+                sim.job_deadline = None
+            await bus.publish(sim_id, 'stage.continuing', {'stage': fn.__name__, 'message': 'Continuing within your model provider limits.'})
+            next_job = await jobs.enqueue(fn.__name__, sim_id=sim_id, _resume_delay=exc.delay)
+            async with session_scope() as s:
+                await s.execute(update(Simulation).where(Simulation.id == sim_id, Simulation.execution_token == token)
+                                .values(job_id=next_job))
+            return {'status': 'continued'}
         except (TimeoutError, asyncio.CancelledError):
             job_lease.set(None)
             await fail_expired(sim_id, token)

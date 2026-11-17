@@ -51,6 +51,12 @@ async def _llm_for(org_id: str):
     return res, make_llm(res.settings)
 
 
+async def _summarize_usage(usage):
+    from app.services.token_budget import current
+    if work := current.get():
+        await work.summarize(usage)
+
+
 async def _fail(sim_id: str, stage: str, exc: Exception, status: str = "failed"):
     msg = str(exc) if isinstance(exc, USER_ERRORS) else "This step could not finish. Retry the test; contact support if it happens again."
     if not isinstance(exc, USER_ERRORS):
@@ -155,6 +161,7 @@ async def build_graph(ctx, sim_id: str):
         await bus.publish(sim_id, "graph.context", {"regions": {k: {kk: v.get(kk) for kk in ("name", "city", "local_time", "weather", "brief", "brief_by")}
                                                                  for k, v in snaps.items()}})
         ontology = await knowledge.build(sim_id, sim.requirement, cards, seeds, snaps, llm, usage, progress)
+        await _summarize_usage(usage)
         await _set(sim_id, ontology=ontology, status="graph_ready", step=2, usage={"graph": usage.as_dict(res.settings)})
         await metering.record(org_id, sim_id, "graph", usage, res)
         await bus.publish(sim_id, "graph.completed", {"ontology": ontology, "usage": usage.as_dict(res.settings)})
@@ -187,6 +194,7 @@ async def prepare_environment(ctx, sim_id: str):
             await bus.publish(sim_id, "env.progress", {"message": msg, "progress": round(frac, 3)})
 
         cfg = await prepare_env(sim_id, llm, usage, progress)
+        await _summarize_usage(usage)
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             sim.status, sim.step = "ready", 2
@@ -213,12 +221,13 @@ async def run_simulation(ctx, sim_id: str):
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
-            sim.status, sim.step, sim.started_at, sim.error = "running", 3, _now(), None
+            sim.status, sim.step, sim.started_at, sim.error = "running", 3, sim.started_at or _now(), None
         res, llm = await _llm_for(org_id)
         await bus.publish(sim_id, "simulation.started", {"rounds": sim.config["time"]["rounds"], "provider": res.settings.provider,
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
         engine = Engine(sim_id, llm, usage)
         results = await engine.run()
+        await _summarize_usage(usage)
         from app.services.analytics_import import forecast
         async with session_scope() as s:
             results['creator_analytics'] = await forecast(s, org_id, sim.content.get('platform'),
@@ -237,6 +246,7 @@ async def run_simulation(ctx, sim_id: str):
             sim.report_status = "queued"
         from app.services.agent_memory import write_run
         await write_run(org_id, sim_id, llm, usage)
+        await _summarize_usage(usage)
         results["usage"] = usage.as_dict(res.settings)
         credits = await metering.record(org_id, sim_id, "simulation", usage, res)
         async with session_scope() as s:
@@ -275,6 +285,7 @@ async def generate_report(ctx, sim_id: str):
             sim.report_status = "running"
         res, llm = await _llm_for(org_id)
         await generate_report_fn(sim_id, llm, usage)
+        await _summarize_usage(usage)
         await metering.record(org_id, sim_id, "report", usage, res)
         async with session_scope() as s:
             sim = await s.get(Simulation, sim_id)

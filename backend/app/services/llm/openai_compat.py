@@ -61,6 +61,8 @@ class OpenAICompatLLM(BaseLLM):
                 t0 = time.time()
                 gate = for_provider(self.base, self.s.api_key)
                 try:
+                    if work := current.get():
+                        work.request_budget(gate.remaining())
                     await gate.wait()
                     r = await self.client.post(self.base + "/chat/completions", json=body)
                     gate.observe(r)
