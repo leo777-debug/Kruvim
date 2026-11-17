@@ -9,7 +9,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   server: {
     port: 5173,
-    watch: { ignored: ["**/test-results*/**", "**/playwright-report/**"] },
+    watch: { ignored: ["**/test-results*/**", "**/playwright-report/**", "**/hardware-check/**"] },
     proxy: { "/api": { target: process.env.KRUVIM_API_URL || "http://127.0.0.1:8000", changeOrigin: true } },
   },
   preview: {

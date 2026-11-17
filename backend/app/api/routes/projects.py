@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,9 +179,9 @@ async def update_project(project_id: str, body: ProjectUpdate, p: Principal = De
 async def delete_project(project_id: str, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     pr = await get_project(s, p, project_id)
     running = (await s.execute(select(func.count()).select_from(Simulation).where(and_(
-        Simulation.project_id == pr.id, Simulation.status.in_(["queued", "running", "paused"]))))).scalar()
+        Simulation.project_id == pr.id, or_(Simulation.status.in_(["queued", "building_graph", "preparing", "running", "paused"]), Simulation.report_status.in_(["queued", "running"])))))).scalar()
     if running:
-        raise AppError("Stop running simulations before deleting the project.", code="conflict", status=409)
+        raise AppError("Wait for active simulations and analyst reports to finish before deleting the project.", code="conflict", status=409)
     for a in (await s.execute(select(Asset).where(Asset.project_id == pr.id))).scalars():
         if a.storage_key:
             await storage.delete(a.storage_key)

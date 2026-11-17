@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 
-self.onmessage = async ({ data: { file } }: MessageEvent<{ file: File }>) => {
+self.onmessage = async ({ data: { file, maxXmlBytes } }: MessageEvent<{ file: File; maxXmlBytes: number }>) => {
   try {
     let text = "";
     const check = () => { if (text.length > 60_000) throw new Error("Document exceeds 60,000 characters. Split it or paste a relevant excerpt; nothing was sent."); };
@@ -9,7 +9,7 @@ self.onmessage = async ({ data: { file } }: MessageEvent<{ file: File }>) => {
       // Bound archive expansion before inflating untrusted ZIP entries.
       const entries = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: entry => {
         if (entry.name !== "word/document.xml") return false;
-        if (entry.originalSize > 4 * 1024 * 1024) throw new Error("Word document XML exceeds the 4 MiB local expansion limit.");
+        if (entry.originalSize > maxXmlBytes) throw new Error(`Word document XML exceeds this device's ${maxXmlBytes / 1024 / 1024} MiB local expansion limit.`);
         return true;
       } });
       const xml = entries["word/document.xml"];

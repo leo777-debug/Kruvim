@@ -133,7 +133,7 @@ test("cancellation unsupported browser low memory and broken media never send fi
     const ctrl = new AbortController(); const reading = run(new File(["a".repeat(60000)], "cancel.txt"), ctrl); ctrl.abort(); messages.push(await reading);
     const original = globalThis.Worker; Object.defineProperty(globalThis, "Worker", { configurable: true, value: undefined });
     messages.push(await run(new File(["hello"], "text.txt"))); Object.defineProperty(globalThis, "Worker", { configurable: true, value: original });
-    Object.defineProperty(navigator, "deviceMemory", { configurable: true, value: 2 }); messages.push(await run(new File(["hello"], "text.txt"))); delete (navigator as any).deviceMemory;
+    Object.defineProperty(navigator, "deviceMemory", { configurable: true, value: 1 }); messages.push(await run(new File(["hello"], "text.txt"))); delete (navigator as any).deviceMemory;
     const wasm = globalThis.WebAssembly; Object.defineProperty(globalThis, "WebAssembly", { configurable: true, value: undefined });
     messages.push(await run(new File(["hello"], "text.txt"))); Object.defineProperty(globalThis, "WebAssembly", { configurable: true, value: wasm });
     class FailedWorker {

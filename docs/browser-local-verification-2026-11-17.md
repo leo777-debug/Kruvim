@@ -1,5 +1,7 @@
 # Browser-local processing verification — 17 November 2026
 
+This is the initial `523a3f8` verification. See the [follow-up report](browser-local-followup-2026-11-17.md) for paid-provider checks and the new conservative memory policy.
+
 Implementation is on branch `feat/browser-local-files-20261117`, based on the source used for the 17 November production release (`8e9aab5`). The other workspace checkouts and their uncommitted work were not changed. No deployment or billing/storage-plan change was performed.
 
 ## Scope and environment

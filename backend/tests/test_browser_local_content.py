@@ -79,3 +79,27 @@ async def test_extracted_background_never_uses_object_storage(client, auth, monk
         assert row.storage_key == "" and row.text_excerpt == "Preserved document context."
     assert (await client.delete(f"/assets/{asset['id']}", headers=h)).status_code == 200
     put.assert_not_called(); get.assert_not_called(); delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,report_status', [('completed','queued'),('completed','running'),('building_graph','none'),('preparing','none')])
+async def test_project_deletion_preserves_active_pipeline_work(client, auth, status, report_status):
+    from app.db.session import session_scope
+    from app.models import Simulation
+    headers, _ = auth
+    project=(await client.post('/projects',headers=headers,json={'name':'Active report protection'})).json()
+    response=await client.post(f"/projects/{project['id']}/simulations",headers=headers,json={'content':{'type':'text','text':'A synthetic test post.'}})
+    assert response.status_code==200,response.text
+    sim_id=response.json()['id']
+    async with session_scope() as session:
+        sim=await session.get(Simulation,sim_id)
+        sim.status=status;sim.report_status=report_status
+        await session.commit()
+    response=await client.delete(f"/projects/{project['id']}",headers=headers)
+    assert response.status_code==409 and 'reports' in response.json()['error']['message']
+    assert (await client.get(f'/simulations/{sim_id}',headers=headers)).status_code==200
+    async with session_scope() as session:
+        sim=await session.get(Simulation,sim_id)
+        sim.status='completed';sim.report_status='done'
+        await session.commit()
+    assert (await client.delete(f"/projects/{project['id']}",headers=headers)).status_code==200

@@ -1,5 +1,7 @@
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PreparedFile, Progress, SelectedImage } from "./types";
+import { localLimits } from "./limits";
+import { imageSize } from "./imageSize";
 
 function check(signal: AbortSignal) { signal.throwIfAborted(); }
 function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -34,7 +36,7 @@ export async function documentText(file: File, signal: AbortSignal, progress: Pr
     const abort = () => { void task.destroy(); }; signal.addEventListener("abort", abort, { once: true });
     try {
       check(signal); const pdf = await task.promise; let text = "";
-      if (pdf.numPages > 200) throw new Error("PDF exceeds 200 pages. Split it locally first.");
+      if (pdf.numPages > localLimits().pdfPages) throw new Error(`PDF exceeds this device's ${localLimits().pdfPages}-page safety ceiling. Split it locally first.`);
       for (let i = 1; i <= pdf.numPages; i++) {
         check(signal); progress(`Reading PDF page ${i} of ${pdf.numPages}`);
         const page = await pdf.getPage(i); const content = await page.getTextContent();
@@ -48,7 +50,7 @@ export async function documentText(file: File, signal: AbortSignal, progress: Pr
   }
   const worker = new Worker(new URL("./document.worker.ts", import.meta.url), { type: "module" });
   try {
-    const result = await workerCall(worker, { file }, signal, progress);
+    const result = await workerCall(worker, { file, maxXmlBytes: localLimits().xmlBytes }, signal, progress);
     if (!result.xml) return result.text;
     const doc = new DOMParser().parseFromString(result.xml, "application/xml");
     if (doc.querySelector("parsererror")) throw new Error("The Word document contains invalid XML.");
@@ -73,7 +75,7 @@ function mediaEvent(el: HTMLMediaElement, event: string, signal: AbortSignal, ac
 
 function resized(source: CanvasImageSource, width: number, height: number): string {
   if (!width || !height || width * height > 40_000_000) throw new Error("Image exceeds 40 megapixels or has invalid dimensions. Resize it locally first.");
-  const scale = Math.min(1, 1024 / Math.max(width, height));
+  const scale = Math.min(1, localLimits().edge / Math.max(width, height));
   const canvas = document.createElement("canvas"); canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
   try {
     const ctx = canvas.getContext("2d"); if (!ctx) throw new Error("Browser image processing is unavailable.");
@@ -90,14 +92,17 @@ export async function prepareFile(file: File, signal: AbortSignal, progress: Pro
   if (!globalThis.Worker || !globalThis.WebAssembly) throw new Error("This browser lacks local processing support. Paste text or a transcript; no file was uploaded.");
   if (!file.size || file.size > 128 * 1024 * 1024) throw new Error("Choose a nonempty file up to the 128 MiB local safety ceiling, or split it locally.");
   const ext = file.name.split(".").pop()?.toLowerCase();
-  if ((ext === "pdf" || file.type.startsWith("image/")) && file.size > 64 * 1024 * 1024) throw new Error("PDFs and images are limited to 64 MiB locally. Split or resize the file on your device.");
-  if (ext === "docx" && file.size > 16 * 1024 * 1024) throw new Error("DOCX files are limited to 16 MiB locally. Split the document or paste text.");
-  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-  if (memory && memory < 4) throw new Error("This browser reports less than 4 GB memory. Paste text or a transcript instead.");
+  const limits = localLimits();
+  if (limits.mode === "paste-only") throw new Error(limits.explanation);
+  const limit = ext === "pdf" ? limits.pdfBytes : ext === "docx" ? limits.docxBytes : file.type.startsWith("image/") ? limits.imageBytes : file.type.startsWith("audio/") || file.type.startsWith("video/") ? 128 * 1024 * 1024 : limits.textBytes;
+  if (file.size > limit) throw new Error(`This device's ${limits.mode} mode limits this format to ${limit / 1024 / 1024} MiB. Split/resize it locally or paste an excerpt/transcript.`);
+  if ((file.type.startsWith("audio/") || file.type.startsWith("video/")) && !transcript.trim() && !limits.automaticSpeech) throw new Error("Automatic speech is disabled when this browser reports under 8 GB RAM or RAM is unknown. Paste a transcript (plain text, SRT or VTT); no model was downloaded and no audio was uploaded.");
   const result: PreparedFile = { text: "", transcript: "", local_media: { images: [] }, notes: [] };
   progress(`Reading ${file.name} on this device`);
   if (file.type.startsWith("image/")) {
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Use a PNG, JPEG or WebP image.");
+    const [width, height] = await imageSize(file); check(signal);
+    if (!width || !height || width * height > limits.imagePixels) throw new Error(`Image exceeds this device's ${limits.imagePixels / 1_000_000}-megapixel safety ceiling. Resize it locally first.`);
     const bitmap = await createImageBitmap(file);
     try { check(signal); result.local_media.images.push({ data: resized(bitmap, bitmap.width, bitmap.height), order: 0 }); } finally { bitmap.close(); }
     return result;
@@ -113,6 +118,7 @@ export async function prepareFile(file: File, signal: AbortSignal, progress: Pro
     const duration = el.duration;
     if (!Number.isFinite(duration) || duration <= 0 || duration > 86400) throw new Error("Media duration is unavailable. Convert it locally or paste timed subtitles.");
     if (video && (!(el as HTMLVideoElement).videoWidth || !(el as HTMLVideoElement).videoHeight)) throw new Error("The video codec is unsupported in this browser. Convert it locally to H.264 MP4, or remove the file and paste a transcript.");
+    if (video && (el as HTMLVideoElement).videoWidth * (el as HTMLVideoElement).videoHeight > limits.videoPixels) throw new Error("This video resolution exceeds the device's local safety ceiling. Convert it locally to 1080p, or remove it and paste a transcript.");
     result.local_media.duration = duration;
     if (!transcript.trim()) {
       // Native decodeAudioData requires the full compressed buffer. Guard both compressed
@@ -148,7 +154,7 @@ export async function prepareFile(file: File, signal: AbortSignal, progress: Pro
       } finally { worker?.terminate(); signal.removeEventListener("abort", close); if (context.state !== "closed") await context.close(); }
     }
     if (video) {
-      const count = Math.min(8, Math.max(1, Math.ceil(duration / 10)));
+      const count = Math.min(limits.frames, Math.max(1, Math.ceil(duration / 10)));
       for (let i = 0; i < count; i++) {
         check(signal); progress(`Extracting local frame ${i + 1} of ${count}`);
         const time = Math.min(duration - 0.001, (i + 0.5) * duration / count);
