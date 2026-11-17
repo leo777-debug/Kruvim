@@ -14,6 +14,26 @@ from app.services.llm.base import ProviderSettings, Usage
 from app.services.llm.openai_compat import OpenAICompatLLM
 
 
+@pytest.mark.parametrize('failure', ['exit', 'timeout', 'empty'])
+def test_failed_extraction_never_reuses_stale_frames(monkeypatch, tmp_path, failure):
+    stale = tmp_path / 'frame_00.jpg'
+    stale.write_bytes(b'older frame from a previous attempt')
+    monkeypatch.setattr(media, 'ffmpeg_tools', lambda: ('ffmpeg', 'ffprobe'))
+
+    def run(*args, **kwargs):
+        assert not stale.exists()
+        if failure == 'timeout':
+            raise subprocess.TimeoutExpired('ffmpeg', 60)
+        if failure == 'empty':
+            stale.write_bytes(b'')
+            return SimpleNamespace(returncode=0)
+        stale.write_bytes(b'partial invalid frame')
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(media.subprocess, 'run', run)
+    assert media.extract_frames('video.mp4', [1], str(tmp_path)) == []
+
+
 def test_transcription_adapter_and_empty_speech(monkeypatch):
     model = Mock()
     model.transcribe.return_value = ([SimpleNamespace(start=0, end=2, text=' Hello world. ')], None)

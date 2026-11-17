@@ -12,9 +12,12 @@ async def request(method, path, **kwargs):
         raise AppError("Supabase Storage is not configured.", status=503)
     headers = kwargs.pop("headers", {})
     headers.update({"apikey": settings.supabase_secret_key, "Authorization": "Bearer " + settings.supabase_secret_key})
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.request(method, settings.supabase_url.rstrip("/") + "/storage/v1/" + path,
-            headers=headers, **kwargs)
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.request(method, settings.supabase_url.rstrip("/") + "/storage/v1/" + path,
+                headers=headers, **kwargs)
+    except httpx.RequestError:
+        raise AppError("Storage is temporarily unavailable. Please try again.", code="storage_unavailable", status=503) from None
     if response.status_code >= 400:
         # Do not include response bodies, URLs or credentials in public errors.
         raise AppError(f"Supabase Storage request failed ({response.status_code}).", status=502)

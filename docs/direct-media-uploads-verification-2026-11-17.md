@@ -55,3 +55,17 @@ npm run typecheck
 npm run build
 npm exec playwright test -- --config playwright.uploads.config.ts
 ```
+
+
+## Follow-up verification, 17 November 2026
+
+The second review found and fixed two errors:
+
+- FFmpeg extraction could accept an old frame left in a persistent work directory when a later extraction failed. Extraction now removes the previous output first and accepts only a successful process exit with a nonempty output file. Regression checks cover failed exit, timeout, and empty output.
+- Supabase HTTP transport failures escaped as unhandled exceptions. Timeouts and connection errors now return a safe `503 storage_unavailable` response, allowing the client to retry finalization without exposing URLs or credentials.
+
+The expanded backend selection passed **33 tests**: uploads, media processing, link import, the full dry workflow, provider defaults and JSON retry. This includes a real **6,000,000-byte HTTP transfer** through the authorization endpoint, the real Supabase HTTP adapter, a local storage-protocol test server, finalization, and the database. The stored bytes matched exactly; only backend metadata requests carried the server credential, and the direct PUT carried none. This test uses simulated storage, not the hosted Supabase bucket.
+
+Both Edge browser upload tests passed again after a clean dependency installation. The earlier font-serving error disappeared. A third-party PostCSS warning remains during development startup; it did not fail the browser checks. Ruff and whitespace checks passed. The production build passed after the clean install.
+
+A fresh read-only production query reconfirmed that the bucket remains private and capped at 52,428,800 bytes. Production deployments, billing, real speech recognition and live vision-provider inference remain outside the checks performed here.

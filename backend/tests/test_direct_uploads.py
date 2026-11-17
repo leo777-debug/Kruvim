@@ -6,6 +6,22 @@ from app.core.config import settings
 from app.services import storage
 
 
+async def test_storage_timeout_returns_safe_retryable_error(monkeypatch):
+    import httpx
+
+    from app.core.errors import AppError
+    from app.services import supabase_storage as cloud
+    monkeypatch.setattr(settings, 'supabase_url', 'https://storage.example')
+    monkeypatch.setattr(settings, 'supabase_secret_key', 'test-server-credential')
+    monkeypatch.setattr(httpx.AsyncClient, 'request', AsyncMock(side_effect=httpx.ReadTimeout('private URL and credentials')))
+    with pytest.raises(AppError) as error:
+        await cloud.request('GET', 'object/info/private/file')
+    assert error.value.status == 503
+    assert error.value.code == 'storage_unavailable'
+    assert 'private' not in str(error.value)
+    assert 'credential' not in str(error.value)
+
+
 async def setup(client, auth, monkeypatch, size=6_000_000):
     h, _ = auth
     pid = (await client.post('/projects', headers=h, json={'name': 'Uploads'})).json()['id']
@@ -113,3 +129,82 @@ async def test_direct_document_excerpt(client, auth, monkeypatch):
     result = await client.post(f'/projects/{pid}/assets/complete', headers=h, json={'ticket': start.json()['ticket']})
     assert result.status_code == 200, result.text
     assert result.json()['excerpt'] == raw.decode()
+
+
+async def test_six_megabytes_cross_real_storage_http_boundary(client, auth, monkeypatch):
+    """Exercise routes, storage HTTP adapter and DB together, with a local storage-protocol server."""
+    import asyncio
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import httpx
+
+    uploaded = {}
+    calls = []
+
+    class StorageServer(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def respond(self, data, status=200):
+            body = json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            calls.append(('GET', self.path, self.headers.get('Authorization')))
+            if '/bucket/' in self.path:
+                self.respond({'file_size_limit': 50 * 1024 * 1024})
+            else:
+                key = self.path.split('/object/info/', 1)[1]
+                raw, mime = uploaded[key]
+                self.respond({'metadata': {'size': len(raw), 'mimetype': mime}})
+
+        def do_POST(self):
+            calls.append(('POST', self.path, self.headers.get('Authorization')))
+            self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            signed = self.path.removeprefix('/storage/v1') + '?token=local-test-scope'
+            self.respond({'url': signed})
+
+        def do_PUT(self):
+            calls.append(('PUT', self.path, self.headers.get('Authorization')))
+            key = self.path.split('/object/upload/sign/', 1)[1].split('?', 1)[0]
+            uploaded[key] = (self.rfile.read(int(self.headers['Content-Length'])), self.headers['Content-Type'])
+            self.respond({'Key': key})
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), StorageServer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(settings, 'storage_backend', 'supabase')
+    monkeypatch.setattr(settings, 'supabase_url', f'http://127.0.0.1:{server.server_port}')
+    monkeypatch.setattr(settings, 'supabase_secret_key', 'local-server-only')
+    try:
+        h, _ = auth
+        pid = (await client.post('/projects', headers=h, json={'name': 'HTTP upload'})).json()['id']
+        raw = b'video fixture bytes ' * 300_000
+        assert len(raw) == 6_000_000
+        result = await client.post(f'/projects/{pid}/assets/upload', headers=h,
+            json={'filename': 'fixture.mp4', 'mime': 'video/mp4', 'size': len(raw)})
+        assert result.status_code == 200, result.text
+        target = result.json()
+        assert 'local-server-only' not in result.text
+        async with httpx.AsyncClient() as uploader:
+            response = await uploader.put(target['url'], headers=target['headers'], content=raw)
+        assert response.status_code == 200
+        completed = await client.post(f'/projects/{pid}/assets/complete', headers=h, json={'ticket': target['ticket']})
+        assert completed.status_code == 200, completed.text
+        assert completed.json()['size'] == len(raw)
+        assert next(iter(uploaded.values())) == (raw, 'video/mp4')
+        assert [method for method, _, _ in calls] == ['GET', 'POST', 'PUT', 'GET']
+        assert calls[2][2] is None
+        assert all(authorization == 'Bearer local-server-only' for method, _, authorization in calls if method != 'PUT')
+        assets = (await client.get(f'/projects/{pid}', headers=h)).json()['assets']
+        assert [asset['id'] for asset in assets] == [completed.json()['id']]
+    finally:
+        await asyncio.to_thread(server.shutdown)
+        server.server_close()
+        thread.join(timeout=5)

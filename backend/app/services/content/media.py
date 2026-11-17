@@ -94,9 +94,15 @@ def extract_frames(path: str, times: list[float], out_dir: str) -> list[str]:
     for k, t in enumerate(times):
         p = os.path.join(out_dir, f"frame_{k:02d}.jpg")
         try:
-            subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-ss", f"{max(0, t):.2f}", "-i", path, "-frames:v", "1",
-                            "-vf", "scale=512:-2", "-q:v", "5", p], capture_output=True, timeout=60)
-            if os.path.exists(p):
+            # Work directories survive retries. A failed extraction must never reuse an older frame.
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+            result = subprocess.run([ffmpeg, "-nostdin", "-y", "-loglevel", "error", "-ss", f"{max(0, t):.2f}",
+                                     "-i", path, "-frames:v", "1", "-vf", "scale=512:-2", "-q:v", "5", p],
+                                    capture_output=True, timeout=60)
+            if result.returncode == 0 and os.path.isfile(p) and os.path.getsize(p) > 0:
                 out.append(p)
         except Exception:
             pass
