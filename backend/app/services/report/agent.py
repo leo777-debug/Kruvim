@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
@@ -18,6 +19,8 @@ from app.services.llm import BaseLLM, LLMAuthError, LLMError, Usage
 
 from .citations import render_section, source_labels
 from .tools import TOOL_SPECS, Toolbox
+
+logger = logging.getLogger(__name__)
 
 OUTLINE_SYSTEM = """You are the lead analyst at Kruvim, a synthetic-audience testing platform. A simulation just finished.
 Plan a report that answers the user's question for a content creator or brand team. Use the overview to decide what
@@ -48,10 +51,13 @@ Tools:
 OPTIMIZE_SYSTEM = """You are a content strategist. A piece of content was tested on a simulated audience. Using ONLY the evidence given
 (objections, where attention dropped, who disliked it and why, what people quoted), propose concrete rewrites the creator
 can test. Keep the creator's language and voice; do not invent facts about the product.
-Return JSON: {"titles": [{"text": "...", "why": "evidence it addresses"} (3 items)],
+Return ONE valid JSON object and nothing else. Use 3 titles, 2 calls to action and 2-4 edits. Keep each text and each
+explanation to one short sentence. The following shows the field structure; repeat array entries as needed:
+{"titles": [{"text": "...", "why": "evidence it addresses"}],
  "hook": {"text": "a new opening line or first 3 seconds", "why": "..."},
- "ctas": [{"text": "...", "why": "..."} (2 items)],
- "edits": [{"area": "pacing|tone|claims|visuals|structure|audience", "change": "specific edit", "why": "evidence"} (2-4 items)]}"""
+ "ctas": [{"text": "...", "why": "..."}],
+ "edits": [{"area": "pacing", "change": "specific edit", "why": "evidence"}]}
+For edit areas choose pacing, tone, claims, visuals, structure or audience. Escape quotation marks inside strings."""
 
 
 async def optimize(sim: Simulation, llm: BaseLLM, usage: Usage) -> dict | None:
@@ -73,10 +79,11 @@ async def optimize(sim: Simulation, llm: BaseLLM, usage: Usage) -> dict | None:
     }
     try:
         d = await llm.complete_json(system=OPTIMIZE_SYSTEM, user=json.dumps(evidence, ensure_ascii=False, default=str), role="report",
-                                    max_tokens=1600, usage=usage, temperature=0.5)
+                                    max_tokens=2400, usage=usage, temperature=0.5)
     except LLMAuthError:
         raise
-    except Exception:
+    except Exception as exc:
+        logger.warning("Optional report rewrites unavailable (%s)", type(exc).__name__)
         return None
     items = lambda k: [x for x in (d.get(k) or []) if isinstance(x, dict) and x.get("text")][:4]  # noqa: E731
     hook = d.get("hook") if isinstance(d.get("hook"), dict) and d["hook"].get("text") else None

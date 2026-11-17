@@ -14,4 +14,6 @@ Live report verification also exposed truncated JSON. The common JSON helper now
 
 At the evidence-tool limit, report writing now switches to a separate plain-Markdown request with bounded evidence excerpts. It no longer asks the model to wrap an entire final section in tool-selection JSON. Failed/in-progress reports retain their outline and completed sections across continuations and retries, while an explicit regeneration of a completed report starts a new report. This avoids rewriting completed sections and stabilizes progress in the browser.
 
+Optional rewrite suggestions now use a valid JSON example, concise field instructions and a larger output allowance. If that optional step fails, it logs the exception type without logging provider output or credentials.
+
 Regression coverage includes live-model failure without substituted entities/reactions/environment/report outlines, cloud-job error state, safe provider-error reporting, retry/pacing behavior, and the existing complete mock-provider workflow. Live production verification is recorded separately with its actual outcome.
