@@ -54,8 +54,20 @@ async def signed_upload(key, mime, size):
 async def info(key):
     data = (await request("GET", "object/info/" + object_path(key))).json()
     metadata = data.get("metadata") or {}
-    return {"size": int(metadata.get("size", data.get("size", -1))),
-            "mime": metadata.get("mimetype", data.get("contentType", ""))}
+    # The info endpoint returns authoritative fields at the top level. Its
+    # `metadata` field is user metadata and must not override the stored size/type.
+    if "size" in data:
+        size, mime = data["size"], data.get("content_type", data.get("contentType", ""))
+    else:
+        # Compatibility with older storage responses.
+        size, mime = metadata.get("size"), metadata.get("mimetype", "")
+    try:
+        size = int(size)
+        if size < 0 or not isinstance(mime, str) or not mime:
+            raise ValueError("invalid object information")
+    except (TypeError, ValueError):
+        raise AppError("Storage returned incomplete file information. Please try again.", code="storage_metadata", status=502)
+    return {"size": size, "mime": mime}
 
 
 async def delete(key):

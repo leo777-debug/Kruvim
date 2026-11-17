@@ -119,6 +119,28 @@ async def test_bucket_limit_rejected_before_signing(monkeypatch):
     assert request.await_count == 1
 
 
+async def test_supabase_info_uses_authoritative_fields_not_user_metadata(monkeypatch):
+    import httpx
+
+    from app.services import supabase_storage as cloud
+    monkeypatch.setattr(cloud, 'request', AsyncMock(return_value=httpx.Response(200, json={
+        'size': 6_000_000, 'content_type': 'video/mp4',
+        'metadata': {'size': 1, 'mimetype': 'text/plain'}})))
+    assert await cloud.info('org/project/file.mp4') == {'size': 6_000_000, 'mime': 'video/mp4'}
+
+
+@pytest.mark.parametrize('data', [{'size': None, 'content_type': 'video/mp4'}, {'size': 10, 'metadata': {'mimetype': 'video/mp4'}}])
+async def test_supabase_incomplete_info_returns_retryable_error(monkeypatch, data):
+    import httpx
+
+    from app.core.errors import AppError
+    from app.services import supabase_storage as cloud
+    monkeypatch.setattr(cloud, 'request', AsyncMock(return_value=httpx.Response(200, json=data)))
+    with pytest.raises(AppError) as error:
+        await cloud.info('org/project/file.mp4')
+    assert error.value.status == 502
+
+
 async def test_direct_document_excerpt(client, auth, monkeypatch):
     h, pid, _ = await setup(client, auth, monkeypatch)
     raw = b'# Research\nPrivate evidence.'
@@ -162,7 +184,7 @@ async def test_six_megabytes_cross_real_storage_http_boundary(client, auth, monk
             else:
                 key = self.path.split('/object/info/', 1)[1]
                 raw, mime = uploaded[key]
-                self.respond({'metadata': {'size': len(raw), 'mimetype': mime}})
+                self.respond({'size': len(raw), 'content_type': mime, 'metadata': {}})
 
         def do_POST(self):
             calls.append(('POST', self.path, self.headers.get('Authorization')))
