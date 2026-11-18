@@ -32,3 +32,14 @@ Production has no SMTP provider credentials or sender configuration. The new pro
 Configure `KRUVIM_MAIL_BACKEND=smtp`, `KRUVIM_MAIL_FROM`, `KRUVIM_SMTP_HOST`, `KRUVIM_SMTP_PORT`, `KRUVIM_SMTP_USERNAME`, `KRUVIM_SMTP_PASSWORD`, and `KRUVIM_SMTP_SECURITY=starttls` (or `ssl`) in the Vercel production environment. Verify the sender with the chosen provider. Do not commit or paste credentials into chat.
 
 After configuration: recheck the production target and database version, apply the additive migration, stage a production-environment deployment without domain assignment, verify health and the full mail flow with a controlled account, then promote that exact tested deployment and check the public alias. Existing users will need email verification; there is an explicit temporary enforcement override documented in `authentication-safeguards.md`.
+
+
+## Zero-cost email setup follow-up
+
+The user declined domain registration and requires no additional spend. No domain was purchased and no paid email plan was selected. Resend terms were accepted and its integration installation exists on the Free plan, but no sending-domain resource or SMTP credentials were provisioned.
+
+Brevo's Free plan is the selected alternative because it supports 300 daily sends and can rewrite a verified free-email sender to its shared `brevosend.com` domain. This avoids buying a domain. Sender rewriting changes the address recipients see; a custom branded sender remains a future option. Provider account approval, sender verification, and live inbox delivery must still be confirmed before deployment.
+
+The Brevo signup page is open for the user to create/verify their account and accept its terms. Use only the Free plan, no payment card, and no paid add-ons. SMTP configuration will use `smtp-relay.brevo.com`, port 587 with STARTTLS; the provider supplies the SMTP login and key. Keep all credentials out of Git and chat output. Production remains unchanged while this prerequisite is pending.
+
+Primary references: [Brevo free plan](https://help.brevo.com/hc/en-us/articles/208589409-About-Brevo-s-pricing-plans), [shared sender-domain behavior](https://help.brevo.com/hc/en-us/articles/16045394674066-Troubleshooting-Domain-authentication), [SMTP setup](https://help.brevo.com/hc/en-us/articles/7924908994450-Send-transactional-emails-using-Brevo-SMTP).
