@@ -20,6 +20,8 @@ class User(IdMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    auth_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     memberships: Mapped[list[Membership]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 

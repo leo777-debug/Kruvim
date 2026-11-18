@@ -4,10 +4,11 @@ import os
 import tempfile
 
 _directory = tempfile.mkdtemp(prefix="kruvim-browser-")
-os.environ.update(KRUVIM_ENV="test", KRUVIM_DATA_DIR=_directory,
+os.environ.update(KRUVIM_ENV="test", KRUVIM_DATA_DIR=_directory, KRUVIM_MAIL_BACKEND="console",
+    KRUVIM_REQUIRE_EMAIL_VERIFICATION="false", KRUVIM_RATE_LIMIT_BACKEND="auto", KRUVIM_TRUST_PROXY_HEADERS="false",
     KRUVIM_DATABASE_URL="sqlite+aiosqlite:///" + os.path.join(_directory, "verify.db").replace("\\", "/"),
     KRUVIM_REDIS_URL="", KRUVIM_POPULATION_SIZE="40000", KRUVIM_LLM_PROVIDER="dryrun", KRUVIM_LLM_PRESET="dryrun",
-    KRUVIM_LLM_API_KEY="", KRUVIM_RATE_LIMIT_PER_MINUTE="10000",
+    KRUVIM_LLM_API_KEY="", KRUVIM_RATE_LIMIT_PER_MINUTE="10000", KRUVIM_RATE_LIMIT_AUTH_PER_MINUTE="1000",
     KRUVIM_BILLING_ENABLED=os.environ.get("KRUVIM_VERIFY_BILLING", "false"),
     KRUVIM_DODO_API_KEY="", KRUVIM_DODO_WEBHOOK_KEY="", KRUVIM_DODO_BUSINESS_ID="",
     KRUVIM_DODO_SUBSCRIPTION_PRODUCT_ID="", KRUVIM_DODO_TOPUP_PRODUCT_ID="")

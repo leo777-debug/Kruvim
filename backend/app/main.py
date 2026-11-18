@@ -80,6 +80,8 @@ async def lifespan(app: FastAPI):
             from app.services.watchdog import check
             while True:
                 try:
+                    from app.services.mail import dispatch_pending
+                    await dispatch_pending()
                     await check()
                     from app.services.token_budget import tick as token_tick
                     await token_tick()

@@ -157,7 +157,7 @@ async def provider_status(res, category='ok', raw=''):
             s.add(Alert(org_id=org_id, kind='platform_key', title='Platform model key needs attention',
                 body=f'{provider_name(res.settings)}: {category} at {now.isoformat()}. Open Platform admin to review paused tests.'))
             from app.services.mail import notify
-            await notify(user_id, 'Platform model key needs attention', f'{provider_name(res.settings)}: {category}')
+            await notify(user_id, 'Platform model key needs attention', f'{provider_name(res.settings)}: {category}', session=s)
 
 
 class Work:
@@ -310,7 +310,7 @@ async def tick(now=None):
                 s.add(Alert(org_id=org.id, kind='tokens_reset', title='Your tokens have reset',
                     body='Your allowance is available again. Paused tests will continue automatically.'))
                 from app.services.mail import notify
-                await notify(notice.user_id, 'Your tokens have reset', 'Your allowance is available again.')
+                await notify(notice.user_id, 'Your tokens have reset', 'Your allowance is available again.', session=s)
         sims = (await s.execute(select(Simulation).where(Simulation.status == 'paused'))).scalars().all()
     for sim in sims:
         if not sim.pause_state:

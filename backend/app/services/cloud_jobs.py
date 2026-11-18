@@ -71,6 +71,8 @@ async def run_job(job_id: str, request: Request):
 @router.api_route("/refresh", methods=["GET", "POST"])
 async def refresh(request: Request):
     authorize(request)
+    from app.services.mail import dispatch_pending
+    await dispatch_pending()
     from app.services.library import sync_due
     await sync_due()
     from app.services.datapool.runner import refresh_free_feeds

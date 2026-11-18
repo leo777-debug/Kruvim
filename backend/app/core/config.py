@@ -65,6 +65,18 @@ class Settings(BaseSettings):
 
     rate_limit_per_minute: int = 240               # per user / API key / IP
     rate_limit_auth_per_minute: int = 20
+    rate_limit_backend: str = "auto"  # auto: Redis, otherwise shared database in production/serverless
+    trust_proxy_headers: bool = False  # enable only behind a proxy that overwrites X-Forwarded-For
+    require_email_verification: bool | None = None  # default: required in production
+    password_reset_minutes: int = Field(default=30, ge=5, le=120)
+    email_verification_hours: int = Field(default=24, ge=1, le=72)
+    mail_backend: str = "console"  # console (development only) | smtp
+    mail_from: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = Field(default="", repr=False)
+    smtp_security: str = "starttls"  # starttls | ssl | plain (development only)
 
     population_size: int = 1_000_000
     population_seed: int = 7
@@ -152,6 +164,10 @@ class Settings(BaseSettings):
         return None if value == "" else value
 
     @property
+    def email_verification_required(self) -> bool:
+        return self.is_prod if self.require_email_verification is None else self.require_email_verification
+
+    @property
     def public_app_url(self) -> str:
         return self.public_url.rstrip("/") + self.app_base_path.rstrip("/")
 
@@ -173,6 +189,18 @@ def get_settings() -> Settings:
         raise RuntimeError("KRUVIM_SECRET_KEY must contain at least 32 characters in production")
     if s.is_prod and "*" in s.cors_origins:
         raise RuntimeError("Production CORS origins must be explicit")
+    if s.rate_limit_backend not in ("auto", "database", "redis", "local"):
+        raise RuntimeError("Unknown rate limit backend")
+    if (s.is_prod or s.serverless) and s.rate_limit_backend == "local":
+        raise RuntimeError("Hosted rate limits require a shared backend")
+    if s.rate_limit_backend == "redis" and not s.redis_url:
+        raise RuntimeError("Redis rate limits require KRUVIM_REDIS_URL")
+    if s.mail_backend not in ("console", "smtp") or s.smtp_security not in ("starttls", "ssl", "plain"):
+        raise RuntimeError("Invalid email delivery configuration")
+    if s.mail_backend == "smtp" and (not s.smtp_host or not s.mail_from):
+        raise RuntimeError("SMTP delivery requires KRUVIM_SMTP_HOST and KRUVIM_MAIL_FROM")
+    if s.is_prod and (s.mail_backend != "smtp" or s.smtp_security == "plain" or not s.public_url.startswith("https://")):
+        raise RuntimeError("Production requires SMTP with TLS and an HTTPS public URL")
     os.makedirs(s.data_dir, exist_ok=True)
     return s
 

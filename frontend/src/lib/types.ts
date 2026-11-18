@@ -1,7 +1,7 @@
 export type Role = "owner" | "admin" | "member" | "viewer";
 
 export interface Org { id: string; name: string; slug: string; plan: string; role: Role; credits_balance: number }
-export interface User { id: string; email: string; name: string; is_superuser: boolean }
+export interface User { id: string; email: string; name: string; is_superuser: boolean; email_verified?: boolean; email_verification_required?: boolean }
 
 export interface Session { access_token: string; refresh_token: string; expires_in: number; user: User; orgs: Org[] }
 

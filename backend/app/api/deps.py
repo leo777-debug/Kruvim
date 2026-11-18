@@ -7,6 +7,7 @@ memberships. Every query below the API layer is scoped by `principal.org_id`."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 
 import jwt
 from fastapi import Depends, Header, Request
@@ -49,7 +50,15 @@ class Principal:
 
 
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
+    # Vercel overwrites this header. Use it only inside the hosted runtime.
+    # Socket peers there are proxies; using them would share one limit across unrelated users.
+    if settings.serverless:
+        forwarded = request.headers.get("x-vercel-forwarded-for", "")
+        try:
+            return str(ip_address(forwarded))
+        except ValueError:
+            pass
+    fwd = request.headers.get("x-forwarded-for") if settings.trust_proxy_headers else None
     return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "")) or "unknown"
 
 
@@ -68,6 +77,8 @@ async def current_user(request: Request, s: AsyncSession = Depends(get_session),
     user = await s.get(User, data["sub"])
     if not user or not user.is_active:
         raise Unauthorized("Account disabled.")
+    if data.get("av", 0) != user.auth_version:
+        raise Unauthorized("Session expired. Sign in again.")
     request.state.token_org = data.get("org")
     return user
 
@@ -85,6 +96,8 @@ async def principal(request: Request, s: AsyncSession = Depends(get_session), au
         p = Principal(None, org, key.role, "api_key", key.id)
     else:
         user = await current_user(request, s, authorization)
+        if settings.email_verification_required and user.email_verified_at is None:
+            raise Forbidden("Verify your email address to continue.", code="email_verification_required")
         want = x_org_id or getattr(request.state, "token_org", None)
         q = select(Membership).where(Membership.user_id == user.id)
         if want:
