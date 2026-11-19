@@ -4,7 +4,8 @@ import tempfile
 _tmp = tempfile.mkdtemp(prefix="kruvim-test-")
 # Table resets must never touch an inherited application/production database.
 # Provider protocol tests explicitly connect their own stub after this setup.
-os.environ.update(KRUVIM_ENV="test", KRUVIM_DATA_DIR=_tmp,
+os.environ.update(KRUVIM_ENV="test", KRUVIM_DATA_DIR=_tmp, KRUVIM_MAIL_BACKEND="console",
+    KRUVIM_REQUIRE_EMAIL_VERIFICATION="false", KRUVIM_RATE_LIMIT_BACKEND="auto", KRUVIM_TRUST_PROXY_HEADERS="false",
     KRUVIM_DATABASE_URL="sqlite+aiosqlite:///" + os.path.join(_tmp, "test.db").replace("\\", "/"),
     KRUVIM_POPULATION_SIZE="40000", KRUVIM_REDIS_URL="", KRUVIM_RATE_LIMIT_AUTH_PER_MINUTE="1000",
     KRUVIM_LLM_PROVIDER="dryrun", KRUVIM_LLM_PRESET="dryrun", KRUVIM_LLM_API_KEY="",

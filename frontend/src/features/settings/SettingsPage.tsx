@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Page } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -194,11 +194,12 @@ function Audit() {
 function Profile() {
   const user = useAuth((s) => s.user);
   const [f, setF] = useState({ current_password: "", new_password: "" });
-  const m = useMutation({ mutationFn: () => api("/auth/password", { json: f }), onSuccess: () => { toast.success("Password changed. Other sessions were signed out."); setF({ current_password: "", new_password: "" }); },
+  const m = useMutation({ mutationFn: () => api("/auth/password", { json: f }), onSuccess: () => { toast.success("Password changed. Sign in with your new password."); useAuth.getState().clear(); setF({ current_password: "", new_password: "" }); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Failed") });
   return (
     <Card className="max-w-xl space-y-4 p-5">
       <div><div className="section-title">{user?.name}</div><div className="text-[13px] text-muted">{user?.email}{user?.is_superuser && " · platform administrator"}</div></div>
+      <p className="text-sm">{user?.email_verified ? "Email verified" : <Link className="text-brand" to="/verification-email">Verify your email address</Link>}</p>
       <Field label="Current password"><Input type="password" value={f.current_password} onChange={(e) => setF({ ...f, current_password: e.target.value })} /></Field>
       <Field label="New password" hint="At least 10 characters"><Input type="password" value={f.new_password} onChange={(e) => setF({ ...f, new_password: e.target.value })} /></Field>
       <Button variant="primary" disabled={f.new_password.length < 10} loading={m.isPending} onClick={() => m.mutate()}>Change password</Button>

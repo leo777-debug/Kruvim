@@ -38,6 +38,8 @@ async def consolidate_agent_memory(ctx):
 
 
 async def watch_runs(ctx):
+    from app.services.mail import dispatch_pending
+    await dispatch_pending()
     from app.services.token_budget import tick
     from app.services.watchdog import check
     await tick()

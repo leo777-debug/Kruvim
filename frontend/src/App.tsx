@@ -5,7 +5,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { refreshSession } from "./lib/api";
 import { useAuth } from "./lib/auth";
 import { pageLoaders, preloadRoute } from "./lib/routes";
-import { AuthPage, InvitePage } from "./features/auth/AuthPages";
+import { AuthPage, InvitePage, AccountRecoveryPage } from "./features/auth/AuthPages";
 
 const Dashboard = lazy(pageLoaders.Dashboard);
 const Help = lazy(pageLoaders.Help);
@@ -32,10 +32,11 @@ function Spinner() {
 }
 
 function RequireAuth({ children }: { children: JSX.Element }) {
-  const { accessToken, ready } = useAuth();
+  const { accessToken, ready, user } = useAuth();
   const loc = useLocation();
   if (!ready) return <Spinner />;
   if (!accessToken) return <Navigate to="/login" state={{ from: loc.pathname }} replace />;
+  if (user?.email_verification_required && !user.email_verified) return <Navigate to="/verification-email" replace />;
   return children;
 }
 
@@ -66,6 +67,10 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<AuthPage key="login" mode="login" />} />
         <Route path="/register" element={<AuthPage key="register" mode="register" />} />
+        <Route path="/forgot-password" element={<AccountRecoveryPage key="forgot" mode="forgot" />} />
+        <Route path="/reset-password" element={<AccountRecoveryPage key="reset" mode="reset" />} />
+        <Route path="/verify-email" element={<AccountRecoveryPage key="verify" mode="verify" />} />
+        <Route path="/verification-email" element={<AccountRecoveryPage key="resend" mode="resend" />} />
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/share/:token" element={<PublicResults />} />
         <Route path="/accuracy" element={signedIn ? <AppShell /> : <PublicAccuracy />}>

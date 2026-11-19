@@ -44,7 +44,7 @@ class AcceptInviteIn(BaseModel):
 
 
 class ChangePasswordIn(BaseModel):
-    current_password: str
+    current_password: str = Field(max_length=200)
     new_password: str = Field(min_length=10, max_length=200)
 
 
@@ -62,6 +62,20 @@ class UserOut(BaseModel):
     email: str
     name: str
     is_superuser: bool
+    email_verified: bool = False
+    email_verification_required: bool = False
+
+
+class EmailRequestIn(BaseModel):
+    email: Email
+
+
+class AccountTokenIn(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+
+
+class ResetPasswordIn(AccountTokenIn):
+    new_password: str = Field(min_length=10, max_length=200)
 
 
 class SessionOut(BaseModel):

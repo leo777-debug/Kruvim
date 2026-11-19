@@ -402,3 +402,5 @@ The target monitoring test failed in 13 of 20 shuffled baseline suites. After is
 Desktop and mobile navigation share five collapsible groups: Create, Audience, Intelligence, Accuracy and Workspace. Every link has an explanatory tooltip. Collapse preferences are saved per signed-in user in this browser, including across workspace changes; they do not sync across devices. Collapsed groups show a marker when they contain the current page. Platform admin remains visible only to platform administrators.
 
 Saved audiences lives at `/saved-audiences`; existing `/audiences` links redirect with their query string and fragment preserved. Public accuracy remains available at `/accuracy` without login and retains navigation when signed in. `cd frontend && npm run test:navigation` checks every sidebar link against the application's declared routes, group order, active states, admin visibility and isolated preferences.
+
+Account recovery setup: [authentication safeguards](docs/authentication-safeguards.md).

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +70,7 @@ async def members(p: Principal = Depends(principal), s: AsyncSession = Depends(g
 
 
 @router.post("/members/invites")
-async def invite(body: InviteIn, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
+async def invite(body: InviteIn, background: BackgroundTasks, p: Principal = Depends(role("admin")), s: AsyncSession = Depends(get_session)):
     if ROLE_RANK[body.role] > ROLE_RANK[p.role]:
         raise Forbidden("You cannot invite someone with a higher role than yours.")
     count = (await s.execute(select(func.count()).select_from(Membership).where(Membership.org_id == p.org_id))).scalar()
@@ -80,9 +80,12 @@ async def invite(body: InviteIn, p: Principal = Depends(role("admin")), s: Async
     inv = Invite(org_id=p.org_id, email=body.email.lower(), role=body.role, token_hash=hashed, invited_by=p.user_id,
                  expires_at=utcnow() + timedelta(days=7))
     s.add(inv)
+    from app.services import mail
+    mail.enqueue(s, inv.email, "Join your Kruvim workspace", f"Accept your invitation: {settings.public_app_url}/invite/{raw}", expires_at=inv.expires_at)
+    background.add_task(mail.dispatch_pending)
     audit.record(s, "member.invite", org_id=p.org_id, user_id=p.user_id, target=inv.email, meta={"role": body.role})
     await s.commit()
-    # Email delivery is deployment-specific; the link is returned so an admin can share it.
+    # The outbox is committed with the invitation.
     return {"id": inv.id, "email": inv.email, "role": inv.role, "expires_at": inv.expires_at,
             "accept_url": f"{settings.public_app_url}/invite/{raw}"}
 
