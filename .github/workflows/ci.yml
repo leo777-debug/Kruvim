@@ -9,6 +9,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Browser inference uses WASM. Native Node CUDA is not part of this website.
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
 jobs:
   backend:
     runs-on: ubuntu-latest

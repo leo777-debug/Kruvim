@@ -15,6 +15,7 @@
     "frontend": {
       "root": "frontend",
       "framework": "vite",
+      "installCommand": "ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci",
       "buildCommand": "npm run build -- --base=/app/ --outDir dist/app",
       "outputDirectory": "dist",
       "devCommand": "npm run dev -- --base=/app/ --port $PORT",

@@ -134,6 +134,16 @@ local ignored `release-*.log` files; do not publish private diagnostic logs or t
 
 GitHub CI repeats these checks, adds a clean PostgreSQL full-chain migration check
 and image builds, and remains a separate remote verification gate until observed.
+The first remote run passed landing and rollback checks but exposed an optional
+ONNX Node CUDA download returning 404 on Linux. Browser inference uses WASM; CI,
+the frontend image and Vercel's frontend install command now explicitly skip the
+unneeded native CUDA provider. The real WASM speech checks remain enabled.
+
+Preview deployment of the reconciled commit was attempted through the configured
+Vercel connection and rejected with `402 resource_creation_blocked`: the team
+exceeded fair-use limits and is blocked. No Vercel CLI is installed for a mapped
+fallback. The account owner must clear that restriction; no billing/plan/security
+setting was changed. No candidate deployment or production alias promotion occurred.
 
 ## Deployment and rollback procedure
 

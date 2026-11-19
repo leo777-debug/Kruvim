@@ -1,5 +1,6 @@
 # Kruvim web: static React build served by nginx, which also reverse-proxies /api to the API service.
 FROM node:24-alpine AS build
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
