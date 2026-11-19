@@ -5,6 +5,8 @@ import base from "./playwright.config";
 const backend = Array.isArray(base.webServer) ? base.webServer[0] : base.webServer;
 export default defineConfig({
   ...base,
+  testIgnore: [],
+  outputDir: "test-results-loading",
   testMatch: /(?:page-loading|library|datapool)\.spec\.ts/,
   use: { ...base.use, baseURL: "http://127.0.0.1:5197" },
   webServer: [

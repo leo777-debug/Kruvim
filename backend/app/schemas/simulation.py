@@ -19,6 +19,7 @@ class LocalImage(BaseModel):
     def _image(self):
         import base64
         import io
+
         from PIL import Image
         prefix = "data:image/jpeg;base64,"
         if not self.data.startswith(prefix):

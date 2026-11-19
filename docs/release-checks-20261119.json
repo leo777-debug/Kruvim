@@ -1,0 +1,38 @@
+{
+  "releaseId": "reconciled-20261119",
+  "localValidation": {
+    "backendFullSuitePassed": 269,
+    "focusedRegressionsPassed": 21,
+    "finalWorkerReadinessPassed": 18,
+    "coreBrowserScenariosCovered": 36,
+    "coreBrowserArtifactFailuresRerunPassed": 2,
+    "paidModeBrowserSkipped": 2,
+    "finalBuiltChunkBrowserPassed": 14,
+    "localMediaScenariosCovered": 5,
+    "conservativeRamCasesPassed": 3,
+    "builtAppMediaPassed": 1,
+    "appBuild": "passed",
+    "landingBuild": "passed, Next.js 16.4.6",
+    "appAuditVulnerabilities": 0,
+    "landingAuditVulnerabilities": 0,
+    "ruff": "passed",
+    "appEslintErrors": 0,
+    "appEslintUnusedDisableWarnings": 9,
+    "landingEslint": "passed",
+    "postgresDeltaRollback": "passed in isolated rolled-back transaction",
+    "sqliteAndAppRollback": "passed",
+    "composeConfiguration": "passed"
+  },
+  "openGates": [
+    "remote CI, image builds and clean PostgreSQL full-chain migrations",
+    "Vercel deployment restriction",
+    "persistent Redis and three matching-commit workers",
+    "TLS SMTP configuration and delivery verification",
+    "production migration and staged smoke/rollback/re-promotion",
+    "paired production database/upload backup restore and received failure alerts"
+  ],
+  "productionDatabaseRevisionObserved": "0019",
+  "candidateDatabaseRevision": "0021",
+  "productionDatabaseChanged": false,
+  "termsAndPrivacy": "deferred until last"
+}

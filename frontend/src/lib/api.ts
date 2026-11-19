@@ -17,6 +17,12 @@ export class ApiError extends Error {
 
 let refreshing: Promise<boolean> | null = null;
 
+// Deployment recovery must not unload a document while its rotating refresh
+// token is in flight: the server may already have invalidated the old token.
+export function waitForSessionRefresh(): Promise<unknown> {
+  return refreshing || Promise.resolve();
+}
+
 export async function refreshSession(): Promise<boolean> {
   const rt = refreshToken();
   if (!rt) return false;

@@ -5,13 +5,16 @@ import numpy as np
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlalchemy import and_, desc, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Principal, principal, superuser
 from app.api.routes.workspace import _provider_out, _upsert_provider
-from app.core.errors import NotFound
+from app.core.config import settings
+from app.core.errors import AppError, NotFound
 from app.core.metrics import render
 from app.core.redis import get_redis
+from app.core.release import EXPECTED_REVISION, identity, worker_health_pattern
 from app.db.session import get_session
 from app.models import Organization, PerformanceReport, ProviderConfig, Simulation, SocialPost, User
 from app.schemas.workspace import AdminOrgUpdate, ProviderIn
@@ -39,7 +42,7 @@ router = APIRouter()
 
 @router.get("/healthz", tags=["ops"])
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "release": identity()}
 
 
 @router.get("/readyz", tags=["ops"])
@@ -48,6 +51,31 @@ async def readyz(s: AsyncSession = Depends(get_session)):
     r = get_redis()
     if r is not None:
         await r.ping()
+    if settings.is_prod or settings.serverless:
+        from app.db.session import engine
+        quote = engine.dialect.identifier_preparer.quote
+        prefix = quote(settings.database_schema) + "." if settings.database_schema else ""
+        try:
+            revisions = (await s.execute(text(f"SELECT version_num FROM {prefix}alembic_version"))).scalars().all()
+        except SQLAlchemyError as exc:
+            raise AppError("Database migration state is unavailable.", status=503) from exc
+        if revisions != [EXPECTED_REVISION]:
+            raise AppError("Database revision does not match this release.", status=503,
+                           details={"required_revision": EXPECTED_REVISION})
+        if r is None:
+            raise AppError("External worker queue is not configured.", status=503)
+        import asyncio
+        workers = {}
+        async with asyncio.timeout(5):
+            for kind in ("worker", "connector", "maintenance"):
+                workers[kind] = False
+                async for key in r.scan_iter(match=worker_health_pattern(kind), count=50):
+                    if await r.exists(key):
+                        workers[kind] = True
+                        break
+        if not all(workers.values()):
+            raise AppError("Background workers are not ready.", status=503, details={"workers": workers})
+        return {"status": "ready", "redis": True, "workers": workers, "release": identity()}
     return {"status": "ready", "redis": r is not None}
 
 

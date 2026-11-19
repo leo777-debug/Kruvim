@@ -1,7 +1,26 @@
 # Kruvim launch checklist
 
 Everything left between today and a paying beta, grouped by phase. Tick items off as they are done.
-Last updated: 2026-10-04.
+Release review updated: 2026-11-19. The sections below the release gates are legacy backlog from 2026-10-04.
+
+## Current release gates
+
+Use [the reconciled release record](docs/release-reconciliation-20261119.md) and `RELEASE.json` as the source of truth.
+
+- [x] Passing local backend, browser, app/landing builds, lint and migration-delta checks on the reconciled source.
+- [ ] Remote CI including clean PostgreSQL full-chain migrations and container image builds.
+- [x] PostgreSQL migration delta upgrade/downgrade/re-upgrade with synthetic data and RLS assertions.
+- [x] Old/new application rollback rehearsal and SQLite metadata drift check.
+- [ ] Real staged deployment rollback and re-promotion.
+- [ ] Hosting restriction cleared, external Redis/three workers and SMTP verified.
+- [ ] Production commit/schema reconciled and final public flow verified.
+- [ ] Database **and uploaded-file** backup restoration and failure-alert receipt verified.
+- [ ] Support/deletion operations assigned and rehearsed.
+- [ ] Terms & Conditions and privacy policy: finalize and publish **last**, at the user's request.
+
+## Historical backlog
+
+The original checkboxes below are planning notes, not current verification results.
 
 ## Saved for later (do these at the end)
 Deliberately postponed. Each one also appears in its own section below.

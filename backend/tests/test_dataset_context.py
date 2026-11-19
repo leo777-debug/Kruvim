@@ -61,6 +61,7 @@ async def test_library_prepares_once_and_reuses_selection(client, auth, monkeypa
 
 async def test_uploaded_dataset_survives_preparation_and_run(client, auth):
     from sqlalchemy import select
+
     from app.db.session import session_scope
     from app.models import SimAgent
     from app.services import jobs

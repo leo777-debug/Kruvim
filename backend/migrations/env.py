@@ -15,7 +15,11 @@ target_metadata = Base.metadata
 
 
 def include_object(obj, name, type_, reflected, compare_to):
-    return not (settings.is_sqlite and type_ == "index" and name == "ix_signal_embeddings_cosine")
+    # These vector indexes are created only on PostgreSQL by their migrations.
+    # SQLite stores vectors as JSON and cannot create pgvector indexes.
+    return not (settings.is_sqlite and type_ == "index" and name in {
+        "ix_signal_embeddings_cosine", "ix_graph_nodes_cosine", "ix_agent_memories_cosine",
+    })
 
 
 def render_item(type_, obj, autogen_context):

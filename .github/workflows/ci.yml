@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, kruvim]
+    branches: [main, kruvim, 'release/**']
   pull_request:
 
 concurrency:
@@ -26,7 +26,7 @@ jobs:
             backend/requirements-dev.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: ruff check app tests scripts migrations tools
-      - run: pytest -q
+      - run: pytest -n 4 --dist loadfile -q
 
   migrations:
     runs-on: ubuntu-latest
@@ -83,7 +83,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit -p .
+      - run: npm run lint
+      - run: npm run test:navigation
+      - run: node tools/test-agent-selection.mjs
+      - run: node tools/test-retest.mjs
       - run: npx vite build
+      - run: node tools/check-page-bundles.mjs
       - run: npm audit --audit-level=high
 
   images:
@@ -91,5 +96,64 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t kruvim-api ./backend
+      - run: docker build --build-arg RELEASE_SHA=${{ github.sha }} -t kruvim-api ./backend
       - run: docker build -t kruvim-web ./frontend
+
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - run: git worktree add --detach "$RUNNER_TEMP/kruvim-baseline" 8e9aab50557ee114447c2c5240bb7fded43a7205
+      - run: python -m tools.verify_release_rollback --baseline-backend "$RUNNER_TEMP/kruvim-baseline/backend"
+        working-directory: backend
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pip install -r backend/requirements.txt
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak
+      - run: python frontend/tools/create-local-processing-fixtures.py
+      - run: npm run test:e2e
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npx playwright test --config playwright.loading.config.ts
+        working-directory: frontend
+      - run: npx playwright test --config playwright.conservative.config.ts
+        working-directory: frontend
+      - run: npx playwright test --config playwright.local.config.ts
+        working-directory: frontend
+      - run: npx playwright test --config playwright.local-production.config.ts
+        working-directory: frontend
+
+  landing:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing-page/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: npm audit --audit-level=high

@@ -1,9 +1,9 @@
 """Dedicated connector queue: arq app.workers.connectors.ConnectorWorkerSettings."""
-import os
 
 from arq.connections import RedisSettings
 
 from app.core.config import settings
+from app.core.release import worker_health_key
 from app.services.outbox import run_outbox_job
 from app.workers.main import startup
 from app.workers.tasks import run_connector
@@ -11,7 +11,7 @@ from app.workers.tasks import run_connector
 
 class ConnectorWorkerSettings:
     health_check_interval = 30
-    health_check_key = f"kruvim:connector:{os.getenv('HOSTNAME', 'local')}:health"
+    health_check_key = worker_health_key("connector")
     functions = [run_outbox_job, run_connector]
     queue_name = "kruvim:connectors"
     redis_settings = RedisSettings.from_dsn(settings.redis_url or "redis://localhost:6379")

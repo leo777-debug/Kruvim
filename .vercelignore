@@ -1,0 +1,15 @@
+.git
+**/node_modules
+**/.venv
+**/.next
+**/dist
+**/dist-local-production
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.env*
+**/data
+**/*.log
+**/test-results*
+**/playwright-report
+**/*.tsbuildinfo

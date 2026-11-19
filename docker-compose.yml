@@ -18,6 +18,13 @@ x-backend: &backend
   restart: unless-stopped
 
 services:
+  migrate:
+    <<: *backend
+    command: ["migrate"]
+    restart: "no"
+    healthcheck:
+      disable: true
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -47,18 +54,48 @@ services:
     <<: *backend
     command: ["api"]
     expose: ["8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
 
   worker:
     <<: *backend
     command: ["worker"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     healthcheck:
-      disable: true
+      test: ["CMD", "arq", "app.workers.main.WorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  maintenance-worker:
+    <<: *backend
+    entrypoint: ["arq", "app.workers.main.MaintenanceWorkerSettings"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "arq", "app.workers.main.MaintenanceWorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   connector-worker:
     <<: *backend
     entrypoint: ["arq", "app.workers.connectors.ConnectorWorkerSettings"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
     healthcheck:
-      disable: true
+      test: ["CMD", "arq", "app.workers.connectors.ConnectorWorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   web:
     build: ./frontend

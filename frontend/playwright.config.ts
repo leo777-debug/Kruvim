@@ -4,6 +4,10 @@ import path from "node:path";
 const py = process.env.KRUVIM_TEST_PYTHON || (process.platform === "win32" ? path.resolve("../backend/.venv/Scripts/python.exe") : "python");
 export default defineConfig({
   testDir: "./e2e", timeout: 180_000, expect: { timeout: 30_000 }, workers: 1, retries: 0,
+  outputDir: "test-results-core",
+  // Media suites use their dedicated fixture/time-budget/server configurations.
+  // They remain separate release checks rather than running against the wrong server.
+  testIgnore: ["**/local-production.spec.ts", "**/local-processing.spec.ts", "**/local-conservative.spec.ts", "**/page-loading.spec.ts"],
   use: { baseURL: "http://127.0.0.1:5186", trace: "retain-on-failure",
     channel: process.env.KRUVIM_BROWSER_CHANNEL || undefined },
   projects: [

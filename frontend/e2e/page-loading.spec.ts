@@ -3,21 +3,44 @@ import { test, expect } from "@playwright/test";
 test("a missing page chunk recovers the current deployment without signing out", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
   await page.goto("/help");
   await expect(page.getByRole("heading", { name: "How Kruvim works", exact: true })).toBeVisible();
   let failed = false;
   let documents = 0;
+  let releaseRefresh!: () => void;
+  let refreshResponseReady!: () => void;
+  let delayed = false;
+  const refreshGate = new Promise<void>(resolve => { releaseRefresh = resolve; });
+  const responseReady = new Promise<void>(resolve => { refreshResponseReady = resolve; });
+  await page.route("**/api/v1/auth/refresh", async route => {
+    if (delayed) return route.continue();
+    delayed = true;
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    refreshResponseReady();
+    await refreshGate;
+    await route.fulfill({ response });
+  });
   page.on("request", request => { if (request.resourceType() === "document") documents++; });
   await page.route(/\/assets\/LibraryPage-[^/]+\.js$/, async route => {
     if (!failed) {
+      // The server has rotated the token, but the browser has not received it.
+      await responseReady;
       failed = true;
       await route.fulfill({ status: 404, contentType: "text/javascript", body: "" });
     } else await route.continue();
   });
-  await page.goto("/data-library");
+  try {
+    await page.goto("/data-library");
+    await page.waitForFunction(() => !!sessionStorage.getItem("kruvim.page-recovery"));
+    expect(failed).toBe(true);
+    expect(documents).toBe(1); // recovery waits for the token response
+  } finally {
+    releaseRefresh();
+  }
   await expect(page.getByRole("heading", { name: "Data library", exact: true })).toBeVisible();
   expect(failed).toBe(true);
   expect(documents).toBe(2);
@@ -27,7 +50,7 @@ test("a missing page chunk recovers the current deployment without signing out",
 test("a persistent chunk failure shows recovery controls without a reload loop", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
   await page.goto("/help");
@@ -46,7 +69,7 @@ test("restoring a session does not wait for a redundant account request", async 
   // Exercise real refresh and authenticated APIs against the disposable DB.
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
   let accountRequests = 0;
@@ -62,7 +85,7 @@ test("restoring a session does not wait for a redundant account request", async 
 test("the sidebar remains usable while the next page code is loading", async ({ page, isMobile }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
   await page.goto("/help");

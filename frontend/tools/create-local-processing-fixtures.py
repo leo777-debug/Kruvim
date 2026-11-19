@@ -1,6 +1,6 @@
-"""Generate real synthetic files for local-processing browser checks (Windows).
+"""Generate real synthetic files for local-processing browser checks.
 
-Needs Python reportlab, python-docx, Pillow; FFmpeg on PATH; Windows System.Speech.
+Needs reportlab, python-docx, Pillow and FFmpeg; System.Speech or Linux espeak.
 The large files are deliberately outside the Git checkout. No user files/network
 services are used. Noise bytes vary between runs, so exact compressed sizes vary.
 """
@@ -15,12 +15,17 @@ from reportlab.pdfgen import canvas
 
 destination = Path(__file__).resolve().parents[3] / "kruvim-local-processing-evidence" / "fixtures"
 destination.mkdir(parents=True, exist_ok=True)
+(destination.parent.parent / "kruvim-paid-local-followup-20261117").mkdir(parents=True, exist_ok=True)
 voice_path = str(destination / "speech.wav").replace("'", "''")
-subprocess.run(["powershell", "-NoProfile", "-Command", "Add-Type -AssemblyName System.Speech; "
+if os.name == "nt":
+    subprocess.run(["powershell", "-NoProfile", "-Command", "Add-Type -AssemblyName System.Speech; "
                 "$localSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
                 f"$localSynth.SetOutputToWaveFile('{voice_path}'); "
                 "$localSynth.Speak('Kruvim keeps your original files on your laptop. You can review this transcript before sending text to the cloud. Try this simple breakfast recipe with oats and banana.'); "
                 "$localSynth.Dispose();"], check=True)
+else:
+    subprocess.run(["espeak", "-w", str(destination / "speech.wav"),
+                    "Kruvim keeps original files on your laptop. Review this transcript before sending text to the cloud. Try breakfast with oats and banana."], check=True)
 
 (destination / "brief.md").write_text("# Context\nBrand guidelines: breakfast with oats and banana.", encoding="utf-8")
 (destination / "broken.pdf").write_bytes(b"not a PDF")
@@ -35,6 +40,16 @@ d.add_paragraph("Brand guidelines: helpful recipes for busy people.")
 d.save(destination / "brief.docx")
 Image.new("RGB", (2400, 1600), "red").save(destination / "slide-red.png")
 Image.new("RGB", (1600, 2400), "blue").save(destination / "slide-blue.jpg")
+Image.new("RGB", (640, 480), "green").save(destination / "small-lossy.webp")
+Image.new("RGB", (640, 480), "green").save(destination / "small-lossless.webp", lossless=True)
+c = canvas.Canvas(str(destination / "forty-one-pages.pdf"))
+for page in range(41):
+    c.drawString(72, 720, f"Page {page + 1}")
+    c.showPage()
+c.save()
+large_xml = Document()
+large_xml.add_paragraph("A" * 1_100_000)
+large_xml.save(destination / "large-xml.docx")
 
 c = canvas.Canvas(str(destination / "large-brief.pdf"))
 for i in range(2):

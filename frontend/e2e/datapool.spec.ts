@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 async function signIn(page: import("@playwright/test").Page) {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/login/);
 }

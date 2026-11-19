@@ -119,6 +119,7 @@ async def get_sim_route(sim_id: str, p: Principal = Depends(principal), s: Async
 
 @router.post("/simulations/{sim_id}/retry")
 async def retry_test(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    jobs.require_workers()
     from app.services.billing import require_access
 
     sim = await get_sim(s, p, sim_id)
@@ -366,6 +367,7 @@ async def get_report(sim_id: str, p: Principal = Depends(principal), s: AsyncSes
 
 @router.post("/simulations/{sim_id}/report")
 async def regenerate_report(sim_id: str, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    jobs.require_workers()
     sim = await get_sim(s, p, sim_id)
     await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status != "completed":
@@ -461,6 +463,7 @@ async def estimate_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(pr
 
 @router.post("/simulations/{sim_id}/surveys")
 async def create_survey(sim_id: str, body: SurveyIn, p: Principal = Depends(role("member")), s: AsyncSession = Depends(get_session)):
+    jobs.require_workers()
     sim = await get_sim(s, p, sim_id)
     if sim.status != "completed":
         raise Conflict("Run the simulation first.")

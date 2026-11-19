@@ -1,3 +1,5 @@
+import { waitForSessionRefresh } from "./api";
+
 const RELOAD_KEY = "kruvim.page-recovery";
 
 // A tab left open during a deployment can still request an old chunk filename.
@@ -11,7 +13,11 @@ export function reloadAfterPageLoadFailure(): boolean {
     // Without a persistent guard, automatic retries could create a reload loop.
     return false;
   }
-  window.location.reload();
+  // Schedule after this turn so startup's refresh can register too. Preserve
+  // the new token before replacing the document after a failed chunk fetch.
+  queueMicrotask(() => {
+    void waitForSessionRefresh().finally(() => window.location.reload());
+  });
   return true;
 }
 

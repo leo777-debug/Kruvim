@@ -58,7 +58,11 @@ async def test_every_voice_preview_progress_and_idempotent_worker(client, auth, 
     assert paid.status_code == 200, paid.text
     async with session_scope() as s:
         org = await s.get(Organization, sim.org_id)
-        assert org.credits_balance == before - 61
+        # Confirming an estimate no longer debits the legacy credit ledger.
+        # Token/spend reservations are made per actual provider call instead.
+        assert org.credits_balance == before
+        queued = await s.get(Survey, paid.json()["id"])
+        assert queued.filters["reserved_credits"] == 0
     await run_survey({}, paid.json()["id"])
     async with session_scope() as s:
         org = await s.get(Organization, sim.org_id)

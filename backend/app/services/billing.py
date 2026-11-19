@@ -5,7 +5,6 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal

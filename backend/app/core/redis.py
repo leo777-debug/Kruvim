@@ -13,7 +13,8 @@ def get_redis() -> Redis | None:
     if not settings.redis_url:
         return None
     if _client is None:
-        _client = Redis.from_url(settings.redis_url, decode_responses=True, health_check_interval=30)
+        _client = Redis.from_url(settings.redis_url, decode_responses=True, health_check_interval=30,
+                                 socket_connect_timeout=3, socket_timeout=3)
     return _client
 
 

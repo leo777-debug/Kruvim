@@ -21,6 +21,7 @@ _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
+    jobs.require_workers()
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
     await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
@@ -47,6 +48,7 @@ async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
 
 
 async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
+    jobs.require_workers()
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
     await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
@@ -57,6 +59,7 @@ async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
 
 
 async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
+    jobs.require_workers()
     # Serialize the quota check and reservation in one process (including SQLite)
     # and lock the organisation row across PostgreSQL worker/API replicas.
     async with _start_locks[sim.org_id]:

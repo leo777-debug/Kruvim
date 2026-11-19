@@ -1,5 +1,8 @@
 # Kruvim
 
+Current release source, verified checks, database requirements and rollout gates:
+[reconciled release record](docs/release-reconciliation-20261119.md) and [release identity](RELEASE.json).
+
 Vercel multi-service configuration is in the repository root. See [Vercel deployment setup](docs/VERCEL.md) for the landing page at `/`, the app at `/app`, API routing, and required persistent infrastructure.
 
 Kruvim tests a piece of content against a synthetic audience before it is published. It builds a knowledge graph

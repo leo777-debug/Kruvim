@@ -33,7 +33,14 @@ async def _arq_pool():
     return _pool
 
 
+def require_workers() -> None:
+    if settings.serverless and not settings.redis_url:
+        from app.core.errors import AppError
+        raise AppError("Background processing requires external Redis workers. Configure KRUVIM_REDIS_URL and start the workload, connector, and maintenance workers.", status=503)
+
+
 async def commit_and_enqueue(session, name, *, simulation=None, **payload):
+    require_workers()
     if settings.redis_url:
         from app.services.outbox import stage
         job_id = stage(session, name, payload)
@@ -50,9 +57,7 @@ async def commit_and_enqueue(session, name, *, simulation=None, **payload):
 
 
 async def enqueue(name: str, *, delay: float = 0, **kwargs) -> str:
-    if settings.serverless and not settings.redis_url:
-        from app.services.cloud_jobs import enqueue as cloud_enqueue
-        return await cloud_enqueue(name, delay, kwargs)
+    require_workers()
     job_id = f"{name}:{uuid.uuid4().hex[:12]}"
     if settings.redis_url:
         from app.db.session import session_scope

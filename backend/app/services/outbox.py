@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from sqlalchemy import and_, or_, select, update
 
+from app.core.config import settings
 from app.db.base import new_id, utcnow
 from app.db.session import session_scope
 from app.models import CloudJob, Simulation
@@ -12,7 +13,7 @@ from app.models import CloudJob, Simulation
 log = logging.getLogger("kruvim.outbox")
 TASKS = frozenset({
     "build_graph", "prepare_environment", "run_simulation", "generate_report",
-    "run_survey", "run_connector", "build_population", "resume_autopilot", "sync_library_inbox",
+    "run_survey", "run_connector", "build_population", "resume_autopilot",
 })
 STAGES = {
     "build_graph": ("status", "building_graph"),
@@ -93,12 +94,13 @@ async def run_outbox_job(ctx, job_id):
 
 
 async def recover_interrupted():
-    # ARQ jobs have a maximum run time of six hours. Do not replay an operation
+    # Match the configurable ARQ timeout. Do not replay an operation
     # whose model calls, uploads or accounting might already have taken effect.
     now = utcnow()
     async with session_scope() as session:
         result = await session.execute(update(CloudJob).where(
-            CloudJob.status == "redis_running", CloudJob.updated_at < now - timedelta(hours=6, minutes=5),
+            CloudJob.status == "redis_running", CloudJob.updated_at < now - timedelta(
+                seconds=max(6 * 3600, settings.simulation_max_duration_seconds + 60) + 300),
         ).values(status="error", error="WorkerInterrupted", updated_at=now))
     if result.rowcount:
         log.warning("Recorded %s interrupted worker jobs", result.rowcount)

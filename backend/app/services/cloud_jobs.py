@@ -29,6 +29,8 @@ async def dispatch(s, job):
 
 
 async def enqueue(name, delay, payload):
+    if settings.serverless:
+        raise AppError("Hosted workloads require external Redis workers.", status=503)
     if not settings.cron_secret:
         raise AppError("Cloud job scheduler is not configured.", status=503)
     async with session_scope() as s:
@@ -43,6 +45,8 @@ async def enqueue(name, delay, payload):
 @router.post("/jobs/{job_id}")
 async def run_job(job_id: str, request: Request):
     authorize(request)
+    if settings.serverless:
+        raise AppError("Hosted HTTP job execution is disabled. Configure external Redis workers.", status=503)
     async with session_scope() as s:
         job = (await s.execute(select(CloudJob).where(CloudJob.id == job_id).with_for_update(skip_locked=True))).scalar_one_or_none()
         if not job or job.status != "pending" or job.due_at > utcnow():
@@ -71,21 +75,9 @@ async def run_job(job_id: str, request: Request):
 @router.api_route("/refresh", methods=["GET", "POST"])
 async def refresh(request: Request):
     authorize(request)
-    from app.services.mail import dispatch_pending
-    await dispatch_pending()
-    from app.services.library import sync_due
-    await sync_due()
-    from app.services.datapool.runner import refresh_free_feeds
-    await refresh_free_feeds()
-    from app.services.datapool.context import refresh_snapshot_archive
-    await refresh_snapshot_archive()
-    from app.services.token_budget import tick
-    from app.services.watchdog import check
-    await check()
-    await tick()
-    async with session_scope() as s:
-        jobs = (await s.execute(select(CloudJob).where(CloudJob.status == "pending", CloudJob.name != "simulation_control", CloudJob.due_at <= utcnow())
-            .order_by(CloudJob.created_at).limit(20).with_for_update(skip_locked=True))).scalars().all()
-        for job in jobs:
-            await dispatch(s, job)
-    return {"status": "ok", "dispatched": len(jobs)}
+    if not settings.redis_url:
+        raise AppError("Maintenance requires external Redis workers.", status=503)
+    from app.services.jobs import _arq_pool
+    from app.workers.maintenance import schedule_due
+    dispatched = await schedule_due(await _arq_pool())
+    return {"status": "ok", "mode": "external-workers", "dispatched": dispatched}

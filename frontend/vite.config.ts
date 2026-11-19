@@ -17,6 +17,7 @@ export default defineConfig({
     proxy: { "/api": { target: process.env.KRUVIM_API_URL || "http://127.0.0.1:8000", changeOrigin: true } },
   },
   build: {
+    manifest: true,
     sourcemap: false,
     chunkSizeWarningLimit: 1200,
     rollupOptions: {

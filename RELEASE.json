@@ -1,0 +1,15 @@
+{
+  "releaseId": "reconciled-20261119",
+  "branch": "release/reconciled-20261119",
+  "baselineCommit": "8e9aab50557ee114447c2c5240bb7fded43a7205",
+  "baselineDeployment": "dpl_BKRRy234dq2AsMomDer6Tpjjq1Qu",
+  "vercelProject": "prj_7opOj3HCYoBRIMqGb81zXrN8ILDw",
+  "vercelTeam": "team_wCW1Fz8EiXYTLsgKxcNFaYmf",
+  "supabaseProject": "jrdgxbdglmpynbyfmamf",
+  "databaseSchema": "kruvim",
+  "databaseRevision": "0021",
+  "previousDatabaseRevision": "0019",
+  "requiredWorkers": ["worker", "connector", "maintenance"],
+  "policyWork": "deferred until last",
+  "evidence": "docs/release-reconciliation-20261119.md"
+}

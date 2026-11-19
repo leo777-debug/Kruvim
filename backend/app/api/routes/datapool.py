@@ -287,6 +287,7 @@ async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), 
     priors = priors_from_summaries([x.summary for x in applied if x.id != d.id] + [d.summary])
     if not priors:
         raise AppError("No region in this dataset has at least 100 respondents.")
+    jobs.require_workers()
     v = PopulationVersion(label=f"Calibrated with {d.name}", size=settings.population_size, seed=settings.population_seed, priors=priors,
                           dataset_ids=[x.id for x in applied if x.id != d.id] + [d.id],
                           source_ids=sorted({registered.id, *(x.registered_source_id for x in applied)}), status="pending")
@@ -328,6 +329,7 @@ async def rebuild_population(body: dict, p: Principal = Depends(principal), s: A
     if len(observations) > 100000:
         raise AppError("Select sources to keep this rebuild within 100,000 observations.")
     targets, provenance = reconcile(observations, sources, datetime.now(UTC))
+    jobs.require_workers()
     v = PopulationVersion(label=str(body.get("label") or "Sourced UAE rebuild")[:200], size=settings.population_size,
         seed=settings.population_seed, priors={"_uae_targets": targets, "_provenance": provenance, "_manual_activation": True},
         source_ids=provenance["source_ids"], observation_ids=provenance["observation_ids"],

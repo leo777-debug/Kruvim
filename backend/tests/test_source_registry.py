@@ -67,6 +67,14 @@ async def test_registry_crud_licence_and_private_upload(client, auth):
         assert await storage.get(record.storage_key) == raw
     other = (await client.post("/auth/register", json={"email": "other@example.com", "password": "correct-horse-battery", "name": "Other", "org_name": "Other"})).json()
     other_headers = {"Authorization": "Bearer " + other["access_token"]}
+    # The data pool is now platform-admin only; membership alone must not grant it.
+    assert (await client.get("/datapool/datasets", headers=other_headers)).status_code == 403
+    assert (await client.put(f"/datapool/datasets/{dataset}/mapping", headers=other_headers, json=mapping)).status_code == 403
+    # Platform access still must not grant access to another tenant's uploads.
+    from app.models import User
+    async with session_scope() as s:
+        user = (await s.execute(select(User).where(User.email == "other@example.com"))).scalar_one()
+        user.is_superuser = True
     assert (await client.get("/datapool/datasets", headers=other_headers)).json() == []
     assert (await client.put(f"/datapool/datasets/{dataset}/mapping", headers=other_headers, json=mapping)).status_code == 404
     assert len((await client.get(f"/datapool/sources/{source['id']}/observations", headers=other_headers)).json()) == 2

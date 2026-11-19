@@ -12,7 +12,7 @@ test("analytics preview, reusable mapping, audience fill and deletion", async ({
   page.on("response", (r) => {if (r.url().includes("/api/v1/") && r.status() >= 400) errors.push(`${r.status()} ${r.url()}`);});
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo@kruvim.local");
-  await page.getByLabel("Password").fill("kruvim-demo-2026");
+  await page.getByLabel("Password", { exact: true }).fill("kruvim-demo-2026");
   await page.getByRole("button", {name: "Sign in", exact: true}).click();
   await expect(page).not.toHaveURL(/login/);
   await page.goto("/my-audience");

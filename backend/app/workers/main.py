@@ -4,7 +4,6 @@ Scale horizontally by running more worker containers; each handles `KRUVIM_WORKE
 from __future__ import annotations
 
 import asyncio
-import os
 from contextlib import suppress
 
 from arq import cron
@@ -12,14 +11,18 @@ from arq.connections import RedisSettings
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.release import worker_health_key
+from app.services import outbox
 from app.services.datapool import ensure_platform_connectors
 
-from app.services import outbox
-
-from . import tasks
+from . import maintenance, tasks
 
 
 async def startup(ctx):
+    if not settings.redis_url:
+        raise RuntimeError("Set KRUVIM_REDIS_URL on every external worker.")
+    if settings.serverless:
+        raise RuntimeError("External workers require KRUVIM_SERVERLESS=false.")
     setup_logging()
     await ensure_platform_connectors()
 
@@ -35,49 +38,29 @@ async def stop_main(ctx):
         await ctx["outbox_poller"]
 
 
-async def sync_analytics(ctx):
-    from app.services.social_sync import sync_due
-    await sync_due()
-
-
-async def maintain_archive(ctx):
-    from app.services.datapool.archive import compress_old
-    from app.services.datapool.cultural import synthesize_daily
-    await synthesize_daily()
-    await compress_old()
-
-
-async def consolidate_agent_memory(ctx):
-    from app.services.agent_memory import consolidate
-    return await consolidate()
-
-
-async def watch_runs(ctx):
-    from app.services.mail import dispatch_pending
-    await dispatch_pending()
-    from app.services.token_budget import tick
-    from app.services.watchdog import check
-    await outbox.recover_interrupted()
-    await tick()
-    return await check()
-
-
 class WorkerSettings:
     health_check_interval = 30
-    health_check_key = f"kruvim:worker:{os.getenv('HOSTNAME', 'local')}:health"
+    health_check_key = worker_health_key("worker")
     functions = [outbox.run_outbox_job, tasks.build_graph, tasks.prepare_environment, tasks.run_simulation, tasks.generate_report, tasks.run_survey,
-                 tasks.refresh_datapool, tasks.monitoring_tick, tasks.run_connector, tasks.build_population, tasks.resume_autopilot,
-                 tasks.sync_library_inbox]
-    cron_jobs = [cron(tasks.refresh_datapool, minute=set(range(0, 60, 10)), run_at_startup=True, unique=True),
-                 cron(tasks.monitoring_tick, minute=set(range(5, 60, 10)), unique=True),
-                 cron(sync_analytics, minute=set(range(3, 60, 10)), unique=True)]
-    cron_jobs.append(cron(maintain_archive, minute=15, unique=True))
-    cron_jobs.append(cron(consolidate_agent_memory, hour=2, minute=30, unique=True))
-    cron_jobs.append(cron(watch_runs, minute=set(range(60)), unique=True, run_at_startup=True))
+                 tasks.refresh_datapool, tasks.monitoring_tick, tasks.run_connector, tasks.build_population, tasks.resume_autopilot]
     redis_settings = RedisSettings.from_dsn(settings.redis_url or "redis://localhost:6379")
     max_jobs = settings.worker_max_jobs
-    job_timeout = 6 * 3600
+    job_timeout = max(6 * 3600, settings.simulation_max_duration_seconds + 60)
     allow_abort_jobs = True
     keep_result = 3600
     on_startup = start_main
     on_shutdown = stop_main
+
+
+class MaintenanceWorkerSettings(WorkerSettings):
+    health_check_key = worker_health_key("maintenance")
+    queue_name = "kruvim:maintenance"
+    functions = [tasks.refresh_datapool, tasks.monitoring_tick,
+                 maintenance.sync_analytics, maintenance.maintain_archive,
+                 maintenance.consolidate_agent_memory, maintenance.watch_runs,
+                 maintenance.archive_snapshots, maintenance.dispatch_mail, maintenance.maintain_token_budget,
+                 maintenance.maintenance_tick]
+    cron_jobs = [cron(maintenance.maintenance_tick, minute=set(range(60)), unique=True, run_at_startup=True)]
+    keep_result = 172800
+    on_startup = startup
+    on_shutdown = None
