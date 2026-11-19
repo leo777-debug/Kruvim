@@ -8,6 +8,7 @@ from collections import defaultdict
 from sqlalchemy import and_, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import AppError, Conflict
 from app.models import Action, GraphEdge, GraphNode, Organization, Post, Report, SimAgent, SimEvent, Simulation
 from app.services import audit, jobs
@@ -22,6 +23,7 @@ _start_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status in LOCKED:
         raise Conflict("A step is already running for this simulation.")
     res = await resolve(s, sim.org_id, platform=(sim.config or {}).get('use_platform_tokens', False))
@@ -40,23 +42,18 @@ async def queue_graph(s: AsyncSession, sim: Simulation) -> str:
     for model in (GraphEdge, GraphNode, SimEvent, Action, Post, SimAgent):
         await s.execute(delete(model).where(model.simulation_id == sim.id))
     sim.status, sim.step, sim.error, sim.results, sim.report_status, sim.progress = "building_graph", 1, None, {}, "none", {}
-    await s.commit()
     bus._seq.pop(sim.id, None)
-    sim.job_id = await jobs.enqueue("build_graph", sim_id=sim.id)
-    await s.commit()
-    return sim.job_id
+    return await jobs.commit_and_enqueue(s, "build_graph", simulation=sim, sim_id=sim.id)
 
 
 async def queue_environment(s: AsyncSession, sim: Simulation) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status not in ("graph_ready", "ready", "completed", "failed", "cancelled"):
         raise Conflict("Build the graph first.")
     sim.status, sim.error = "preparing", None
-    await s.commit()
-    sim.job_id = await jobs.enqueue("prepare_environment", sim_id=sim.id)
-    await s.commit()
-    return sim.job_id
+    return await jobs.commit_and_enqueue(s, "prepare_environment", simulation=sim, sim_id=sim.id)
 
 
 async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
@@ -70,6 +67,7 @@ async def queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None
 async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = None) -> str:
     from app.services.billing import require_access
     await require_access(s, sim.org_id)
+    await s.refresh(sim, attribute_names=["status", "report_status"], with_for_update=True)
     if sim.status not in ("ready", "completed", "failed", "cancelled") or not (sim.config or {}).get("agents"):
         raise Conflict("Prepare the environment first.")
     org = (await s.execute(select(Organization).where(Organization.id == sim.org_id).with_for_update())).scalar_one()
@@ -89,16 +87,21 @@ async def _queue_run(s: AsyncSession, sim: Simulation, user_id: str | None = Non
     await s.execute(delete(SimEvent).where(and_(SimEvent.simulation_id == sim.id, SimEvent.type.notlike("graph.%"), SimEvent.type.notlike("env.%"))))
     sim.status, sim.error, sim.results, sim.progress, sim.report_status = "queued", None, {}, {"round": 0, "rounds": sim.config["time"]["rounds"]}, "none"
     audit.record(s, "simulation.start", org_id=sim.org_id, user_id=user_id, target=sim.id, meta={"credits_estimate": sim.credits_estimate})
+    if settings.redis_url:
+        return await jobs.commit_and_enqueue(s, "run_simulation", simulation=sim, sim_id=sim.id)
     await s.commit()
-    # graph.delta events from an earlier run stay in the log; clients replaying it drop that run's nodes here
-    await bus.publish(sim.id, "graph.prune", {"min_round": 0})
+    await publish_run_queued(s, sim.id, sim.config["time"]["rounds"])
+    return await jobs.commit_and_enqueue(s, "run_simulation", simulation=sim, sim_id=sim.id)
+
+
+async def publish_run_queued(s: AsyncSession, sim_id: str, rounds: int) -> None:
+    # Replay keeps old graph events, so the client prunes previous run nodes.
+    await bus.publish(sim_id, "graph.prune", {"min_round": 0})
     from app.services.knowledge.store import edge_public
-    seed_edges = (await s.execute(select(GraphEdge).where(GraphEdge.simulation_id == sim.id, GraphEdge.round < 0))).scalars().all()
-    await bus.publish(sim.id, "graph.delta", {"nodes": [], "edges": [], "updated_edges": [edge_public(e) for e in seed_edges]})
-    await bus.publish(sim.id, "simulation.queued", {"rounds": sim.config["time"]["rounds"]})
-    sim.job_id = await jobs.enqueue("run_simulation", sim_id=sim.id)
-    await s.commit()
-    return sim.job_id
+    seed_edges = (await s.execute(select(GraphEdge).where(GraphEdge.simulation_id == sim_id, GraphEdge.round < 0))).scalars().all()
+    await bus.publish(sim_id, "graph.delta", {"nodes": [], "edges": [], "updated_edges": [edge_public(e) for e in seed_edges]})
+    await bus.publish(sim_id, "simulation.queued", {"rounds": rounds})
+
 
 
 async def make_copy(s: AsyncSession, sim: Simulation, mode: str = "edit", changes: dict | None = None, user_id: str | None = None,

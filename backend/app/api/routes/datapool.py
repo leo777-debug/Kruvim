@@ -291,10 +291,10 @@ async def apply_dataset(dataset_id: str, p: Principal = Depends(role("admin")), 
                           dataset_ids=[x.id for x in applied if x.id != d.id] + [d.id],
                           source_ids=sorted({registered.id, *(x.registered_source_id for x in applied)}), status="pending")
     s.add(v)
+    await s.flush()
     d.status = "applied"
     audit.record(s, "population.calibrate", org_id=p.org_id, user_id=p.user_id, target=d.name)
-    await s.commit()
-    await jobs.enqueue("build_population", version_id=v.id)
+    await jobs.commit_and_enqueue(s, "build_population", version_id=v.id)
     return {"version_id": v.id, "regions": list(priors)}
 
 
@@ -335,8 +335,7 @@ async def rebuild_population(body: dict, p: Principal = Depends(principal), s: A
     s.add(v)
     await s.flush()
     audit.record(s, "population.rebuild", org_id=p.org_id, user_id=p.user_id, target=v.id)
-    await s.commit()
-    await jobs.enqueue("build_population", version_id=v.id)
+    await jobs.commit_and_enqueue(s, "build_population", version_id=v.id)
     return {"version_id": v.id, "provenance": provenance, "requires_activation": True}
 
 

@@ -372,7 +372,7 @@ async def resume_survey(org_id, sim_id, survey_id):
             if survey.status != 'paused':
                 return {'resumed': False}
             survey.status, survey.pause_state = 'queued', {}
-    await jobs.enqueue('run_survey', survey_id=survey_id)
+            await jobs.commit_and_enqueue(s, 'run_survey', survey_id=survey_id)
     return {'resumed': True}
 
 
@@ -394,8 +394,5 @@ async def resume(org_id, sim_id, automatic=False):
             sim.status = {'build_graph': 'building_graph', 'prepare_environment': 'preparing', 'run_simulation': 'queued', 'generate_report': 'completed'}[stage]
             if stage == 'generate_report':
                 sim.report_status = 'queued'
-        job_id = await jobs.enqueue(stage, sim_id=sim_id)
-        async with accounting_session() as s:
-            sim = await s.get(Simulation, sim_id)
-            sim.job_id = job_id
+            await jobs.commit_and_enqueue(s, stage, simulation=sim, sim_id=sim_id)
     return {'resumed': True}

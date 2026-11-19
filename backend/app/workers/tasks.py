@@ -222,6 +222,9 @@ async def run_simulation(ctx, sim_id: str):
             sim = await s.get(Simulation, sim_id)
             org_id = sim.org_id
             sim.status, sim.step, sim.started_at, sim.error = "running", 3, sim.started_at or _now(), None
+        if ctx.get("outbox") and not sim.checkpoint:
+            async with session_scope() as s:
+                await lifecycle.publish_run_queued(s, sim_id, sim.config["time"]["rounds"])
         res, llm = await _llm_for(org_id)
         await bus.publish(sim_id, "simulation.started", {"rounds": sim.config["time"]["rounds"], "provider": res.settings.provider,
                                                          "dry": llm.is_dry, "voice_model": llm.model_for("voice")})
@@ -259,10 +262,11 @@ async def run_simulation(ctx, sim_id: str):
         SIMULATIONS.labels("completed").inc()
         await bus.publish(sim_id, "simulation.completed", {"score": results["score"], "viral": results["viral"]["score"],
                                                            "stopped_early": results.get("stopped_early")})
-        from app.services.jobs import enqueue
         await monitoring.on_completed(sim_id)
         job_lease.set(None)
-        await enqueue("generate_report", sim_id=sim_id)
+        async with session_scope() as s:
+            sim = await s.get(Simulation, sim_id)
+            await jobs.commit_and_enqueue(s, "generate_report", simulation=sim, sim_id=sim_id)
     except Exception as exc:
         SIMULATIONS.labels("failed").inc()
         return await _fail(sim_id, "simulation", exc)

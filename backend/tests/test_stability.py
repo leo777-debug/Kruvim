@@ -289,6 +289,12 @@ async def test_watchdog_recovers_lost_autopilot_handoff_but_keeps_manual_pause(c
         row.status, row.report_status = 'completed', 'done'
     await fail_expired(ids[1], 'replacement')
     assert (await client.get(f'/simulations/{ids[1]}', headers=h)).json()['status'] == 'completed'
+    async with session_scope() as s:
+        row = await s.get(Simulation, ids[1])
+        row.report_status = 'running'
+    await fail_expired(ids[1], 'replacement')
+    result = (await client.get(f'/simulations/{ids[1]}', headers=h)).json()
+    assert (result['status'], result['report_status']) == ('completed', 'failed')
 
 
 async def test_watchdog_and_tenant_retry(client, auth):

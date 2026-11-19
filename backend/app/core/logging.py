@@ -8,7 +8,7 @@ import sys
 import time
 
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
-EXTRA_FIELDS = ("method", "path", "status", "duration_ms", "org_id", "user_id", "simulation_id", "job")
+EXTRA_FIELDS = ("method", "path", "status", "duration_ms", "org_id", "user_id", "simulation_id", "job_id", "job", "failure")
 
 
 def _extras(record: logging.LogRecord) -> dict:

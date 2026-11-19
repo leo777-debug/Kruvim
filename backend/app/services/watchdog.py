@@ -4,7 +4,7 @@ from contextvars import ContextVar
 from datetime import timedelta
 from functools import wraps
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import case, or_, select, update
 
 from app.core.config import settings
 from app.db.base import utcnow
@@ -24,12 +24,15 @@ def active_workflow():
 
 async def fail_expired(sim_id, token):
     async with session_scope() as s:
-        result = await s.execute(update(Simulation).where(Simulation.id == sim_id, Simulation.execution_token == token,
-            active_workflow())
-            .values(status='failed', error=REASON, report_status='failed'))
-        if not result.rowcount:
-            return
-    await bus.publish(sim_id, "simulation.failed", {"message": REASON})
+        status = (await s.execute(update(Simulation).where(
+            Simulation.id == sim_id, Simulation.execution_token == token, active_workflow(),
+        ).values(
+            status=case((Simulation.status == "completed", "completed"), else_="failed"),
+            error=REASON, report_status="failed", execution_token=None, job_deadline=None,
+        ).returning(Simulation.status))).scalar_one_or_none()
+    if status:
+        event = "report.failed" if status == "completed" else "simulation.failed"
+        await bus.publish(sim_id, event, {"message": REASON})
 
 
 def bounded_job(fn):
@@ -108,7 +111,4 @@ async def check(now=None):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         await fail_expired(row.id, row.execution_token)
-        async with session_scope() as s:
-            await s.execute(update(Simulation).where(Simulation.id == row.id, Simulation.execution_token == row.execution_token)
-                            .values(execution_token=None))
     return len(rows)
