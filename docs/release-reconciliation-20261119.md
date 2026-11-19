@@ -138,6 +138,12 @@ The first remote run passed landing and rollback checks but exposed an optional
 ONNX Node CUDA download returning 404 on Linux. Browser inference uses WASM; CI,
 the frontend image and Vercel's frontend install command now explicitly skip the
 unneeded native CUDA provider. The real WASM speech checks remain enabled.
+The next remote run passed backend (269 passed, one optional FFmpeg check skipped),
+PostgreSQL full-chain migrations, rollback, frontend, landing and both image builds.
+Its browser job found a recovery-test route transition race: the login and recovery
+pages both expose an Email field. The test now waits for the recovery route and
+heading before entering the address. The final exact-commit CI result is tracked
+by the workspace release pointer; earlier failed runs are retained as evidence.
 
 Preview deployment of the reconciled commit was attempted through the configured
 Vercel connection and rejected with `402 resource_creation_blocked`: the team

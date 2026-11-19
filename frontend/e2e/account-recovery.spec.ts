@@ -3,6 +3,9 @@ import { expect, test } from "@playwright/test";
 test("forgot password submits and shows the same private confirmation", async ({ page }) => {
   await page.goto("/login");
   await page.getByRole("link", { name: "Forgot password?" }).click();
+  // Both routes have an Email field; wait for recovery before filling it.
+  await expect(page).toHaveURL(/\/forgot-password$/);
+  await expect(page.getByRole("heading", { name: "Forgot password", exact: true })).toBeVisible();
   await page.getByLabel("Email", { exact: true }).fill(`unknown-${Date.now()}@example.com`);
   const sent = page.waitForResponse("**/api/v1/auth/forgot-password");
   await page.getByRole("button", { name: "Send email", exact: true }).click();

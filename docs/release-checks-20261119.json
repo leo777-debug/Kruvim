@@ -6,6 +6,7 @@
     "finalWorkerReadinessPassed": 18,
     "coreBrowserScenariosCovered": 36,
     "coreBrowserArtifactFailuresRerunPassed": 2,
+    "recoveryRouteRaceRepeatedDesktopMobilePassed": 16,
     "paidModeBrowserSkipped": 2,
     "finalBuiltChunkBrowserPassed": 14,
     "localMediaScenariosCovered": 5,
